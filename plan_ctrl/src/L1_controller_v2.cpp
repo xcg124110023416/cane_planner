@@ -553,7 +553,7 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
         double eta = getEta(carPose);
         // std::cout << "eta = " << eta << std::endl;
         // double eta = 0.3;
-        cmd_vel.angular.z = (eta*link_length*360)/(2*PI*wheel_radius);
+        cmd_vel.angular.z = (eta*180)/(PI);
         
         if (foundForwardPt)
         // if (ser_.isOpen())
@@ -583,7 +583,9 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
                 }
                 else
                 {
-                    pub_.publish(cmd_vel);
+                    // pub_.publish(cmd_vel);
+                    Set(CMD_VEL,0);
+
                 }
             }
         }

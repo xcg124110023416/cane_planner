@@ -22,7 +22,7 @@
         <arg name="simulation" value="false"/>
         <arg name="collision_margin" value="0.1"/>
         <arg name="slice_height" value="0.0"/>
-        <arg name="kin_horizon" value="4.0"/>
+        <arg name="kin_horizon" value="6.0"/>
         <!-- map size -->
         <arg name="map_size_x" value="100.0"/>
         <arg name="map_size_y" value="50.0"/>

@@ -40,28 +40,33 @@ catkin_package(
 )
 
 ## Specify additional locations of header files
-## Your package locations should be listed before other locations
 include_directories(
- include
+  include
   ${catkin_INCLUDE_DIRS}
   ${SERIAL_INCLUDE_DIRS}
 )
 
-
-# add_executable(gkf_hardware_interface src/gkf_hardware_interface_node.cpp)
-#add_dependencies(robot_hardware_interface ${catkin_EXPORTED_TARGETS})
-# target_link_libraries(gkf_hardware_interface ${catkin_LIBRARIES})
-
-add_executable(gkf_test_usb src/test_usb.cpp
-src/omni_gkf_usb.cpp
+# ---------------------------------------------------------
+# 可执行文件 1: gkf_test_usb
+# ---------------------------------------------------------
+add_executable(gkf_test_usb 
+  src/test_usb.cpp
+  src/omni_gkf_usb.cpp
 )
-#add_dependencies(robot_hardware_interface ${catkin_EXPORTED_TARGETS})
 target_link_libraries(gkf_test_usb ${catkin_LIBRARIES} ${SERIAL_LIBRARIES})
 
+# [关键修改] 添加这行，确保编译前先生成消息头文件
+add_dependencies(gkf_test_usb ${PROJECT_NAME}_generate_messages_cpp)
 
-add_executable(gkf_server_node src/omni_gkf_server.cpp
-src/omni_gkf_usb.cpp
+
+# ---------------------------------------------------------
+# 可执行文件 2: gkf_server_node
+# ---------------------------------------------------------
+add_executable(gkf_server_node 
+  src/omni_gkf_server.cpp
+  src/omni_gkf_usb.cpp
 )
-
 target_link_libraries(gkf_server_node ${catkin_LIBRARIES} ${SERIAL_LIBRARIES})
 
+# [关键修改] 添加这行，解决 "omniGKFcmd.h: 没有那个文件" 的错误
+add_dependencies(gkf_server_node ${PROJECT_NAME}_generate_messages_cpp)
