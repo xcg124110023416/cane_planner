@@ -19,6 +19,8 @@ def keyboardLoop():
     if ser_.is_open:
         ser_.write('z000\n'.encode('utf-8'))
         rospy.loginfo("init success")
+    
+    pos = 0
 
     # 读取按键循环
     while not rospy.is_shutdown():
@@ -32,19 +34,20 @@ def keyboardLoop():
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
-        if ch == 'q':
-            rospy.loginfo("test")
-            ser_.write('z800\n'.encode('utf-8'))
-        elif ch == 'w':
-            rospy.loginfo("test1")
-            ser_.write('z000\n'.encode('utf-8'))
+        if ch == 'a':
+            rospy.loginfo("left")
+            pos = pos + 800
+        elif ch == 'd':
+            rospy.loginfo("right")
+            pos = pos - 800
         elif ch == 'a':
-            rospy.loginfo("test2")
-            ser_.write('z-800\n'.encode('utf-8'))
+            rospy.loginfo("zero")
+            pos = 0
         elif ch == 'p':
             ser_.close()
             exit()
-
+        pos_str = 'z' + str(pos) + '\n'
+        ser_.write(pos_str.encode('utf-8'))
 
 if __name__ == '__main__':
     try:
