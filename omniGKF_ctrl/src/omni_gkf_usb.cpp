@@ -82,6 +82,11 @@ namespace omni_gkf
             frame.push_back((data >> 8) & 0xFF); // 数据高字节
             frame.push_back(data & 0xFF);        // 数据低字节
         }
+        if(cmd == CMD_SET_POS_ZERO)
+        {
+            frame.push_back((data >> 8) & 0xFF); // 数据高字节
+            frame.push_back(data & 0xFF);        // 数据低字节
+        }
 
         write(frame);
     }

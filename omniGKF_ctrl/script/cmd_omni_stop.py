@@ -19,6 +19,7 @@ def stop_robot():
     stop_msg.varepsilon = 0.0
     stop_msg.pos = 0.0   
     stop_msg.vel = 0.0
+    
 
 
     # 设置频率

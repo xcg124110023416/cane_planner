@@ -29,37 +29,54 @@ def keyboardLoop():
     rospy.init_node('omniGKFcmd_publisher', anonymous=True)
     # rate = rospy.Rate(rospy.get_param('~hz', 1))
     rate = rospy.Rate(10)  # 10Hz
-    vel = 0.3  # m/s
-    pos = 1 # rad
+    vel = 0.0  # m/s
+    pos = 0.0 # rad
+    set_pos_zero = 0.0
+    flag = True
+    while flag:
+        key = getKey()
+        msg = omniGKFcmd()
+        if key =='j':
+            msg.gkf_state =True
+            set_pos_zero = set_pos_zero + 0.1
+            msg.set_pos_zero = set_pos_zero
+        elif key == 'l':
+            msg.gkf_state =True
+            set_pos_zero = set_pos_zero - 0.1
+            msg.set_pos_zero = set_pos_zero
+        elif key == 'k':
+            msg.gkf_state = True
+            msg.set_zero = True
+            pub.publish(msg)
+            break
+        else :
+            msg.gkf_state = True
+            msg.vel = 0.0
+        # 发布消息
+        pub.publish(msg)
+
+        # 按照设定的频率等待
+        rate.sleep()
 
     while not rospy.is_shutdown():
         key = getKey()
         msg = omniGKFcmd()
+        msg.gkf_state = True
 
         if key == 'w':  # 前进
-            msg.gkf_state = True
-            msg.vel = vel
-            msg.pos = pos
-
+            vel = vel + 0.1
         elif key == 's':  # 后退
             msg.gkf_state = True
-            msg.vel = -vel
-            msg.pos = -pos
+            vel = vel - 0.1
         elif key == 'a':  # 左转
             msg.gkf_state = True
-            msg.a = 0.5
-            msg.varepsilon = 1.0
+            pos = pos + 0.1
         elif key == 'd':  # 右转
             msg.gkf_state = True
-            msg.a = 0.5
-            msg.varepsilon = -1.0
-        else:  # 停止
-            msg.gkf_state = False
-            msg.vel = 0.0
-            msg.pos = 0.0
-            msg.a = 0.0
-            msg.varepsilon = 0.0
-            
+            pos = pos - 0.1
+
+        msg.vel = vel
+        msg.pos = pos
 
         # 发布消息
         pub.publish(msg)
@@ -67,10 +84,10 @@ def keyboardLoop():
         # 按照设定的频率等待
         rate.sleep()
 
+    msg = omniGKFcmd()
+    pub.publish(msg)
+
 if __name__ == '__main__':
-    try:
-       
-        keyboardLoop()
-    except rospy.ROSInterruptException:
-        pass
+    keyboardLoop()
+ 
   

@@ -17,6 +17,7 @@ void cmdCallback(const omniGKF_control::omniGKFcmd::ConstPtr &msg)
     double pos = usb.getHeading();
     double vel = usb.getVelocity1() / k1;
     double current_time = msg->header.stamp.toSec();
+    double set_pos_zero;
 
     if (msg->gkf_state)
     {
@@ -39,6 +40,19 @@ void cmdCallback(const omniGKF_control::omniGKFcmd::ConstPtr &msg)
             usb.Set(CMD_VEL, (float)vel_set, 1); // 设定前进加速度
             usb.Set(CMD_POS, (float)pos_set, 1); // 设定转向角速度
         }
+
+        if(msg->set_pos_zero != 0)
+        {
+           ROS_WARN("setting pos"); 
+           double pos_set = msg->set_pos_zero * k2;
+           usb.Set(CMD_SET_POS_ZERO,(float)pos_set,1);
+        }
+        if (msg->set_zero)
+        {
+            ROS_WARN("zero!!!!"); 
+            usb.Set(CMD_ZERO, 0);
+        }
+        
         last_time = current_time;
     }
     else 
