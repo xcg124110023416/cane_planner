@@ -14,9 +14,9 @@ int main(int argc, char **argv)
     while (ros::ok())
     {
         // 发送数据
-        usb.Set(CMD_VEL, -2000); // 设定前进速度为1000
+        usb.Set(CMD_VEL, 100); // 设定转向角度
        // usb.Set(CMD_POS, -900);  // 设定转向角度为2000/10 = 200.0
-        usb.Set(CMD_POS, -1800);  // 设定转向角度为2000/10 = 200.0
+        //usb.Set(CMD_POS, -1800);  // 设定转向角度为2000/10 = 200.0
         // usb.Set(0x03); // 停止运动
 
         // 读取数据
