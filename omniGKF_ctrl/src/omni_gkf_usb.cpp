@@ -72,7 +72,7 @@ namespace omni_gkf
         std::vector<uint8_t> frame;
         frame.push_back(0x43);          // 帧头
         frame.push_back(cmd);           // 命令码
-        if (cmd == 0x01 || cmd == 0x02) // 如果命令码是0x01或0x02，添加数据内容
+        if (cmd == CMD_VEL || cmd == CMD_POS) // 如果命令码是0x01或0x02，添加数据内容
         {
             frame.push_back((data >> 8) & 0xFF); // 数据高字节
             frame.push_back(data & 0xFF);        // 数据低字节

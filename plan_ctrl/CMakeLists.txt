@@ -73,3 +73,7 @@ include_directories(
 add_executable(L1_controller_v2 src/L1_controller_v2.cpp)
 target_link_libraries(L1_controller_v2 ${catkin_LIBRARIES})
 add_dependencies(L1_controller_v2 hypha_racecar_generate_messages_cpp)
+
+add_executable(controller_xcg src/controller_xcg.cpp)
+target_link_libraries(controller_xcg ${catkin_LIBRARIES})
+add_dependencies(controller_xcg hypha_racecar_generate_messages_cpp)
