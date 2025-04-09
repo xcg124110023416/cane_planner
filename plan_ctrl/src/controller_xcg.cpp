@@ -147,7 +147,7 @@ L1Controller::L1Controller()
     timer1 = n_.createTimer(ros::Duration((1.0) / controller_freq), &L1Controller::controlLoopCB, this);  // Duration(0.05) -> 20Hz
     timer2 = n_.createTimer(ros::Duration((0.5) / controller_freq), &L1Controller::goalReachingCB, this); // Duration(0.05) -> 20Hz
 
-    std::string port("/dev/ttyUSB0");
+    std::string port("/dev/ttyACM0");
     int baudrate = 115200;
 
     pn.param("port", port, port);
@@ -545,11 +545,11 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
     if (ser_.isOpen())
     {
         /*Estimate Steering Angle*/
-        double eta = 300;
-        if (foundForwardPt)
-        {
+        double eta = 800;
+        // if (foundForwardPt)
+        // {
 
-            cmd_vel.angular.z = eta;
+            // cmd_vel.angular.z = eta;
             // ROS_WARN("\nEstimate Steering Angle angle = %f", eta);
             // ROS_INFO("\nSteering angle = %d", (int)(cmd_vel.angular.z) * 100);
 
@@ -561,14 +561,14 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
                 cmd_vel.linear.x = baseSpeed;
                 if (use_ser_flag_)
                 {
-                    Set(CMD_VEL,300);
+                    Set(CMD_VEL,eta);
                 }
                 else
                 {
                     pub_.publish(cmd_vel);
                 }
             }
-        }
+        // }
     }
 }
 
