@@ -336,8 +336,8 @@ bool L1Controller::isWayPtAwayFromLfwDist(const geometry_msgs::Point &wayPt, con
 
 geometry_msgs::Point L1Controller::get_odom_car2WayPtVec(const geometry_msgs::Pose &carPose)
 {
-    geometry_msgs::Point carPose_pos = carPose.position;
-    double carPose_yaw = getYawFromPose(carPose);
+    geometry_msgs::Point carPose_pos = carPose.position;//获取车的位姿
+    double carPose_yaw = getYawFromPose(carPose);//获取车的朝向
     geometry_msgs::Point forwardPt;
     geometry_msgs::Point odom_car2WayPtVec;
     foundForwardPt = false;
@@ -406,7 +406,7 @@ geometry_msgs::Point L1Controller::get_odom_car2WayPtVec(const geometry_msgs::Po
 
 double L1Controller::getEta(const geometry_msgs::Pose &carPose)
 {
-    geometry_msgs::Point odom_car2WayPtVec = get_odom_car2WayPtVec(carPose);
+    geometry_msgs::Point odom_car2WayPtVec = get_odom_car2WayPtVec(carPose);//获取car与最近距离为1之内的前向路径点的相对位置，该目标点以car/odom为参考坐标系
 
     double eta = atan2(odom_car2WayPtVec.y, odom_car2WayPtVec.x);
     return eta;
@@ -514,11 +514,11 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
             return;
         }
         auto cane_Q = trans.getRotation();
-        carPose.orientation.x = cane_Q.getX();
+        carPose.orientation.x = cane_Q.getX();//carpose的方向由cane_base决定
         carPose.orientation.y = cane_Q.getY();
-        carPose.orientation.x = cane_Q.getZ();
+        carPose.orientation.z = cane_Q.getZ();
         carPose.orientation.w = cane_Q.getW();
-        carPose.position = pose_world.pose.position;
+        carPose.position = pose_world.pose.position;//carpose的位置由odom决定
     }
 
     // geometry_msgs::Twist carVel = odom.twist.twist;
@@ -526,9 +526,8 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
     cmd_vel.angular.z = baseAngle;
 
     if (goal_received)
-    {
-        /*Estimate Steering Angle*/
-        double eta = getEta(carPose) + 1.57;
+    {    /*Estimate Steering Angle*/
+        double eta = getEta(carPose) + 1.57;//+1.57不清楚具体含义。eta为正时应该相对car坐标系朝左，第二象限；为负时相对car坐标系朝右，第一象限。需要验证eta是否为正确的朝向弧度值。
         if (foundForwardPt)
         {
 
