@@ -61,7 +61,7 @@ namespace fast_planner
     random_device rd;
     eng_ = default_random_engine(rd());
 
-    esdf_timer_ = node_.createTimer(ros::Duration(0.05), &MapROS::updateESDFCallback, this);
+    esdf_timer_ = node_.createTimer(ros::Duration(0.05), &MapROS::updateESDFCallback, this);//主要重新计算每个体素到最近障碍物的距离
     vis_timer_ = node_.createTimer(ros::Duration(0.05), &MapROS::visCallback, this);
 
     // publish init
@@ -131,7 +131,7 @@ namespace fast_planner
       return;
     auto t1 = ros::Time::now();
 
-    map_->updateESDF3d();
+    map_->updateESDF3d();//计算每个体素到最近障碍物的距离
     esdf_need_update_ = false;
 
     auto t2 = ros::Time::now();
@@ -267,13 +267,13 @@ namespace fast_planner
                                    odom->pose.pose.orientation.y,
                                    odom->pose.pose.orientation.z);
     pcl::PointCloud<pcl::PointXYZ> cloud;
-    pcl::fromROSMsg(*msg, cloud);
+    pcl::fromROSMsg(*msg, cloud);//关键信息cloud，有点云意味着可能存在障碍物
     int num = cloud.points.size();
-    map_->inputPointCloud(cloud, num, camera_pos_);
+    map_->inputPointCloud(cloud, num, camera_pos_);//将输入的点云数据融合到三维栅格地图（SDFMap）中,主要用于动态更新地图的占据概率
 
     if (local_updated_)
     {
-      map_->clearAndInflateLocalMap();
+      map_->clearAndInflateLocalMap();//实现三维栅格地图中障碍物的膨胀过程和虚拟天花板（z轴）的设置
       esdf_need_update_ = true;
       local_updated_ = false;
     }
@@ -376,7 +376,7 @@ namespace fast_planner
     pcl::PointXYZ pt;
     pcl::PointCloud<pcl::PointXYZ> cloud;
     pcl::PointCloud<pcl::PointXYZ> cloud2;
-    Eigen::Vector3i min_cut = map_->md_->local_bound_min_;
+    Eigen::Vector3i min_cut = map_->md_->local_bound_min_;//全局变量
     Eigen::Vector3i max_cut = map_->md_->local_bound_max_;
     map_->boundIndex(min_cut);
     map_->boundIndex(max_cut);
@@ -386,7 +386,7 @@ namespace fast_planner
       for (int y = min_cut(1); y <= max_cut(1); ++y)
         for (int z = map_->mp_->box_min_(2); z < map_->mp_->box_max_(2); ++z)
         {
-          if (map_->md_->occupancy_buffer_[map_->toAddress(x, y, z)] > map_->mp_->min_occupancy_log_)
+          if (map_->md_->occupancy_buffer_[map_->toAddress(x, y, z)] > map_->mp_->min_occupancy_log_)//该点occupancy_buffer_大于可能是障碍物的阈值
           {
             // Occupied cells
             Eigen::Vector3d pos;
@@ -401,7 +401,7 @@ namespace fast_planner
             pt.z = pos(2);
             cloud.push_back(pt);
           }
-          else if (map_->md_->occupancy_buffer_inflate_[map_->toAddress(x, y, z)] == 1)
+          else if (map_->md_->occupancy_buffer_inflate_[map_->toAddress(x, y, z)] == 1)//或者该体素本身被视为膨胀单位
           {
             // Inflated occupied cells
             Eigen::Vector3d pos;

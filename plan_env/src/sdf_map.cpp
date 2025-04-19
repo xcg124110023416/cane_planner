@@ -21,21 +21,21 @@ void SDFMap::initMap(ros::NodeHandle& nh) {
   nh.param("sdf_map/map_size_y", y_size, -1.0);
   nh.param("sdf_map/map_size_z", z_size, -1.0);
   nh.param("sdf_map/obstacles_inflation", mp_->obstacles_inflation_, -1.0);
-  nh.param("sdf_map/local_bound_inflate", mp_->local_bound_inflate_, 1.0);
+  nh.param("sdf_map/local_bound_inflate", mp_->local_bound_inflate_, 1.0);//地图边界的“膨胀”范围系数
   nh.param("sdf_map/local_map_margin", mp_->local_map_margin_, 1);
   nh.param("sdf_map/ground_height", mp_->ground_height_, 1.0);
   nh.param("sdf_map/default_dist", mp_->default_dist_, 5.0);
   nh.param("sdf_map/optimistic", mp_->optimistic_, true);
   nh.param("sdf_map/signed_dist", mp_->signed_dist_, false);
 
-  mp_->local_bound_inflate_ = max(mp_->resolution_, mp_->local_bound_inflate_);
-  mp_->resolution_inv_ = 1 / mp_->resolution_;
-  mp_->map_origin_ = Eigen::Vector3d(-x_size / 2.0, -y_size / 2.0, mp_->ground_height_);
-  mp_->map_size_ = Eigen::Vector3d(x_size, y_size, z_size);
+  mp_->local_bound_inflate_ = max(mp_->resolution_, mp_->local_bound_inflate_);//0.1，0.4
+  mp_->resolution_inv_ = 1 / mp_->resolution_;//10
+  mp_->map_origin_ = Eigen::Vector3d(-x_size / 2.0, -y_size / 2.0, mp_->ground_height_);//-50，-25，-0.3
+  mp_->map_size_ = Eigen::Vector3d(x_size, y_size, z_size);//100，50，4
   for (int i = 0; i < 3; ++i)
-    mp_->map_voxel_num_(i) = ceil(mp_->map_size_(i) / mp_->resolution_);
-  mp_->map_min_boundary_ = mp_->map_origin_;
-  mp_->map_max_boundary_ = mp_->map_origin_ + mp_->map_size_;
+    mp_->map_voxel_num_(i) = ceil(mp_->map_size_(i) / mp_->resolution_);//1000，500，40
+  mp_->map_min_boundary_ = mp_->map_origin_;//-50，-25，-0.3
+  mp_->map_max_boundary_ = mp_->map_origin_ + mp_->map_size_;//50，25，3.7
 
   // Params of raycasting-based fusion
   nh.param("sdf_map/p_hit", mp_->p_hit_, 0.70);
@@ -52,16 +52,17 @@ void SDFMap::initMap(ros::NodeHandle& nh) {
   mp_->prob_miss_log_ = logit(mp_->p_miss_);
   mp_->clamp_min_log_ = logit(mp_->p_min_);
   mp_->clamp_max_log_ = logit(mp_->p_max_);
-  mp_->min_occupancy_log_ = logit(mp_->p_occ_);
+  mp_->min_occupancy_log_ = logit(mp_->p_occ_);//判断为障碍物的最小对数阈值
   mp_->unknown_flag_ = 0.01;
   cout << "hit: " << mp_->prob_hit_log_ << ", miss: " << mp_->prob_miss_log_
        << ", min: " << mp_->clamp_min_log_ << ", max: " << mp_->clamp_max_log_
        << ", thresh: " << mp_->min_occupancy_log_ << endl;
+  //hit: 0.619039, miss: -0.281851, min: -2.19722, max: 2.19722, thresh: 1.38629
 
   // Initialize data buffer of map
-  int buffer_size = mp_->map_voxel_num_(0) * mp_->map_voxel_num_(1) * mp_->map_voxel_num_(2);
-  md_->occupancy_buffer_ = vector<double>(buffer_size, mp_->clamp_min_log_ - mp_->unknown_flag_);
-  md_->occupancy_buffer_inflate_ = vector<char>(buffer_size, 0);
+  int buffer_size = mp_->map_voxel_num_(0) * mp_->map_voxel_num_(1) * mp_->map_voxel_num_(2);//1000*500*40，总共的体素数
+  md_->occupancy_buffer_ = vector<double>(buffer_size, mp_->clamp_min_log_ - mp_->unknown_flag_);//值的大小反映了该体素被障碍物占据的可能性
+  md_->occupancy_buffer_inflate_ = vector<char>(buffer_size, 0);//用于存储障碍物膨胀后的结果
   md_->distance_buffer_neg_ = vector<double>(buffer_size, mp_->default_dist_);
   md_->distance_buffer_ = vector<double>(buffer_size, mp_->default_dist_);
   md_->count_hit_and_miss_ = vector<short>(buffer_size, 0);
@@ -87,7 +88,7 @@ void SDFMap::initMap(ros::NodeHandle& nh) {
   // Initialize ROS wrapper
   mr_->setMap(this);
   mr_->node_ = nh;
-  mr_->init();
+  mr_->init();//初始化MapRos对象
 
   caster_.reset(new RayCaster);
   caster_->setParams(mp_->resolution_, mp_->map_origin_);
@@ -352,10 +353,10 @@ void SDFMap::inputPointCloud(
   if (point_num == 0) return;
   md_->raycast_num_ += 1;
 
-  Eigen::Vector3d update_min = camera_pos;
+  Eigen::Vector3d update_min = camera_pos;//局部变量
   Eigen::Vector3d update_max = camera_pos;
   if (md_->reset_updated_box_) {
-    md_->update_min_ = camera_pos;
+    md_->update_min_ = camera_pos;//全局变量
     md_->update_max_ = camera_pos;
     md_->reset_updated_box_ = false;
   }
@@ -371,51 +372,52 @@ void SDFMap::inputPointCloud(
     // Set flag for projected point
     if (!isInMap(pt_w)) {
       // Find closest point in map and set free
-      pt_w = closetPointInMap(pt_w, camera_pos);
+      pt_w = closetPointInMap(pt_w, camera_pos);//找到地图边界上的最近点
       length = (pt_w - camera_pos).norm();
       if (length > mp_->max_ray_length_)
-        pt_w = (pt_w - camera_pos) / length * mp_->max_ray_length_ + camera_pos;
+        pt_w = (pt_w - camera_pos) / length * mp_->max_ray_length_ + camera_pos;//将其距离限制在最大射线长度内
       if (pt_w[2] < 0.2) continue;
       tmp_flag = 0;
     } else {
       length = (pt_w - camera_pos).norm();
       if (length > mp_->max_ray_length_) {
-        pt_w = (pt_w - camera_pos) / length * mp_->max_ray_length_ + camera_pos;
+        pt_w = (pt_w - camera_pos) / length * mp_->max_ray_length_ + camera_pos;//同样操作：将其距离限制在最大射线长度内
         if (pt_w[2] < 0.2) continue;
         tmp_flag = 0;
       } else
-        tmp_flag = 1;
+        tmp_flag = 1;//（1为击中，0为未击中(自由空间)）
     }
     posToIndex(pt_w, idx);
     vox_adr = toAddress(idx);
-    setCacheOccupancy(vox_adr, tmp_flag);
+    setCacheOccupancy(vox_adr, tmp_flag);//将本次点云的索引和状态记录到缓存cache_voxel_
 
-    for (int k = 0; k < 3; ++k) {
+    for (int k = 0; k < 3; ++k) {//更新本次点云的空间边界
       update_min[k] = min(update_min[k], pt_w[k]);
       update_max[k] = max(update_max[k], pt_w[k]);
     }
-    // Raycasting between camera center and point
+    // Raycasting between camera center and point（从相机位置到点进行射线遍历）
     if (md_->flag_rayend_[vox_adr] == md_->raycast_num_)
       continue;
     else
-      md_->flag_rayend_[vox_adr] = md_->raycast_num_;
+      md_->flag_rayend_[vox_adr] = md_->raycast_num_;//使用 flag_rayend_ 避免重复处理同一个体素（voxel）
 
     caster_->input(pt_w, camera_pos);
     caster_->nextId(idx);
-    while (caster_->nextId(idx))
+    while (caster_->nextId(idx))//沿途所有体素都被标记为“未击中”（自由空间）
       setCacheOccupancy(toAddress(idx), 0);
   }
+  //for循环结束，md_->cache_voxel_中存有所有本次回调函数中所有体素（voxel）的索引和状态
 
-  Eigen::Vector3d bound_inf(mp_->local_bound_inflate_, mp_->local_bound_inflate_, 0);
+  Eigen::Vector3d bound_inf(mp_->local_bound_inflate_, mp_->local_bound_inflate_, 0);//x,y,z
   posToIndex(update_max + bound_inf, md_->local_bound_max_);
-  posToIndex(update_min - bound_inf, md_->local_bound_min_);
+  posToIndex(update_min - bound_inf, md_->local_bound_min_);//更新局部地图（包含边界膨胀）的最小/最大索引
   boundIndex(md_->local_bound_min_);
-  boundIndex(md_->local_bound_max_);
+  boundIndex(md_->local_bound_max_);//更新为全局信息
 
   // for ros callback function do local_updated
   mr_->local_updated_ = true;
 
-  // Bounding box for subsequent updating
+  // Bounding box for subsequent updating，将本次点云的局部空间范围与全局范围合并（不包含边界膨胀），便于后续整体地图维护
   for (int k = 0; k < 3; ++k) {
     md_->update_min_[k] = min(update_min[k], md_->update_min_[k]);
     md_->update_max_[k] = max(update_max[k], md_->update_max_[k]);
@@ -424,15 +426,15 @@ void SDFMap::inputPointCloud(
   while (!md_->cache_voxel_.empty()) {
     int adr = md_->cache_voxel_.front();
     md_->cache_voxel_.pop();
-    double log_odds_update =
+    double log_odds_update =//根据体素状态信息，设置不同的对数值hit: 0.619039, miss: -0.281851
         md_->count_hit_[adr] >= md_->count_miss_[adr] ? mp_->prob_hit_log_ : mp_->prob_miss_log_;
-    md_->count_hit_[adr] = md_->count_miss_[adr] = 0;
+    md_->count_hit_[adr] = md_->count_miss_[adr] = 0;//清除本次回调函数中所有体素（voxel）的状态信息
     if (md_->occupancy_buffer_[adr] < mp_->clamp_min_log_ - 1e-3)
-      md_->occupancy_buffer_[adr] = mp_->min_occupancy_log_;
+      md_->occupancy_buffer_[adr] = mp_->min_occupancy_log_;//初始化默认值为min_occupancy_log_ = 1.38629
 
-    md_->occupancy_buffer_[adr] = std::min(
+    md_->occupancy_buffer_[adr] = std::min(//min: -2.19722, max: 2.19722
         std::max(md_->occupancy_buffer_[adr] + log_odds_update, mp_->clamp_min_log_),
-        mp_->clamp_max_log_);
+        mp_->clamp_max_log_);//最终输出的occupancy_buffer_（值的大小反映了该体素被障碍物占据的可能性）
   }
 }
 
@@ -523,7 +525,7 @@ void SDFMap::clearAndInflateLocalMap() {
   // update inflated occupied cells
   // clean outdated occupancy
 
-  int inf_step = ceil(mp_->obstacles_inflation_ / mp_->resolution_);
+  int inf_step = ceil(mp_->obstacles_inflation_ / mp_->resolution_);//膨胀的体素数
   vector<Eigen::Vector3i> inf_pts(pow(2 * inf_step + 1, 3));
   // inf_pts.resize(4 * inf_step + 3);
 
@@ -538,8 +540,8 @@ void SDFMap::clearAndInflateLocalMap() {
     for (int y = md_->local_bound_min_(1); y <= md_->local_bound_max_(1); ++y)
       for (int z = md_->local_bound_min_(2); z <= md_->local_bound_max_(2); ++z) {
         int id1 = toAddress(x, y, z);
-        if (md_->occupancy_buffer_[id1] > mp_->min_occupancy_log_) {
-          inflatePoint(Eigen::Vector3i(x, y, z), inf_step, inf_pts);
+        if (md_->occupancy_buffer_[id1] > mp_->min_occupancy_log_) {//
+          inflatePoint(Eigen::Vector3i(x, y, z), inf_step, inf_pts);//调用 inflatePoint 生成以该体素为中心、半径为 inf_step 的所有膨胀体素索引inf_pts
 
           for (auto inf_pt : inf_pts) {
             int idx_inf = toAddress(inf_pt);

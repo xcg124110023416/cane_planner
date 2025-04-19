@@ -106,7 +106,7 @@ L1Controller::L1Controller()
     pn.param("baseSpeed", baseSpeed, 1470);
     pn.param("baseAngle", baseAngle, 90.0);
     pn.param("SerialUsing", use_ser_flag_, true);
-    pn.param("/kin_replan_node/planner_node/planner", plan_, 1);
+    pn.param("/kin_replan_node/planner_node/planner", plan_, 2);
 
     // Publishers and Subscribers
     odom_sub = n_.subscribe("/odometry/filtered", 1, &L1Controller::odomCB, this);
