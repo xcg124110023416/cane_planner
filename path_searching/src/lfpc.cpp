@@ -31,7 +31,7 @@ namespace cane_planner
         support_leg_ = LEFT_LEG;
         step_num_ = 0;
         // calculate
-        t_c_ = sqrt(h_ / 10);
+        t_c_ = sqrt(h_ / 10);//0.1
         double CT = cosh(t_sup_ / t_c_);
         double ST = sinh(t_sup_ / t_c_);
         b_ = t_c_ * CT / ST;
@@ -81,21 +81,21 @@ namespace cane_planner
     }
     void LFPC::updateOneStep()
     {
-        int swing_data_len = int(t_sup_ / delta_t_);
+        int swing_data_len = int(t_sup_ / delta_t_);//在一个支撑相中需要计算的离散时间点数量，0.35/0.1=3.5，取整为3
         auto state_f = calculateLFPC(vx_0_, vy_0_);
         // update step support_leg_pos
-        support_leg_pos_(0) = COM_pos_(0) + state_f(0);
+        support_leg_pos_(0) = COM_pos_(0) + state_f(0);//state_f表示当前步态下的足底目标偏移
         support_leg_pos_(1) = COM_pos_(1) + state_f(1);
         support_leg_pos_(2) = 0.0;
         // update step param;
         x_0_ = -state_f(0);
         y_0_ = -state_f(1);
         // update motion com_pos into step_path_
-        for (int i = 0; i < swing_data_len; i++)
+        for (int i = 0; i < swing_data_len; i++)//支撑相期间，逐时间步长计算质心轨迹,由COM_pos_，用x_0_和y_0_得到最终到support_leg_pos_路径点上的COM_pos_。
         {
             updateOneDt();
             step_path_.push_back(COM_pos_);
-        }
+        }//循环结束最终得到的是COM_pos_，以t_ += delta_t_的最终一轮时间0.3为准推算出来的
         step_num_ += 1;
     }
     // -------------------------------------API function------------------------------------//
@@ -133,7 +133,7 @@ namespace cane_planner
     // -------------------------------------private function------------------------------------//
     void LFPC::updateOneDt()
     {
-        t_ += delta_t_;
+        t_ += delta_t_;//0.1、0.2、0.3
         Vector4d iter_state = calculateXtVt(t_);
         x_t_ = iter_state(0);
         vx_t_ = iter_state(1);
@@ -150,7 +150,7 @@ namespace cane_planner
         // in here,  iter_state  == [x_t,vx_t,y_t,vy_t]"
         Vector4d iter_state;
         // linear inverted pendulum motion low
-        double tau = t / t_c_;
+        double tau = t / t_c_;//t_c_ = 0.1
         // x
         iter_state(0) = x_0_ * cosh(tau) + t_c_ * vx_0_ * sinh(tau);
         iter_state(1) = x_0_ * sinh(tau) / t_c_ + vx_0_ * cosh(tau);

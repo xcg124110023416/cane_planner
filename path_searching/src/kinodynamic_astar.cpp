@@ -119,13 +119,13 @@ namespace cane_planner
             /* ---------- param for next gait point ---------- */
             double al_res = 1 / 2.0, aw_res = 1 / 1.0, pi_res = 1 / 3.0;
             /* ----------set input list ---------- */
-            for (double al = max_al_ - 0.1; al < max_al_ + 1e-3; al += al_res * 0.1)
-                for (double aw = max_aw_ * aw_res; aw < max_aw_ + 1e-3; aw += max_aw_ * aw_res)
-                    for (double api = -max_api_; api < max_api_ + 1e-2; api += max_api_ * pi_res)
+            for (double al = max_al_ - 0.1; al < max_al_ + 1e-3; al += al_res * 0.1)//可能表示步态点的某个线性参数（如步长）
+                for (double aw = max_aw_ * aw_res; aw < max_aw_ + 1e-3; aw += max_aw_ * aw_res)//可能表示步态点的宽度或横向偏移
+                    for (double api = -max_api_; api < max_api_ + 1e-2; api += max_api_ * pi_res)//可能表示步态点的角度或方向偏移
                     {
                         um << al, aw, api;
                         inputs.push_back(um);
-                    }
+                    }//使用 1e-3 和 1e-2 作为循环终止条件的偏移量,这样处理可以避免浮点数精度问题导致的循环边界错误
 
             /* ----------Explore the next gait point ---------- */
             // std::cout << "set input list" << std::endl;
@@ -138,9 +138,10 @@ namespace cane_planner
                                    cur_node->support_feet, cur_node->step_num);
                 lfpc_model_->SetCtrlParams(um);
                 lfpc_model_->updateOneStep();
-                pur_state.com_pos = lfpc_model_->getCOMPos();
-                pur_state.com_path = lfpc_model_->getStepCOMPath();
-                pur_state.support_pos = lfpc_model_->getFootPosition();
+                pur_state.com_pos = lfpc_model_->getCOMPos();//得到的是pur_state的com_pos_
+                pur_state.com_path = lfpc_model_->getStepCOMPath();//由多个COM_pos_组成的容器
+                pur_state.support_pos = lfpc_model_->getFootPosition();//得到的是pur_state的support_leg_pos_，和上面COM_pos_的值应该是不同的
+
                 // std::cout << "\ninput:sx,sy,yaw" << um.transpose() << std::endl;
                 // std::cout << "pur_state: " << pur_state.com_pos.transpose() << std::endl;
                 // std::cout << "pur_support_pos" << pur_state.support_pos.transpose() << std::endl;

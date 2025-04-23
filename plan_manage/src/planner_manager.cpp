@@ -460,7 +460,7 @@ namespace cane_planner
         // vx = 0.5 * sin(start_state_(2));
         // vy = 0.5 * cos(start_state_(2));
         // input << 0.0, vx, 0.0, vy;
-        input << 0.0, 0.0, start_state_(2);
+        input << 0.0, 0.0, start_state_(2);//vx,vy,theta
         //
         ros::Time time_1 = ros::Time::now();
         bool plan_success = kin_finder_->search(start_state_, input, end_state_);
