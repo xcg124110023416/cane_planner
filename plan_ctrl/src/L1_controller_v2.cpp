@@ -398,7 +398,7 @@ geometry_msgs::Point L1Controller::get_odom_car2WayPtVec(const geometry_msgs::Po
 
     marker_pub.publish(points);
     marker_pub.publish(line_strip);
-
+    //从世界坐标系到车体坐标系的二维点坐标变换
     odom_car2WayPtVec.x = cos(carPose_yaw) * (forwardPt.x - carPose_pos.x) + sin(carPose_yaw) * (forwardPt.y - carPose_pos.y);
     odom_car2WayPtVec.y = -sin(carPose_yaw) * (forwardPt.x - carPose_pos.x) + cos(carPose_yaw) * (forwardPt.y - carPose_pos.y);
     return odom_car2WayPtVec;
@@ -501,12 +501,12 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
     {
         pose_cam.header = odom.header;
         pose_cam.pose = odom.pose.pose;
-        tf_listener.transformPose("world", pose_cam, pose_world);
+        tf_listener.transformPose("world", pose_cam, pose_world);//坐标系中的点的转换，从odom的header坐标系下的点转换到world坐标系
 
         tf::StampedTransform trans;
         try
         {
-            tf_listener.lookupTransform("/world", "/cane_base", ros::Time(), trans);
+            tf_listener.lookupTransform("/world", "/cane_base", ros::Time(), trans);//坐标系之间的变换，cane_base坐标系到world坐标系
         }
         catch (tf::TransformException &ex)
         {
@@ -527,7 +527,11 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
 
     if (goal_received)
     {    /*Estimate Steering Angle*/
-        double eta = getEta(carPose) + 1.57;//+1.57不清楚具体含义。eta为正时应该相对car坐标系朝左，第二象限；为负时相对car坐标系朝右，第一象限。需要验证eta是否为正确的朝向弧度值。
+        /*已经验证eta，当雷达朝向与杖一致时，不需要＋1.57，得出的数值即相对于雷达坐标系需要转动的弧度值，只需要转换为角度值即可。
+        +1.57应该和fastlio.lanuch文件设置的body2cane_base有关。
+        eta是以camera_base为参考系，当前相对于目标路径上最近一点的角度（弧度值），话题car_path可以显示。
+        eta为正时相对camera_base坐标系朝左，第二象限；为负时相对camera_base坐标系朝右，第一象限。*/
+        double eta = getEta(carPose) + 1.57;
         if (foundForwardPt)
         {
 

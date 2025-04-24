@@ -35,6 +35,7 @@
         <param name="AngleGain" value="-2.0"/>
         <param name="controller_freq" value="15"/>
         <param name="SerialUsing" value="true"/>
+        <!-- 调试时，需要改成/dev/ttyACM0 -->
         <param name="port" value="/dev/feedback_controller"/>
         <remap from="/odometry/filtered" to="$(arg odometry_topic)" />
     </node>
