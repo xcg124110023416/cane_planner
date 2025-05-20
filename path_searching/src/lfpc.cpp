@@ -31,7 +31,7 @@ namespace cane_planner
         support_leg_ = LEFT_LEG;
         step_num_ = 0;
         // calculate
-        t_c_ = sqrt(h_ / 10);//0.1
+        t_c_ = sqrt(h_ / 10);//根号0.1,h_为腿长
         double CT = cosh(t_sup_ / t_c_);
         double ST = sinh(t_sup_ / t_c_);
         b_ = t_c_ * CT / ST;
@@ -82,7 +82,7 @@ namespace cane_planner
     void LFPC::updateOneStep()
     {
         int swing_data_len = int(t_sup_ / delta_t_);//在一个支撑相中需要计算的离散时间点数量，0.35/0.1=3.5，取整为3
-        auto state_f = calculateLFPC(vx_0_, vy_0_);
+        auto state_f = calculateLFPC(vx_0_, vy_0_);//初始均为0
         // update step support_leg_pos
         support_leg_pos_(0) = COM_pos_(0) + state_f(0);//state_f表示当前步态下的足底目标偏移
         support_leg_pos_(1) = COM_pos_(1) + state_f(1);
@@ -150,10 +150,10 @@ namespace cane_planner
         // in here,  iter_state  == [x_t,vx_t,y_t,vy_t]"
         Vector4d iter_state;
         // linear inverted pendulum motion low
-        double tau = t / t_c_;//t_c_ = 0.1
+        double tau = t / t_c_;//t_c_ = 根号0.1
         // x
-        iter_state(0) = x_0_ * cosh(tau) + t_c_ * vx_0_ * sinh(tau);
-        iter_state(1) = x_0_ * sinh(tau) / t_c_ + vx_0_ * cosh(tau);
+        iter_state(0) = x_0_ * cosh(tau) + t_c_ * vx_0_ * sinh(tau);//x_0_ = -state_f(0)，为负的足底目标偏移量
+        iter_state(1) = x_0_ * sinh(tau) / t_c_ + vx_0_ * cosh(tau);//y_0_ = -state_f(1)
         // y
         iter_state(2) = y_0_ * cosh(tau) + t_c_ * vy_0_ * sinh(tau);
         iter_state(3) = y_0_ * sinh(tau) / t_c_ + vy_0_ * cosh(tau);

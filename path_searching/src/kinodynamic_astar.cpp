@@ -138,9 +138,9 @@ namespace cane_planner
                                    cur_node->support_feet, cur_node->step_num);
                 lfpc_model_->SetCtrlParams(um);
                 lfpc_model_->updateOneStep();
-                pur_state.com_pos = lfpc_model_->getCOMPos();//得到的是pur_state的com_pos_
+                pur_state.com_pos = lfpc_model_->getCOMPos();//得到的是pur_state的com_pos_,即质心位置的轨迹点
                 pur_state.com_path = lfpc_model_->getStepCOMPath();//由多个COM_pos_组成的容器
-                pur_state.support_pos = lfpc_model_->getFootPosition();//得到的是pur_state的support_leg_pos_，和上面COM_pos_的值应该是不同的
+                pur_state.support_pos = lfpc_model_->getFootPosition();//得到的是pur_state的support_leg_pos_，即支撑腿位置的轨迹点
 
                 // std::cout << "\ninput:sx,sy,yaw" << um.transpose() << std::endl;
                 // std::cout << "pur_state: " << pur_state.com_pos.transpose() << std::endl;
@@ -377,9 +377,9 @@ namespace cane_planner
         // 分配规划的区域限制
         nh.param("kinastar/horizon", horizon_, -1.0);
         // 人体动力学限制参数
-        nh.param("kinastar/max_al", max_al_, -1.0);
-        nh.param("kinastar/max_aw", max_aw_, -1.0);
-        nh.param("kinastar/max_theta", max_api_, -1.0);
+        nh.param("kinastar/max_al", max_al_, -1.0);//步长
+        nh.param("kinastar/max_aw", max_aw_, -1.0);//不宽
+        nh.param("kinastar/max_theta", max_api_, -1.0);//最大旋转弧度制
 
         tie_breaker_ = 1.0 + 1.0 / 10000;
     }
