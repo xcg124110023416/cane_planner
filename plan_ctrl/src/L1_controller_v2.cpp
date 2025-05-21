@@ -36,6 +36,20 @@ along with hypha_racecar.  If not, see <http://www.gnu.org/licenses/>.
 
 #define PI 3.14159265358979
 
+// 帧头43->大写C
+#define CMD_FRAME_HEADER 0x43
+// cmd
+#define CMD_VEL 0x01
+#define CMD_POS 0x02
+#define CMD_STOP 0x03
+#define CMD_UPDATE 0x04
+#define CMD_VAREPSILON 0X05
+#define CMD_A 0x06
+#define CMD_SET_POS_ZERO 0x07
+#define CMD_ZERO 0x08
+
+#define GKF_DATA_LEN 4
+
 /********************/
 /* CLASS DEFINITION */
 /********************/
@@ -52,6 +66,7 @@ public:
     double getL1Distance(const double &_Vcmd);
     double getSteeringAngle(double eta);
     double getGasInput(const float &current_v);
+    void Set(uint8_t cmd, int16_t data);
     geometry_msgs::Point get_odom_car2WayPtVec(const geometry_msgs::Pose &carPose);
 
 private:
@@ -73,7 +88,7 @@ private:
     int plan_;
 
     double L, Lfw, Lrv, Vcmd, lfw, lrv, steering, u, v;
-    double Gas_gain, baseAngle, Angle_gain, goalRadius;
+    double Gas_gain, baseAngle, Angle_gain, goalRadius, link_length, wheel_radius;
     int controller_freq, baseSpeed;
     bool foundForwardPt, goal_received, goal_reached;
     bool have_odom;
@@ -130,7 +145,7 @@ L1Controller::L1Controller()
     timer1 = n_.createTimer(ros::Duration((1.0) / controller_freq), &L1Controller::controlLoopCB, this);  // Duration(0.05) -> 20Hz
     timer2 = n_.createTimer(ros::Duration((0.5) / controller_freq), &L1Controller::goalReachingCB, this); // Duration(0.05) -> 20Hz
 
-    std::string port("/dev/ttyUSB0");
+    std::string port("/dev/ttyACM0");
     int baudrate = 115200;
 
     pn.param("port", port, port);
@@ -179,6 +194,8 @@ L1Controller::L1Controller()
     have_odom = false;
     cmd_vel.linear.x = 1500; // 1500 for stop
     cmd_vel.angular.z = baseAngle;
+    link_length = 0.8;
+    wheel_radius = 0.03;
 
     // Show info
     ROS_INFO("[param] baseSpeed: %d", baseSpeed);
@@ -525,33 +542,42 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
     cmd_vel.linear.x = 1500;
     cmd_vel.angular.z = baseAngle;
 
-    if (goal_received)
+    // if (goal_received)
+    if (ser_.isOpen())
     {    /*Estimate Steering Angle*/
         /*已经验证eta，当雷达朝向与杖一致时，不需要＋1.57，得出的数值即相对于雷达坐标系需要转动的弧度值，只需要转换为角度值即可。
-        +1.57应该和fastlio.lanuch文件设置的body2cane_base有关。
+        +1.57和雷达安装位置有关系。
         eta是以camera_base为参考系，当前相对于目标路径上最近一点的角度（弧度值），话题car_path可以显示。
         eta为正时相对camera_base坐标系朝左，第二象限；为负时相对camera_base坐标系朝右，第一象限。*/
-        double eta = getEta(carPose) + 1.57;
-        if (foundForwardPt)
+        // double eta = getEta(carPose) + 1.57;
+        double eta = 0.3;
+        cmd_vel.angular.z = (eta*link_length*360)/(2*PI*wheel_radius);
+        std::cout << "cmd_vel.angular.z = " << int(cmd_vel.angular.z) << std::endl;
+        // if (foundForwardPt)
+        if (ser_.isOpen())
         {
 
-            cmd_vel.angular.z = getSteeringAngle(eta) * Angle_gain;
+            // cmd_vel.angular.z = getSteeringAngle(eta) * Angle_gain;
             // ROS_WARN("\nEstimate Steering Angle angle = %f", eta);
             // ROS_INFO("\nSteering angle = %d", (int)(cmd_vel.angular.z) * 100);
 
             /*Estimate Gas Input*/
-            if (!goal_reached)
+            // if (!goal_reached)
+            if (ser_.isOpen())
             {
                 // double u = getGasInput(carVel.linear.x);
                 // cmd_vel.linear.x = baseSpeed - u;
                 cmd_vel.linear.x = baseSpeed;
                 if (use_ser_flag_)
                 {
-                    std::string send_data = "z" + std::to_string((int)(cmd_vel.angular.z * 100)) + "\n";
-                    u_char send_data_char[send_data.size()];
-                    for (size_t i = 0; i < send_data.size(); i++)
-                        send_data_char[i] = send_data.c_str()[i];
-                    ser_.write(send_data_char, send_data.size());
+                    // std::string send_data = "z" + std::to_string((int)(cmd_vel.angular.z * 100)) + "\n";
+                    // u_char send_data_char[send_data.size()];
+                    // for (size_t i = 0; i < send_data.size(); i++)
+                    //     send_data_char[i] = send_data.c_str()[i];
+                    // ser_.write(send_data_char, send_data.size());
+
+
+                    // Set(CMD_VEL,int(cmd_vel.angular.z));
                 }
                 else
                 {
@@ -560,6 +586,20 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
             }
         }
     }
+}
+
+void L1Controller::Set(uint8_t cmd, int16_t data)
+{
+    std::vector<uint8_t> frame;
+    frame.push_back(CMD_FRAME_HEADER);          // 帧头
+    frame.push_back(cmd);           // 命令码
+    if (cmd == CMD_VEL || cmd == CMD_POS) // 如果命令码是0x01或0x02，添加数据内容
+    {
+        frame.push_back((data >> 8) & 0xFF); // 数据高字节
+        frame.push_back(data & 0xFF);        // 数据低字节
+    }
+    ser_.write(frame);
+
 }
 
 /*****************/

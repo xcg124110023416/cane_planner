@@ -90,7 +90,7 @@ private:
     int plan_;
 
     double L, Lfw, Lrv, Vcmd, lfw, lrv, steering, u, v;
-    double Gas_gain, baseAngle, Angle_gain, goalRadius;
+    double Gas_gain, baseAngle, Angle_gain, goalRadius, link_length, wheel_radius;
     int controller_freq, baseSpeed;
     bool foundForwardPt, goal_received, goal_reached;
     bool have_odom;
@@ -196,6 +196,8 @@ L1Controller::L1Controller()
     have_odom = false;
     cmd_vel.linear.x = 1500; // 1500 for stop
     cmd_vel.angular.z = baseAngle;
+    link_length = 0.8;
+    wheel_radius = 0.03;
 
     // Show info
     ROS_INFO("[param] baseSpeed: %d", baseSpeed);
@@ -545,7 +547,9 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
     if (ser_.isOpen())
     {
         /*Estimate Steering Angle*/
-        double eta = 800;
+        double eta = 0.3;
+        cmd_vel.angular.z = (eta*link_length*360)/(2*PI*wheel_radius);
+        std::cout << "cmd_vel.angular.z = " << int(cmd_vel.angular.z) << std::endl;
         // if (foundForwardPt)
         // {
 
@@ -561,7 +565,7 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
                 cmd_vel.linear.x = baseSpeed;
                 if (use_ser_flag_)
                 {
-                    Set(CMD_VEL,eta);
+                    Set(CMD_VEL,int(cmd_vel.angular.z));
                 }
                 else
                 {
