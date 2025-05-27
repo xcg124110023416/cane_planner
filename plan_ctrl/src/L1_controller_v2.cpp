@@ -192,7 +192,7 @@ L1Controller::L1Controller()
     goal_received = false;
     goal_reached = false;
     have_odom = false;
-    cmd_vel.linear.x = 1500; // 1500 for stop
+    cmd_vel.linear.x = 0; // 1500 for stop
     cmd_vel.angular.z = baseAngle;
     link_length = 0.8;
     wheel_radius = 0.03;
@@ -550,15 +550,15 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
         +1.57和雷达安装位置有关系。
         eta是以camera_base为参考系，当前相对于目标路径上最近一点的角度（弧度值），话题car_path可以显示。
         eta为正时相对camera_base坐标系朝左，第二象限；为负时相对camera_base坐标系朝右，第一象限。*/
-        double eta = getEta(carPose) + 1.57;
-        std::cout << "eta = " << eta << std::endl;
+        double eta = getEta(carPose);
+        // std::cout << "eta = " << eta << std::endl;
         // double eta = 0.3;
         cmd_vel.angular.z = (eta*link_length*360)/(2*PI*wheel_radius);
         
         if (foundForwardPt)
         // if (ser_.isOpen())
         {
-            // std::cout << "cmd_vel.angular.z = " << int(cmd_vel.angular.z) << std::endl;
+            std::cout << "cmd_vel.angular.z = " << int(cmd_vel.angular.z) << std::endl;
             // cmd_vel.angular.z = getSteeringAngle(eta) * Angle_gain;
             // ROS_WARN("\nEstimate Steering Angle angle = %f", eta);
             // ROS_INFO("\nSteering angle = %d", (int)(cmd_vel.angular.z) * 100);
@@ -579,7 +579,7 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
                     // ser_.write(send_data_char, send_data.size());
 
 
-                    // Set(CMD_VEL,int(cmd_vel.angular.z));
+                    Set(CMD_VEL,int(cmd_vel.angular.z)*-1);
                 }
                 else
                 {
