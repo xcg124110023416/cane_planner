@@ -256,6 +256,7 @@ void L1Controller::odomCB(const nav_msgs::Odometry::ConstPtr &odomMsg)
 void L1Controller::pathCB(const nav_msgs::Path::ConstPtr &pathMsg)
 {
     map_path = *pathMsg;
+    std::cout << "path_receive" <<std::endl;
 }
 
 void L1Controller::waypointCB(const nav_msgs::PathConstPtr &msg)
@@ -549,21 +550,22 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
         +1.57和雷达安装位置有关系。
         eta是以camera_base为参考系，当前相对于目标路径上最近一点的角度（弧度值），话题car_path可以显示。
         eta为正时相对camera_base坐标系朝左，第二象限；为负时相对camera_base坐标系朝右，第一象限。*/
-        // double eta = getEta(carPose) + 1.57;
-        double eta = 0.3;
+        double eta = getEta(carPose) + 1.57;
+        std::cout << "eta = " << eta << std::endl;
+        // double eta = 0.3;
         cmd_vel.angular.z = (eta*link_length*360)/(2*PI*wheel_radius);
-        std::cout << "cmd_vel.angular.z = " << int(cmd_vel.angular.z) << std::endl;
-        // if (foundForwardPt)
-        if (ser_.isOpen())
+        
+        if (foundForwardPt)
+        // if (ser_.isOpen())
         {
-
+            // std::cout << "cmd_vel.angular.z = " << int(cmd_vel.angular.z) << std::endl;
             // cmd_vel.angular.z = getSteeringAngle(eta) * Angle_gain;
             // ROS_WARN("\nEstimate Steering Angle angle = %f", eta);
             // ROS_INFO("\nSteering angle = %d", (int)(cmd_vel.angular.z) * 100);
 
             /*Estimate Gas Input*/
-            // if (!goal_reached)
-            if (ser_.isOpen())
+            if (!goal_reached)
+            // if (ser_.isOpen())
             {
                 // double u = getGasInput(carVel.linear.x);
                 // cmd_vel.linear.x = baseSpeed - u;
