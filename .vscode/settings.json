@@ -109,7 +109,17 @@
         "eigen": "cpp",
         "*.ipp": "cpp",
         "dense": "cpp",
-        "rope": "cpp"
+        "rope": "cpp",
+        "csetjmp": "cpp",
+        "codecvt": "cpp",
+        "cuchar": "cpp",
+        "filesystem": "cpp",
+        "regex": "cpp",
+        "slist": "cpp",
+        "future": "cpp",
+        "scoped_allocator": "cpp",
+        "charconv": "cpp",
+        "netfwd": "cpp"
     },
     "C_Cpp.default.cppStandard": "c++14",
     "cmake.configureOnOpen": false,

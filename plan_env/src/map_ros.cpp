@@ -252,20 +252,19 @@ namespace fast_planner
   {
     // tf from cam to odom
     geometry_msgs::PoseStamped pose_cam;
-    pose_cam.header = odom->header;
+    pose_cam.header = odom->header;//camera_init
     pose_cam.pose = odom->pose.pose;
     geometry_msgs::PoseStamped pose_world;
-    tf_listener_.transformPose("world", pose_cam, pose_world);
-
+    tf_listener_.transformPose("world", pose_cam, pose_world);//camera_init to world，实际没有变化
     camera_pos_(0) = pose_world.pose.position.x;
     camera_pos_(1) = pose_world.pose.position.y;
     camera_pos_(2) = pose_world.pose.position.z;
     if (!map_->isInMap(camera_pos_)) // exceed mapped region
       return;
-    camera_q_ = Eigen::Quaterniond(odom->pose.pose.orientation.w,
-                                   odom->pose.pose.orientation.x,
-                                   odom->pose.pose.orientation.y,
-                                   odom->pose.pose.orientation.z);
+    camera_q_ = Eigen::Quaterniond( pose_cam.pose.orientation.w,
+                                    pose_cam.pose.orientation.x,
+                                    pose_cam.pose.orientation.y,
+                                    pose_cam.pose.orientation.z);
     pcl::PointCloud<pcl::PointXYZ> cloud;
     pcl::fromROSMsg(*msg, cloud);//关键信息cloud，有点云意味着可能存在障碍物
     int num = cloud.points.size();
@@ -273,7 +272,7 @@ namespace fast_planner
 
     if (local_updated_)
     {
-      map_->clearAndInflateLocalMap();//实现三维栅格地图中障碍物的膨胀过程和虚拟天花板（z轴）的设置
+      map_->clearAndInflateLocalMap();//主要用于实现三维栅格地图中障碍物的膨胀过程
       esdf_need_update_ = true;
       local_updated_ = false;
     }

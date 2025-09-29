@@ -408,7 +408,7 @@ void SDFMap::inputPointCloud(
   }
   //for循环结束，md_->cache_voxel_中存有所有本次回调函数中所有体素（voxel）的索引和状态
 
-  Eigen::Vector3d bound_inf(mp_->local_bound_inflate_, mp_->local_bound_inflate_, 0);//x,y,z
+  Eigen::Vector3d bound_inf(mp_->local_bound_inflate_, mp_->local_bound_inflate_, 0);//x,y,z边界膨胀
   posToIndex(update_max + bound_inf, md_->local_bound_max_);
   posToIndex(update_min - bound_inf, md_->local_bound_min_);//更新局部地图（包含边界膨胀）的最小/最大索引
   boundIndex(md_->local_bound_min_);
@@ -426,13 +426,18 @@ void SDFMap::inputPointCloud(
   while (!md_->cache_voxel_.empty()) {
     int adr = md_->cache_voxel_.front();
     md_->cache_voxel_.pop();
-    double log_odds_update =//根据体素状态信息，设置不同的对数值hit: 0.619039, miss: -0.281851
+    //根据体素状态信息，设置不同的对数值hit: 0.619039, miss: -0.281851
+    double log_odds_update =
         md_->count_hit_[adr] >= md_->count_miss_[adr] ? mp_->prob_hit_log_ : mp_->prob_miss_log_;
-    md_->count_hit_[adr] = md_->count_miss_[adr] = 0;//清除本次回调函数中所有体素（voxel）的状态信息
+    //清除本次回调函数中所有体素（voxel）的状态信息
+    md_->count_hit_[adr] = md_->count_miss_[adr] = 0;
+    //md_->occupancy_buffer_默认值为mp_->clamp_min_log_ - mp_->unknown_flag_
     if (md_->occupancy_buffer_[adr] < mp_->clamp_min_log_ - 1e-3)
-      md_->occupancy_buffer_[adr] = mp_->min_occupancy_log_;//初始化默认值为min_occupancy_log_ = 1.38629
-
-    md_->occupancy_buffer_[adr] = std::min(//min: -2.19722, max: 2.19722
+      //初始化默认值为min_occupancy_log_ = 1.38629
+      md_->occupancy_buffer_[adr] = mp_->min_occupancy_log_;
+    //clamp_min_log_: -2.19722, clamp_max_log_: 2.19722
+    md_->occupancy_buffer_[adr] = std::min(
+        //第一次为min_occupancy_log_+hit或者min_occupancy_log_+miss
         std::max(md_->occupancy_buffer_[adr] + log_odds_update, mp_->clamp_min_log_),
         mp_->clamp_max_log_);//最终输出的occupancy_buffer_（值的大小反映了该体素被障碍物占据的可能性）
   }

@@ -52,7 +52,8 @@
     <node pkg="faster_lio" type="run_mapping_online" name="laserMapping"/>
 
 	<node pkg="tf2_ros" type="static_transform_publisher" name="cam2world" args="0 0 0 0 0 0 /world /camera_init" />
-	<node pkg="tf2_ros" type="static_transform_publisher" name="body2cane_base" args="0 0 0 -1.57 0 0 /body /cane_base" />
+	<node pkg="tf2_ros" type="static_transform_publisher" name="body2cane_base" args="0 0 0 0 0 0 /cane_base /body" />
+	<node pkg="tf2_ros" type="static_transform_publisher" name="world2map" args="0 0 0 0 0 0 /map /world" />
 
 
 	<!-- <group if="$(arg rviz_enable)">//.rviz配置文件不合适
