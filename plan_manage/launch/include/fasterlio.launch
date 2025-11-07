@@ -51,9 +51,14 @@
 
     <node pkg="faster_lio" type="run_mapping_online" name="laserMapping"/>
 
-	<node pkg="tf2_ros" type="static_transform_publisher" name="cam2world" args="0 0 0 0 0 0 /world /camera_init" />
-	<node pkg="tf2_ros" type="static_transform_publisher" name="body2cane_base" args="0 0 0 0 0 0 /cane_base /body" />
 	<node pkg="tf2_ros" type="static_transform_publisher" name="world2map" args="0 0 0 0 0 0 /map /world" />
+	<node pkg="tf2_ros" type="static_transform_publisher" name="cam2world" args="0 0 0 0 0 0 /world /camera_init" />
+	<!-- body to camera_init这个变换关系由fasterlio的Odometry话题发布，camera_init(全局固定坐标系)、body(IMU所在的机体坐标系) ，
+	让其他节点可以获取机器人在全局坐标系下的位姿信息。  -->
+	<node pkg="tf2_ros" type="static_transform_publisher" name="camera2radar_body" args="0.05 -0.03 -0.05 0 0 0 /body /camera_link" />
+	<node pkg="tf2_ros" type="static_transform_publisher" name="cane_base2body" args="0 0 0 0 0 0 /body /cane_base" />
+	
+	
 
 
 	<!-- <group if="$(arg rviz_enable)">//.rviz配置文件不合适

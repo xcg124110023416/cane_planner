@@ -378,7 +378,7 @@ namespace cane_planner
         nh.param("kinastar/horizon", horizon_, -1.0);
         // 人体动力学限制参数
         nh.param("kinastar/max_al", max_al_, -1.0);//步长
-        nh.param("kinastar/max_aw", max_aw_, -1.0);//不宽
+        nh.param("kinastar/max_aw", max_aw_, -1.0);//步宽
         nh.param("kinastar/max_theta", max_api_, -1.0);//最大旋转弧度制
 
         tie_breaker_ = 1.0 + 1.0 / 10000;

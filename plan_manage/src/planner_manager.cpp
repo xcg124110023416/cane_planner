@@ -262,7 +262,6 @@ namespace cane_planner
             if (!have_odom_)
                 return;
             changeFSMExecState(WAIT_TARGET);
-            exec_state_ = WAIT_TARGET;
             break;
         }
         case WAIT_TARGET:
@@ -322,8 +321,8 @@ namespace cane_planner
             }
             if (success2) // kin star success
             {
-                displayKinastar();
-                publishKinodynamicAstarPath();
+                displayKinastar(); //发布离散点和足迹
+                publishKinodynamicAstarPath();  //发布路径
             }
             // real experience using odom judge stop replan
             Eigen::Vector2d odom_pt(odom_pos_(0), odom_pos_(1));
@@ -469,8 +468,8 @@ namespace cane_planner
         {
             std::cout << (time_2 - time_1).toSec() << ",";
             vector<Eigen::Vector3d> list;
-            list = kin_finder_->getPath();
-            double len = getPathLen(list);
+            list = kin_finder_->getPath();  //多个com_pos组成的路径点
+            double len = getPathLen(list);  //路径长度
             std::cout << len << ",1" << std::endl;
         }
         return plan_success;

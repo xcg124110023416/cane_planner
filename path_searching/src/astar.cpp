@@ -226,7 +226,7 @@ namespace cane_planner
     nh.param("astar/lambda_heu", lambda_heu_, -1.0);
     // 分配的最大可以搜索的数量；
     nh.param("astar/allocate_num", allocate_num_, 1);
-
+    // 搜索允许的最大范围（例如 10 米内）
     nh.param("astar/horizon", horizon_, -1.0);
     // tie_breaker 见路径规划课程
     tie_breaker_ = 1.0 + 1.0 / 10000;

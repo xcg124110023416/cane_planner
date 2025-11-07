@@ -12,8 +12,8 @@ namespace cane_planner
     void CollisionDetection::init(ros::NodeHandle &nh)
     {
         node_ = nh;
-        node_.param("Collision/margin", margin_, -1.0);
-        node_.param("Collision/SliceHeight", slice_height_, -1.0);
+        node_.param("Collision/margin", margin_, -1.0);//当机器人与障碍物之间的距离小于 margin_ 时，认为有碰撞风险。
+        node_.param("Collision/SliceHeight", slice_height_, -1.0);//它指定了要在哪个高度平面上进行碰撞检测。
         
         cout << "Collision Detection[18]:margin:" << margin_ << endl;
         cout << "Collision Detection[18]:SliceHeight:" << slice_height_ << endl;

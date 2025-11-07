@@ -391,7 +391,7 @@ void SDFMap::inputPointCloud(
     vox_adr = toAddress(idx);
     setCacheOccupancy(vox_adr, tmp_flag);//将本次点云的索引和状态记录到缓存cache_voxel_
 
-    for (int k = 0; k < 3; ++k) {//更新本次点云的空间边界
+    for (int k = 0; k < 3; ++k) {//更新本次点云的空间边界，得到点云覆盖的最小/最大坐标
       update_min[k] = min(update_min[k], pt_w[k]);
       update_max[k] = max(update_max[k], pt_w[k]);
     }
@@ -408,13 +408,13 @@ void SDFMap::inputPointCloud(
   }
   //for循环结束，md_->cache_voxel_中存有所有本次回调函数中所有体素（voxel）的索引和状态
 
-  Eigen::Vector3d bound_inf(mp_->local_bound_inflate_, mp_->local_bound_inflate_, 0);//x,y,z边界膨胀
+  Eigen::Vector3d bound_inf(mp_->local_bound_inflate_, mp_->local_bound_inflate_, 0);//x,y,z边界膨胀，扩大边界（留安全余量）
   posToIndex(update_max + bound_inf, md_->local_bound_max_);
   posToIndex(update_min - bound_inf, md_->local_bound_min_);//更新局部地图（包含边界膨胀）的最小/最大索引
   boundIndex(md_->local_bound_min_);
   boundIndex(md_->local_bound_max_);//更新为全局信息
 
-  // for ros callback function do local_updated
+  // for ros callback function do local_updated，标记局部地图更新
   mr_->local_updated_ = true;
 
   // Bounding box for subsequent updating，将本次点云的局部空间范围与全局范围合并（不包含边界膨胀），便于后续整体地图维护
@@ -423,6 +423,10 @@ void SDFMap::inputPointCloud(
     md_->update_max_[k] = max(update_max[k], md_->update_max_[k]);
   }
 
+  /*
+    如果这个格子被“打中”次数更多 → 增加它的占据概率（更像障碍物）；
+    如果它更多是“射线经过” → 降低它的占据概率（更像自由空间）。
+  */
   while (!md_->cache_voxel_.empty()) {
     int adr = md_->cache_voxel_.front();
     md_->cache_voxel_.pop();
@@ -431,10 +435,12 @@ void SDFMap::inputPointCloud(
         md_->count_hit_[adr] >= md_->count_miss_[adr] ? mp_->prob_hit_log_ : mp_->prob_miss_log_;
     //清除本次回调函数中所有体素（voxel）的状态信息
     md_->count_hit_[adr] = md_->count_miss_[adr] = 0;
-    //md_->occupancy_buffer_默认值为mp_->clamp_min_log_ - mp_->unknown_flag_
+
+    //md_->occupancy_buffer_默认值为mp_->clamp_min_log_ - mp_->unknown_flag_，其中mp_->unknown_flag_ = 0.01;
     if (md_->occupancy_buffer_[adr] < mp_->clamp_min_log_ - 1e-3)
-      //初始化默认值为min_occupancy_log_ = 1.38629
+    //初始化默认值为min_occupancy_log_ = 1.38629
       md_->occupancy_buffer_[adr] = mp_->min_occupancy_log_;
+
     //clamp_min_log_: -2.19722, clamp_max_log_: 2.19722
     md_->occupancy_buffer_[adr] = std::min(
         //第一次为min_occupancy_log_+hit或者min_occupancy_log_+miss
@@ -559,7 +565,7 @@ void SDFMap::clearAndInflateLocalMap() {
         }
       }
 
-  // add virtual ceiling to limit flight height
+  // add virtual ceiling to limit flight height，在地图的某个固定高度上方，添加一个“看不见的障碍层”
   if (mp_->virtual_ceil_height_ > -0.5) {
     int ceil_id = floor((mp_->virtual_ceil_height_ - mp_->map_origin_(2)) * mp_->resolution_inv_);
     for (int x = md_->local_bound_min_(0); x <= md_->local_bound_max_(0); ++x)

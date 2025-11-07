@@ -82,7 +82,7 @@ namespace cane_planner
     void LFPC::updateOneStep()
     {
         int swing_data_len = int(t_sup_ / delta_t_);//在一个支撑相中需要计算的离散时间点数量，0.35/0.1=3.5，取整为3
-        auto state_f = calculateLFPC(vx_0_, vy_0_);//初始均为0
+        auto state_f = calculateLFPC(vx_0_, vy_0_);//初始均为0，根据当前速度预测下一步脚的落点
         // update step support_leg_pos
         support_leg_pos_(0) = COM_pos_(0) + state_f(0);//state_f表示当前步态下的足底目标偏移
         support_leg_pos_(1) = COM_pos_(1) + state_f(1);
@@ -93,8 +93,8 @@ namespace cane_planner
         // update motion com_pos into step_path_
         for (int i = 0; i < swing_data_len; i++)//支撑相期间，逐时间步长计算质心轨迹,由COM_pos_，用x_0_和y_0_得到最终到support_leg_pos_路径点上的COM_pos_。
         {
-            updateOneDt();
-            step_path_.push_back(COM_pos_);
+            updateOneDt();//按 LIPM 方程推进质心的运动
+            step_path_.push_back(COM_pos_);//保存本步质心轨迹
         }//循环结束最终得到的是COM_pos_，以t_ += delta_t_的最终一轮时间0.3为准推算出来的
         step_num_ += 1;
     }

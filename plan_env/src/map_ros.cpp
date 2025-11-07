@@ -61,7 +61,7 @@ namespace fast_planner
     random_device rd;
     eng_ = default_random_engine(rd());
 
-    esdf_timer_ = node_.createTimer(ros::Duration(0.05), &MapROS::updateESDFCallback, this);//主要重新计算每个体素到最近障碍物的距离
+    esdf_timer_ = node_.createTimer(ros::Duration(0.05), &MapROS::updateESDFCallback, this);//计算每个体素到最近障碍物的距离
     vis_timer_ = node_.createTimer(ros::Duration(0.05), &MapROS::visCallback, this);
 
     // publish init
@@ -131,7 +131,7 @@ namespace fast_planner
       return;
     auto t1 = ros::Time::now();
 
-    map_->updateESDF3d();//计算每个体素到最近障碍物的距离
+    map_->updateESDF3d();//计算每个体素到最近障碍物的距离，结果保存在distance_buffer_中
     esdf_need_update_ = false;
 
     auto t2 = ros::Time::now();
@@ -266,13 +266,14 @@ namespace fast_planner
                                     pose_cam.pose.orientation.y,
                                     pose_cam.pose.orientation.z);
     pcl::PointCloud<pcl::PointXYZ> cloud;
-    pcl::fromROSMsg(*msg, cloud);//关键信息cloud，有点云意味着可能存在障碍物
+    pcl::fromROSMsg(*msg, cloud);//转换为pcl类型cloud，点云意味着障碍物
     int num = cloud.points.size();
-    map_->inputPointCloud(cloud, num, camera_pos_);//将输入的点云数据融合到三维栅格地图（SDFMap）中,主要用于动态更新地图的占据概率
+    //将输入的点云数据融合到三维栅格地图（SDFMap）中,把相机看到的点云变成一张“概率地图”occupancy_buffer_，更新出哪些地方是障碍、哪些地方是空的，并维护更新范围和缓存，方便下一步地图计算。
+    map_->inputPointCloud(cloud, num, camera_pos_);
 
     if (local_updated_)
     {
-      map_->clearAndInflateLocalMap();//主要用于实现三维栅格地图中障碍物的膨胀过程
+      map_->clearAndInflateLocalMap();//主要用于实现三维栅格地图中障碍物的膨胀过程，occupancy_buffer_inflate_为膨胀障碍栅格
       esdf_need_update_ = true;
       local_updated_ = false;
     }
