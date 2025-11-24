@@ -20,6 +20,9 @@ void SDFMap::initMap(ros::NodeHandle& nh) {
   nh.param("sdf_map/map_size_x", x_size, -1.0);
   nh.param("sdf_map/map_size_y", y_size, -1.0);
   nh.param("sdf_map/map_size_z", z_size, -1.0);
+  nh.param("sdf_map/local_update_range_x", mp_->local_update_range_(0), -1.0);
+  nh.param("sdf_map/local_update_range_y", mp_->local_update_range_(1), -1.0);
+  nh.param("sdf_map/local_update_range_z", mp_->local_update_range_(2), -1.0);
   nh.param("sdf_map/obstacles_inflation", mp_->obstacles_inflation_, -1.0);
   nh.param("sdf_map/local_bound_inflate", mp_->local_bound_inflate_, 1.0);//地图边界的“膨胀”范围系数
   nh.param("sdf_map/local_map_margin", mp_->local_map_margin_, 1);

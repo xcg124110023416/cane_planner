@@ -28,6 +28,7 @@ namespace fast_planner
     node_.param("map_ros/fy", fy_, -1.0);
     node_.param("map_ros/cx", cx_, -1.0);
     node_.param("map_ros/cy", cy_, -1.0);
+
     node_.param("map_ros/depth_filter_maxdist", depth_filter_maxdist_, -1.0);
     node_.param("map_ros/depth_filter_mindist", depth_filter_mindist_, -1.0);
     node_.param("map_ros/depth_filter_margin", depth_filter_margin_, -1);
@@ -84,22 +85,31 @@ namespace fast_planner
         new message_filters::Subscriber<nav_msgs::Odometry>(node_, "/map_ros/odom", 25));
 
     // register callback function
-    // depth+pose
-    sync_image_pose_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyImagePose>(
-        MapROS::SyncPolicyImagePose(100), *depth_sub_, *pose_sub_));
-    sync_image_pose_->registerCallback(boost::bind(&MapROS::depthPoseCallback, this, _1, _2));
-    // depth+odom
-    sync_image_odom_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyImageOdom>(
-        MapROS::SyncPolicyImageOdom(100), *depth_sub_, *odom_sub_));
-    sync_image_odom_->registerCallback(boost::bind(&MapROS::depthOdomCallback, this, _1, _2));
-    // cloud+pose
-    sync_cloud_pose_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudPose>(
-        MapROS::SyncPolicyCloudPose(100), *cloud_sub_, *pose_sub_));
-    sync_cloud_pose_->registerCallback(boost::bind(&MapROS::cloudPoseCallback, this, _1, _2));
-    // cloud+odom
-    sync_cloud_odom_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudOdom>(
-        MapROS::SyncPolicyCloudOdom(100), *cloud_sub_, *odom_sub_));
-    sync_cloud_odom_->registerCallback(boost::bind(&MapROS::cloudOdomCallback, this, _1, _2));
+    // // depth+pose
+    // sync_image_pose_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyImagePose>(
+    //     MapROS::SyncPolicyImagePose(100), *depth_sub_, *pose_sub_));
+    // sync_image_pose_->registerCallback(boost::bind(&MapROS::depthPoseCallback, this, _1, _2));
+    // // depth+odom
+    // sync_image_odom_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyImageOdom>(
+    //     MapROS::SyncPolicyImageOdom(100), *depth_sub_, *odom_sub_));
+    // sync_image_odom_->registerCallback(boost::bind(&MapROS::depthOdomCallback, this, _1, _2));
+    // // cloud+pose
+    // sync_cloud_pose_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudPose>(
+    //     MapROS::SyncPolicyCloudPose(100), *cloud_sub_, *pose_sub_));
+    // sync_cloud_pose_->registerCallback(boost::bind(&MapROS::cloudPoseCallback, this, _1, _2));
+    // // cloud+odom
+    // sync_cloud_odom_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudOdom>(
+    //     MapROS::SyncPolicyCloudOdom(100), *cloud_sub_, *odom_sub_));
+    // sync_cloud_odom_->registerCallback(boost::bind(&MapROS::cloudOdomCallback, this, _1, _2));
+
+
+
+    // use odometry and point cloud
+    indep_cloud_sub_ =
+        node_.subscribe<sensor_msgs::PointCloud2>("/map_ros/cloud", 10, &MapROS::cloudCallback, this);
+    indep_odom_sub_ =
+        node_.subscribe<nav_msgs::Odometry>("/map_ros/odom", 10, &MapROS::odomCallback, this);
+
 
     map_start_time_ = ros::Time::now();
   }
@@ -247,6 +257,111 @@ namespace fast_planner
     }
   }
 
+
+void MapROS::odomCallback(const nav_msgs::OdometryConstPtr& odom) {
+  // if (has_first_depth_) return;
+
+  camera_pos_(0) = odom->pose.pose.position.x;
+  camera_pos_(1) = odom->pose.pose.position.y;
+  camera_pos_(2) = odom->pose.pose.position.z;
+
+  has_odom_ = true;
+}
+
+
+void MapROS::cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img) {
+
+  pcl::PointCloud<pcl::PointXYZ> latest_cloud;
+  pcl::fromROSMsg(*img, latest_cloud);
+
+  // has_cloud_ = true;
+
+  if (!has_odom_) {
+    // std::cout << "no odom!" << std::endl;
+    return;
+  }
+
+  if (latest_cloud.points.size() == 0) return;
+
+  if (isnan(camera_pos_(0)) || isnan(camera_pos_(1)) || isnan(camera_pos_(2))) return;
+
+  map_->resetBuffer(camera_pos_ - map_ ->mp_->local_update_range_,
+                    camera_pos_ + map_ ->mp_->local_update_range_);
+
+  pcl::PointXYZ pt;
+  Eigen::Vector3d p3d, p3d_inf;
+
+  int inf_step = ceil(map_ ->mp_->obstacles_inflation_ / map_ ->mp_->resolution_);
+  int inf_step_z = 1;
+
+  double max_x, max_y, max_z, min_x, min_y, min_z;
+
+  min_x = map_ ->mp_->map_max_boundary_(0);
+  min_y = map_ ->mp_->map_max_boundary_(1);
+  min_z = map_ ->mp_->map_max_boundary_(2);
+
+  max_x = map_ ->mp_->map_min_boundary_(0);
+  max_y = map_ ->mp_->map_min_boundary_(1);
+  max_z = map_ ->mp_->map_min_boundary_(2);
+
+  for (size_t i = 0; i < latest_cloud.points.size(); ++i) {
+    pt = latest_cloud.points[i];
+    p3d(0) = pt.x, p3d(1) = pt.y, p3d(2) = pt.z;
+
+    /* point inside update range */
+    Eigen::Vector3d devi = p3d - camera_pos_;
+    Eigen::Vector3i inf_pt;
+
+    if (fabs(devi(0)) < map_ ->mp_->local_update_range_(0) && fabs(devi(1)) < map_ ->mp_->local_update_range_(1) &&
+        fabs(devi(2)) < map_ ->mp_->local_update_range_(2)) {
+
+      /* inflate the point */
+      for (int x = -inf_step; x <= inf_step; ++x)
+        for (int y = -inf_step; y <= inf_step; ++y)
+          for (int z = -inf_step_z; z <= inf_step_z; ++z) {
+
+            p3d_inf(0) = pt.x + x * map_ ->mp_->resolution_;
+            p3d_inf(1) = pt.y + y * map_ ->mp_->resolution_;
+            p3d_inf(2) = pt.z + z * map_ ->mp_->resolution_;
+
+            max_x = max(max_x, p3d_inf(0));
+            max_y = max(max_y, p3d_inf(1));
+            max_z = max(max_z, p3d_inf(2));
+
+            min_x = min(min_x, p3d_inf(0));
+            min_y = min(min_y, p3d_inf(1));
+            min_z = min(min_z, p3d_inf(2));
+
+            map_ ->posToIndex(p3d_inf, inf_pt);
+
+            if (!map_ ->isInMap(inf_pt)) continue;
+
+            int idx_inf = map_ ->toAddress(inf_pt);
+
+            map_ ->md_->occupancy_buffer_inflate_[idx_inf] = 1;
+          }
+    }
+  }
+
+  min_x = min(min_x, camera_pos_(0));
+  min_y = min(min_y, camera_pos_(1));
+  min_z = min(min_z, camera_pos_(2));
+
+  max_x = max(max_x, camera_pos_(0));
+  max_y = max(max_y, camera_pos_(1));
+  max_z = max(max_z, camera_pos_(2));
+
+  max_z = max(max_z, map_ ->mp_->ground_height_);
+
+  map_ ->posToIndex(Eigen::Vector3d(max_x, max_y, max_z), map_ ->md_->local_bound_max_);
+  map_ ->posToIndex(Eigen::Vector3d(min_x, min_y, min_z), map_ ->md_->local_bound_min_);
+
+  map_ ->boundIndex(map_ ->md_->local_bound_min_);
+  map_ ->boundIndex(map_ ->md_->local_bound_max_);
+
+  esdf_need_update_ = true;
+}
+
   void MapROS::cloudOdomCallback(const sensor_msgs::PointCloud2ConstPtr &msg,
                                  const nav_msgs::OdometryConstPtr &odom)
   {
@@ -386,22 +501,22 @@ namespace fast_planner
       for (int y = min_cut(1); y <= max_cut(1); ++y)
         for (int z = map_->mp_->box_min_(2); z < map_->mp_->box_max_(2); ++z)
         {
-          if (map_->md_->occupancy_buffer_[map_->toAddress(x, y, z)] > map_->mp_->min_occupancy_log_)//该点occupancy_buffer_大于可能是障碍物的阈值
-          {
-            // Occupied cells
-            Eigen::Vector3d pos;
-            map_->indexToPos(Eigen::Vector3i(x, y, z), pos);
-            if (pos(2) > visualization_truncate_height_)
-              continue;
-            if (pos(2) < visualization_truncate_low_)
-              continue;
+          // if (map_->md_->occupancy_buffer_[map_->toAddress(x, y, z)] > map_->mp_->min_occupancy_log_)//该点occupancy_buffer_大于可能是障碍物的阈值
+          // {
+          //   // Occupied cells
+          //   Eigen::Vector3d pos;
+          //   map_->indexToPos(Eigen::Vector3i(x, y, z), pos);
+          //   if (pos(2) > visualization_truncate_height_)
+          //     continue;
+          //   if (pos(2) < visualization_truncate_low_)
+          //     continue;
 
-            pt.x = pos(0);
-            pt.y = pos(1);
-            pt.z = pos(2);
-            cloud.push_back(pt);
-          }
-          else if (map_->md_->occupancy_buffer_inflate_[map_->toAddress(x, y, z)] == 1)//或者该体素本身被视为膨胀单位
+          //   pt.x = pos(0);
+          //   pt.y = pos(1);
+          //   pt.z = pos(2);
+          //   cloud.push_back(pt);
+          // }
+          if (map_->md_->occupancy_buffer_inflate_[map_->toAddress(x, y, z)] == 1)//或者该体素本身被视为膨胀单位
           {
             // Inflated occupied cells
             Eigen::Vector3d pos;
@@ -428,9 +543,9 @@ namespace fast_planner
     cloud2.header.frame_id = frame_id_;
     sensor_msgs::PointCloud2 cloud_msg;
 
-    pcl::toROSMsg(cloud, cloud_msg);
-    map_local_pub_.publish(cloud_msg);
     pcl::toROSMsg(cloud2, cloud_msg);
+    map_local_pub_.publish(cloud_msg);
+    // pcl::toROSMsg(cloud2, cloud_msg);
     map_local_inflate_pub_.publish(cloud_msg);
   }
 

@@ -106,6 +106,8 @@ struct MapParam {
   
   int local_map_margin_;
   double unknown_flag_;
+
+  Eigen::Vector3d local_update_range_;
 };
 
 struct MapData {
