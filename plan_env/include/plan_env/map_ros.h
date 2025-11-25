@@ -16,6 +16,7 @@
 
 #include <memory>
 #include <random>
+#include <mutex>
 
 using std::shared_ptr;
 using std::normal_distribution;
@@ -123,6 +124,7 @@ private:
   friend SDFMap;
 
   bool has_odom_, has_cloud_;
+  std::mutex map_mutex_; // 声明一把锁
 };
 }
 

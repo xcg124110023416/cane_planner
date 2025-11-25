@@ -116,6 +116,7 @@ namespace fast_planner
 
   void MapROS::visCallback(const ros::TimerEvent &e)
   {
+    std::lock_guard<std::mutex> lock(map_mutex_); // 【等待锁释放后，再上锁】
     publishMapLocal();
     if (show_all_map_)
     {
@@ -137,12 +138,11 @@ namespace fast_planner
 
   void MapROS::updateESDFCallback(const ros::TimerEvent & /*event*/)
   {
-    if (!esdf_need_update_)
-      return;
+    std::lock_guard<std::mutex> lock(map_mutex_); // 【自动上锁】
+    if (!esdf_need_update_)  return;
     auto t1 = ros::Time::now();
 
     map_->updateESDF3d();//计算每个体素到最近障碍物的距离，结果保存在distance_buffer_中
-    esdf_need_update_ = false;
 
     auto t2 = ros::Time::now();
     esdf_time_ += (t2 - t1).toSec();
@@ -151,6 +151,7 @@ namespace fast_planner
     if (show_esdf_time_)
       ROS_WARN("ESDF t: cur: %lf, avg: %lf, max: %lf", (t2 - t1).toSec(), esdf_time_ / esdf_num_,
                max_esdf_time_);
+    esdf_need_update_ = false;
   }
 
   void MapROS::depthPoseCallback(const sensor_msgs::ImageConstPtr &img,
@@ -258,15 +259,30 @@ namespace fast_planner
   }
 
 
-void MapROS::odomCallback(const nav_msgs::OdometryConstPtr& odom) {
-  // if (has_first_depth_) return;
+  void MapROS::odomCallback(const nav_msgs::OdometryConstPtr& odom) {
 
-  camera_pos_(0) = odom->pose.pose.position.x;
-  camera_pos_(1) = odom->pose.pose.position.y;
-  camera_pos_(2) = odom->pose.pose.position.z;
+    // tf from cam to odom
+    geometry_msgs::PoseStamped pose_cam;
+    pose_cam.header = odom->header;//camera_init
+    pose_cam.pose = odom->pose.pose;
+    geometry_msgs::PoseStamped pose_world;
+    tf_listener_.transformPose("world", pose_cam, pose_world);//camera_init to world，实际没有变化
+    // if (has_first_depth_) return;
 
-  has_odom_ = true;
-}
+    camera_pos_(0) = pose_world.pose.position.x;
+    camera_pos_(1) = pose_world.pose.position.y;
+    camera_pos_(2) = pose_world.pose.position.z;
+
+    camera_q_ = Eigen::Quaterniond( pose_cam.pose.orientation.w,
+                                pose_cam.pose.orientation.x,
+                                pose_cam.pose.orientation.y,
+                                pose_cam.pose.orientation.z);
+
+    // if (!map_->isInMap(camera_pos_)) // exceed mapped region
+    // return;
+
+    has_odom_ = true;
+  }
 
 
 void MapROS::cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img) {
