@@ -41,7 +41,7 @@ namespace cane_planner
         start_sub_ =
             nh.subscribe("/initialpose", 1, &PlannerManager::startCallback, this); // 接收始点的topic
         // Visial
-        astar_pub_ = nh.advertise<visualization_msgs::Marker>("/planning_vis/astar", 20);
+        astar_pub_ = nh.advertise<visualization_msgs::Marker>("/planning_vis/kinpath_sample", 20);
         kin_vis_pub_ = nh.advertise<visualization_msgs::Marker>("/planning_vis/kin_astar", 20);
         kin_foot_pub_ = nh.advertise<visualization_msgs::Marker>("/planning_vis/kin_foot", 20);
         // Path
@@ -154,7 +154,7 @@ namespace cane_planner
         // replan_timer_ =
             // nh.createTimer(ros::Duration(0.1), &PlannerManager::checkCollisionCallback, this);
         // Visial
-        astar_pub_ = nh.advertise<visualization_msgs::Marker>("/planning_vis/astar", 20);
+        astar_pub_ = nh.advertise<visualization_msgs::Marker>("/planning_vis/kinpath_sample", 20);
         kin_vis_pub_ = nh.advertise<visualization_msgs::Marker>("/planning_vis/kin_astar", 20);
         kin_foot_pub_ = nh.advertise<visualization_msgs::Marker>("/planning_vis/kin_foot", 20);
         // Path

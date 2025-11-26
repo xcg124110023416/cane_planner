@@ -85,18 +85,18 @@ namespace fast_planner
         new message_filters::Subscriber<nav_msgs::Odometry>(node_, "/map_ros/odom", 25));
 
     // register callback function
-    // // depth+pose
-    // sync_image_pose_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyImagePose>(
-    //     MapROS::SyncPolicyImagePose(100), *depth_sub_, *pose_sub_));
-    // sync_image_pose_->registerCallback(boost::bind(&MapROS::depthPoseCallback, this, _1, _2));
-    // // depth+odom
-    // sync_image_odom_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyImageOdom>(
-    //     MapROS::SyncPolicyImageOdom(100), *depth_sub_, *odom_sub_));
-    // sync_image_odom_->registerCallback(boost::bind(&MapROS::depthOdomCallback, this, _1, _2));
-    // // cloud+pose
-    // sync_cloud_pose_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudPose>(
-    //     MapROS::SyncPolicyCloudPose(100), *cloud_sub_, *pose_sub_));
-    // sync_cloud_pose_->registerCallback(boost::bind(&MapROS::cloudPoseCallback, this, _1, _2));
+    // depth+pose
+    sync_image_pose_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyImagePose>(
+        MapROS::SyncPolicyImagePose(100), *depth_sub_, *pose_sub_));
+    sync_image_pose_->registerCallback(boost::bind(&MapROS::depthPoseCallback, this, _1, _2));
+    // depth+odom
+    sync_image_odom_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyImageOdom>(
+        MapROS::SyncPolicyImageOdom(100), *depth_sub_, *odom_sub_));
+    sync_image_odom_->registerCallback(boost::bind(&MapROS::depthOdomCallback, this, _1, _2));
+    // cloud+pose
+    sync_cloud_pose_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudPose>(
+        MapROS::SyncPolicyCloudPose(100), *cloud_sub_, *pose_sub_));
+    sync_cloud_pose_->registerCallback(boost::bind(&MapROS::cloudPoseCallback, this, _1, _2));
     // // cloud+odom
     // sync_cloud_odom_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudOdom>(
     //     MapROS::SyncPolicyCloudOdom(100), *cloud_sub_, *odom_sub_));
@@ -659,6 +659,7 @@ void MapROS::cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img) {
     const double min_dist = 0.0;
     const double max_dist = 3.0;
 
+    // 获取当前局部地图的边界索引
     Eigen::Vector3i min_cut = map_->md_->local_bound_min_ - Eigen::Vector3i(map_->mp_->local_map_margin_,
                                                                             map_->mp_->local_map_margin_,
                                                                             map_->mp_->local_map_margin_);
@@ -668,18 +669,47 @@ void MapROS::cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img) {
     map_->boundIndex(min_cut);
     map_->boundIndex(max_cut);
 
+    // 遍历 X 和 Y 轴（水平面）
     for (int x = min_cut(0); x <= max_cut(0); ++x)
       for (int y = min_cut(1); y <= max_cut(1); ++y)
       {
-        Eigen::Vector3d pos;
-        map_->indexToPos(Eigen::Vector3i(x, y, 1), pos);
-        pos(2) = esdf_slice_height_;
-        dist = map_->getDistance(pos);
+        // 【核心修改】：投影逻辑
+        // 对于每个 (x, y)，我们要找到垂直方向 (z) 上最小的距离值
+        double min_dist_in_column = max_dist; // 初始化为最大值
+
+        // 遍历 Z 轴范围 (从 min_z 到 max_z)
+        for (int z = min_cut(2); z <= max_cut(2); ++z) {
+            Eigen::Vector3d pos_check;
+            map_->indexToPos(Eigen::Vector3i(x, y, z), pos_check);
+
+            if (pos_check(2) > visualization_truncate_height_)
+              continue;
+            if (pos_check(2) < visualization_truncate_low_)
+              continue;
+            
+            // 获取该 3D 点的距离
+            double d = map_->getDistance(pos_check);
+            
+            // 更新最小值
+            if (d < min_dist_in_column) {
+                min_dist_in_column = d;
+            }
+        }
+
+        // 将找到的最小距离作为该 (x,y) 点的显示值
+        dist = min_dist_in_column;
         dist = min(dist, max_dist);
         dist = max(dist, min_dist);
+
+        // 计算显示位置
+        Eigen::Vector3d pos;
+        // 这里 Z 轴依然固定在切片高度，或者设为 0，方便在平面上查看
+        map_->indexToPos(Eigen::Vector3i(x, y, 1), pos); 
         pt.x = pos(0);
         pt.y = pos(1);
-        pt.z = pos(2);
+        pt.z = esdf_slice_height_; // 投影到一个固定高度平面上显示
+
+        // 颜色强度映射：距离越近越黑/红，越远越白/绿 (取决于 Rviz 配色)
         pt.intensity = (dist - min_dist) / (max_dist - min_dist);
         cloud.push_back(pt);
       }
@@ -692,7 +722,5 @@ void MapROS::cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img) {
     pcl::toROSMsg(cloud, cloud_msg);
 
     esdf_pub_.publish(cloud_msg);
-
-    // ROS_INFO("pub esdf");
   }
-}
+} // namespace fast_planner

@@ -142,6 +142,7 @@ if __name__ == '__main__':
         rospy.init_node('sim_teleop')
         rate = rospy.Rate(rospy.get_param('~hz', 1))
         # keyboardLoop()
+        print("Teleop node started, waiting for goal messages...")
         rospy.spin()
     except rospy.ROSInterruptException:
         pass

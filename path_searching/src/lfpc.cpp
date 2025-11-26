@@ -142,7 +142,7 @@ namespace cane_planner
 
         COM_pos_(0) = x_t_ + support_leg_pos_(0);
         COM_pos_(1) = y_t_ + support_leg_pos_(1);
-        COM_pos_(2) = 0.1;
+        COM_pos_(2) = 0.1;//设置路径高度
     }
 
     Vector4d LFPC::calculateXtVt(double t)
