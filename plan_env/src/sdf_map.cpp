@@ -642,5 +642,10 @@ double SDFMap::getDistWithGrad(const Eigen::Vector3d& pos, Eigen::Vector3d& grad
 
   return dist;
 }
+
+double SDFMap::getGroundHeight() {
+    return mp_->ground_height_;
+}
+
 }  // namespace fast_planner
 // SDFMap

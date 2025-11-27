@@ -144,9 +144,10 @@ namespace cane_planner
             continue;
           }
           Eigen::Vector3d pro_pos_3d;
-          pro_pos_3d << pro_pos(0), pro_pos(1), 0.1; // z=0.1，设置路径高度
+          pro_pos_3d << pro_pos(0), pro_pos(1), collision_->getSliceHeight(); // 设置路径高度
           /* collision free */
-          if (collision_->sdf_map_->getInflateOccupancy(pro_pos_3d) == 1)
+          if (!collision_->isTraversable(pro_pos(0), pro_pos(1),collision_->getSliceHeight()))
+          // if (!collision_->isTraversable(pro_pos_3d))
           {
             // cout << "Can't Traversable" << endl;
             continue;

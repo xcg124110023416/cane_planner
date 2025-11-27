@@ -7,8 +7,11 @@
     <arg name="odometry_topic" value = "odom"/>
     <!-- simulation opion -->
     <arg name="simulation" value="true"/>
-    <arg name="slice_height" value="1.0"/>
+    <!-- 检测高度，与默认rviz平面高度（即z=0）一致 -->
+    <arg name="slice_height" value="0"/>
     <arg name="kin_horizon" value="200.0"/>
+    <!-- 与障碍物距离的安全阈值 -->
+    <arg name="collision_margin" value="0.3"/>
     <!-- map size -->
     <arg name="map_size_x" value="40.0"/>
     <arg name="map_size_y" value="40.0"/>
@@ -35,9 +38,10 @@
         <param name="sdf_map/map_size_y" value="$(arg map_size_y)" />
         <param name="sdf_map/map_size_z" value="$(arg map_size_z)" />
         <param name="sdf_map/obstacles_inflation" value="0.3" />
-        <param name="sdf_map/local_bound_inflate" value="0.1"/>
+        <param name="sdf_map/local_bound_inflate" value="0.0"/>
         <param name="sdf_map/local_map_margin" value="50"/>
-        <param name="sdf_map/ground_height" value="-0.3"/>
+        <!-- 预定义空间的z轴最低高度 -->
+        <param name="sdf_map/ground_height" value="-1"/>
         <param name="sdf_map/default_dist" value="5.0"/>
         <!-- local fusion -->
         <param name="sdf_map/p_hit" value="0.65"/>
@@ -84,7 +88,7 @@
         <param name="astar/lambda_heu" value="0.05"/>
         <param name="astar/allocate_num" value="1000000"/>
         <!-- collision set -->
-        <param name="Collision/margin" value="0.3"/>
+        <param name="Collision/margin" value="$(arg collision_margin)"/>
         <param name="Collision/SliceHeight" value="$(arg slice_height)"/>
         <!-- lfpc set -->
         <param name="lfpc/delta_t" value="0.1"/>

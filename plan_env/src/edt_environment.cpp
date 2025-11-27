@@ -39,7 +39,7 @@ double EDTEnvironment::distToBox(int idx, const Eigen::Vector3d& pos, const doub
 
 double EDTEnvironment::minDistToAllBox(const Eigen::Vector3d& pos, const double& time) {
   double dist = 10000000.0;
-  for (int i = 0; i < obj_prediction_->size(); i++) {
+  for (size_t i = 0; i < obj_prediction_->size(); i++) {
     double di = distToBox(i, pos, time);
     if (di < dist) dist = di;
   }

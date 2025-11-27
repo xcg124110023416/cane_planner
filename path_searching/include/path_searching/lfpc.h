@@ -13,6 +13,8 @@
 #include <ros/console.h>
 #include <ros/ros.h>
 
+#include <plan_env/collision_detection.h>
+
 using namespace std;
 using namespace Eigen;
 
@@ -28,6 +30,9 @@ namespace cane_planner
         double h_;
         double t_c_;
         int step_num_;
+
+        // EDTEnvironment::Ptr edt_environment_;
+        CollisionDetection::Ptr collision_;
 
         // cycle init params
         double x_0_, vx_0_, y_0_, vy_0_;
@@ -59,6 +64,11 @@ namespace cane_planner
         void SetCtrlParams(Vector3d input);
         void reset(Vector3d init_v_state, Vector3d COM_init_pos,
                    char cur_support_leg, int step_num);
+
+        void setCollisionDetection(CollisionDetection::Ptr collision)
+        {
+            collision_ = collision;
+        }
 
         // API function
         std::vector<Eigen::Vector3d> getStepCOMPath();

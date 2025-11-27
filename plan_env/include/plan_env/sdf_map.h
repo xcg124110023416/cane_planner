@@ -65,7 +65,12 @@ public:
   double getResolution();
   int getVoxelNum();
 
-private:
+  double getGroundHeight(); 
+
+  typedef std::shared_ptr<SDFMap> Ptr;
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+  private:
   void clearAndInflateLocalMap();
   void inflatePoint(const Eigen::Vector3i& pt, int step, vector<Eigen::Vector3i>& pts);
   void setCacheOccupancy(const int& adr, const int& occ);
@@ -80,9 +85,6 @@ private:
 
   friend MapROS;
 
-public:
-  typedef std::shared_ptr<SDFMap> Ptr;
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
 struct MapParam {

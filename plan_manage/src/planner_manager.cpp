@@ -29,6 +29,7 @@ namespace cane_planner
         // init lfpc model
         lfpc_model_.reset(new LFPC);
         lfpc_model_->initializeModel(nh);
+        lfpc_model_->setCollisionDetection(collision_);
         // init astar planner
         ROS_WARN(" kinodynamic planer start");
         kin_finder_.reset(new KinodynamicAstar);
@@ -90,7 +91,7 @@ namespace cane_planner
             success2 = callKinodynamicAstarPlan();
             if (success1)
             {
-                displayAstar();
+                // displayAstar();
                 publishAstarPath();
             }
             if (success2)
@@ -487,7 +488,7 @@ namespace cane_planner
             geometry_msgs::PoseStamped this_pose_stamped;
             this_pose_stamped.pose.position.x = list[i](0);
             this_pose_stamped.pose.position.y = list[i](1);
-            this_pose_stamped.pose.position.z = 0.0;
+            this_pose_stamped.pose.position.z = collision_->getSliceHeight();
             this_pose_stamped.pose.orientation.x = 0.0;
             this_pose_stamped.pose.orientation.y = 0.0;
             this_pose_stamped.pose.orientation.z = 0.0;
@@ -511,7 +512,7 @@ namespace cane_planner
             geometry_msgs::PoseStamped this_pose_stamped;
             this_pose_stamped.pose.position.x = list[i](0);
             this_pose_stamped.pose.position.y = list[i](1);
-            this_pose_stamped.pose.position.z = 0.0;
+            this_pose_stamped.pose.position.z = collision_->getSliceHeight();
             this_pose_stamped.pose.orientation.x = 0.0;
             this_pose_stamped.pose.orientation.y = 0.0;
             this_pose_stamped.pose.orientation.z = 0.0;
@@ -553,7 +554,7 @@ namespace cane_planner
         {
             pt.x = list[i](0);
             pt.y = list[i](1);
-            pt.z = 0;
+            pt.z = 0.0;
             mk.points.push_back(pt);
         }
 
@@ -590,7 +591,7 @@ namespace cane_planner
         {
             pt.x = list[i](0);
             pt.y = list[i](1);
-            pt.z = 0;
+            pt.z = collision_->getSliceHeight();
             mk.points.push_back(pt);
         }
         // publish traj
@@ -620,7 +621,7 @@ namespace cane_planner
         {
             pt.x = list[i](0);
             pt.y = list[i](1);
-            pt.z = 0;
+            pt.z = collision_->getSliceHeight();
             mk.points.push_back(pt);
         }
         // publish feet

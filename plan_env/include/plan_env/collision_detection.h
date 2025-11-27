@@ -21,10 +21,11 @@ namespace cane_planner
     double margin_;
     double slice_height_;
     Eigen::Vector3d slice_height_list_;
+    
 
   public:
-    shared_ptr<SDFMap> sdf_map_;
     
+    shared_ptr<SDFMap> sdf_map_;
     CollisionDetection(){};
     ~CollisionDetection();
 
@@ -36,7 +37,8 @@ namespace cane_planner
         \brief evaluates whether the configuration is safe
         \return true if it is traversable, else false
     */
-    bool isTraversable(Eigen::Vector2d pos);
+    bool isTraversable(double x, double y, double slice_height);
+    bool isTraversable(Eigen::Vector3d pos);
     bool isTraversable(Eigen::Vector3d state, double times);
     double getCollisionDistance(Eigen::Vector2d pos);
 
@@ -46,6 +48,9 @@ namespace cane_planner
     {
       sdf_map_->getRegion(ori, size);
     }
+
+    double getSliceHeight() const { return slice_height_; }
+
 
     typedef shared_ptr<CollisionDetection> Ptr;
   };
