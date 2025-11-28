@@ -187,7 +187,8 @@ namespace cane_planner
                 for (size_t i = 0; i < pur_state.com_path.size(); i++)
                 {
                     pro_pos << pur_state.com_path[i];
-                    if (collision_->sdf_map_->getInflateOccupancy(pro_pos) == 1)
+                    // if (collision_->sdf_map_->getInflateOccupancy(pro_pos) == 1)
+                    if (!collision_->isTraversable(pro_pos(0), pro_pos(1)))
                     {
                         safe_flag = false;
                         break;

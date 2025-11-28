@@ -9,13 +9,15 @@
     <arg name="simulation"/>
     <arg name="planner"/>
     <arg name="slice_height"/>
+    <arg name="collision_margin"/>
+
     <arg name="map_size_x"/>
     <arg name="map_size_y"/>
     <arg name="map_size_z"/>
     <arg name="kin_horizon"/>
 
 
-    <node pkg="plan_manage" name="kin_replan_node" type="kin_replan_node" output="screen">
+    <node pkg="plan_manage" name="kin_replan_node" type="kin_replan_node" output="screen" >
         <remap from ="/map_ros/odom"  to = "$(arg odometry_topic)"/>
         <remap from ="/map_ros/cloud" to = "$(arg cloud_topic)"/>
         <remap from ="/map_ros/depth" to = "$(arg depth_topic)"/>
@@ -36,8 +38,9 @@
         <param name="sdf_map/obstacles_inflation" value="0.1" />
         <!-- sdf_map/local_bound_inflate原本0.4 -->
         <param name="sdf_map/local_bound_inflate" value="0.0"/>
-        <param name="sdf_map/local_map_margin" value="50"/>
-        <param name="sdf_map/ground_height" value="-0.3"/>
+        <param name="sdf_map/local_map_margin" value="20"/>
+        <!-- 预定义空间的z轴最低高度 -->
+        <param name="sdf_map/ground_height" value="-1"/>
         <param name="sdf_map/default_dist" value="5.0"/>
         <!-- local fusion -->
         <param name="sdf_map/p_hit" value="0.65"/>
@@ -45,8 +48,8 @@
         <param name="sdf_map/p_min" value="0.10"/>
         <param name="sdf_map/p_max" value="0.90"/>
         <param name="sdf_map/p_occ" value="0.80"/>
-        <param name="sdf_map/min_ray_length" value="0.1"/>
-        <param name="sdf_map/max_ray_length" value="20.0"/>
+        <param name="sdf_map/min_ray_length" value="0.5"/>
+        <param name="sdf_map/max_ray_length" value="5.0"/>
         <param name="sdf_map/virtual_ceil_height" value="3.2"/>
         <param name="sdf_map/optimistic" value="true" type="bool"/>
         <param name="sdf_map/signed_dist" value="false" type="bool"/>
@@ -84,7 +87,7 @@
         <param name="astar/lambda_heu" value="0.01"/>
         <param name="astar/allocate_num" value="100000"/>
         <!-- collision set -->
-        <param name="Collision/margin" value="0.4"/>
+        <param name="Collision/margin" value="$(arg collision_margin)"/>
         <param name="Collision/SliceHeight" value="$(arg slice_height)"/>
         <!-- lfpc set -->
         <param name="lfpc/delta_t" value="0.1"/>

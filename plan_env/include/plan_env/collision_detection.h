@@ -37,7 +37,7 @@ namespace cane_planner
         \brief evaluates whether the configuration is safe
         \return true if it is traversable, else false
     */
-    bool isTraversable(double x, double y, double slice_height);
+    bool isTraversable(double x, double y);
     bool isTraversable(Eigen::Vector3d pos);
     bool isTraversable(Eigen::Vector3d state, double times);
     double getCollisionDistance(Eigen::Vector2d pos);

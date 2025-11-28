@@ -12,7 +12,10 @@
         <arg name="sensor_pose_topic" value="pose"/>
         <!-- simulation opion -->
         <arg name="simulation" value="false"/>
-        <arg name="slice_height" value="0.1"/>
+
+        <arg name="slice_height" value="0.0"/>
+        <arg name="collision_margin" value="0.3"/>
+        
         <arg name="kin_horizon" value="5.0"/>
         <!-- map size -->
         <arg name="map_size_x" value="40.0"/>

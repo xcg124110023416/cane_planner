@@ -25,11 +25,11 @@ namespace cane_planner
     }
 
     // 修改后的 3D 碰撞检测函数
-bool CollisionDetection::isTraversable(double x, double y, double slice_height) {
+bool CollisionDetection::isTraversable(double x, double y) {
     // foot_z: 脚部高度，稍微抬高一点，容忍地面的微小不平整
-    double foot_z = slice_height - 0.6; 
+    double foot_z = slice_height_ - 0.6; 
     // head_z: 头部高度，导盲杖系统的关键保护区域
-    double head_z = slice_height + 1.4; 
+    double head_z = slice_height_ + 1.4; 
     // check_step: 检查步长，建议设为分辨率的 2-3 倍 (0.2 - 0.3m)
     double check_step = 0.3;        
     // ===  身体圆柱体碰撞检测 (防止撞头/撞腰) ===
@@ -38,13 +38,13 @@ bool CollisionDetection::isTraversable(double x, double y, double slice_height) 
         
         double dist = sdf_map_->getDistance(check_pt);
         
-        if (dist < 0.15) { 
+        if (dist < margin_) { 
             return false; 
         }
     }
     // 额外检查一下头顶 
     Eigen::Vector3d head_pt(x, y, head_z);
-    if (sdf_map_->getDistance(head_pt) < 0.15) {
+    if (sdf_map_->getDistance(head_pt) < margin_) {
         return false;
     }
 

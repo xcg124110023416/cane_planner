@@ -79,27 +79,27 @@ namespace cane_planner
         return true;
       }
       // horizon 为最大搜索距离, 如果到达了最大搜索距离, 但是还是没有找到路径, 则认为没有路径
-      // if (reach_horizon >= horizon_)
-      // {
-      //   double cur_near_end = (cur_node->position - end_pt).norm();
-      //   double start_near_end = (start_pt - end_pt).norm();
-      //   if (cur_near_end <= start_near_end)
-      //   {
-      //     std::cout << "[Astar](horizon):---------------------- " << use_node_num_ << std::endl;
-      //     std::cout << use_node_num_ << "," << iter_num_ << ",";
-      //     terminate_node = cur_node;
+      if (reach_horizon >= horizon_)
+      {
+        double cur_near_end = (cur_node->position - end_pt).norm();
+        double start_near_end = (start_pt - end_pt).norm();
+        if (cur_near_end <= start_near_end)
+        {
+          std::cout << "[Astar](horizon):---------------------- " << use_node_num_ << std::endl;
+          std::cout << use_node_num_ << "," << iter_num_ << ",";
+          terminate_node = cur_node;
 
-      //     retrievePath(terminate_node);
-      //     has_path_ = true;
+          retrievePath(terminate_node);
+          has_path_ = true;
 
-      //     return true;
-      //   }
-      //   else
-      //   {
-      //     std::cout << "[Astar](horizon):---------------------- " << use_node_num_ << std::endl;
-      //     std::cout << "!---in horizion no find path--" << std::endl;
-      //   }
-      // }
+          return true;
+        }
+        else
+        {
+          std::cout << "[Astar](horizon):---------------------- " << use_node_num_ << std::endl;
+          std::cout << "!---in horizion no find path--" << std::endl;
+        }
+      }
       /* ---------- pop node and add to close set ---------- */
       open_set_.pop();
       cur_node->node_state = IN_CLOSE_SET;
@@ -146,7 +146,7 @@ namespace cane_planner
           Eigen::Vector3d pro_pos_3d;
           pro_pos_3d << pro_pos(0), pro_pos(1), collision_->getSliceHeight(); // 设置路径高度
           /* collision free */
-          if (!collision_->isTraversable(pro_pos(0), pro_pos(1),collision_->getSliceHeight()))
+          if (!collision_->isTraversable(pro_pos(0), pro_pos(1)))
           // if (!collision_->isTraversable(pro_pos_3d))
           {
             // cout << "Can't Traversable" << endl;

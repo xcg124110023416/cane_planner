@@ -137,6 +137,7 @@ namespace cane_planner
         ROS_WARN(" LFPC model start");
         lfpc_model_.reset(new LFPC);
         lfpc_model_->initializeModel(nh);
+        lfpc_model_->setCollisionDetection(collision_);
         // init kin planner
         ROS_WARN(" kinodynamic planer start");
         kin_finder_.reset(new KinodynamicAstar);
