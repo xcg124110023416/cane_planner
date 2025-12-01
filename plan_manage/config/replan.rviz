@@ -139,7 +139,7 @@ Visualization Manager:
           Selectable: true
           Size (Pixels): 3
           Size (m): 0.05000000074505806
-          Style: Points
+          Style: Flat Squares
           Topic: /sdf_map/occupancy_local
           Unreliable: false
           Use Fixed Frame: true
@@ -361,7 +361,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/XYOrbit
-      Distance: 14.869089126586914
+      Distance: 19.14884376525879
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -369,17 +369,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.800000011920929
       Focal Point:
-        X: -2.8324103355407715
-        Y: -1.8713312149047852
+        X: -2.1013705730438232
+        Y: -2.7629380226135254
         Z: 7.4896306614391506e-06
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.5697963237762451
+      Pitch: 1.2847965955734253
       Target Frame: <Fixed Frame>
-      Yaw: 4.71673059463501
+      Yaw: 4.766737461090088
     Saved: ~
 Window Geometry:
   Displays:

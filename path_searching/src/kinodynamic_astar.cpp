@@ -441,7 +441,7 @@ namespace cane_planner
     {
         double dx = fabs(x1(0) - x2(0));
         double dy = fabs(x1(1) - x2(1));
-        double h = (dx + dy) + (sqrt(2.0) - 2) * min(dx, dy);
+        double h = (dx + dy) + (sqrt(2.0) - 1) * min(dx, dy);
 
         // std::cout << "f heu is : " << tie_breaker_ * h << std::endl;
 

@@ -16,11 +16,12 @@
         <arg name="depth_topic" value="/camera/aligned_depth_to_color/image_raw"/>
         <arg name="sensor_pose_topic" value="/plvins_estimator/camera_pose"/>
         <!-- using cloud and odom -->
-        <arg name="odometry_topic" value = "/Odometry"/>
+        <arg name="odometry_topic" value = "$(arg odometry_topic)"/>
         <arg name="cloud_topic" value = "/cloud_registered_body"/>
         <!-- experice set -->
         <arg name="simulation" value="false"/>
-        <arg name="slice_height" value="0.1"/>
+        <arg name="collision_margin" value="0.2"/>
+        <arg name="slice_height" value="0.0"/>
         <arg name="kin_horizon" value="4.0"/>
         <!-- map size -->
         <arg name="map_size_x" value="100.0"/>

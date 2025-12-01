@@ -85,6 +85,8 @@ public:
 
   friend MapROS;
 
+  bool is_simulation_;  
+
 };
 
 struct MapParam {

@@ -43,6 +43,8 @@ namespace fast_planner
     node_.param("map_ros/show_all_map", show_all_map_, false);
     node_.param("map_ros/frame_id", frame_id_, std::string("world"));
 
+    node_.getParam("map_ros/is_simulation", map_->is_simulation_);
+
     proj_points_.resize(640 * 480 / (skip_pixel_ * skip_pixel_));
     point_cloud_.points.resize(640 * 480 / (skip_pixel_ * skip_pixel_));
     // proj_points_.reserve(640 * 480 / map_->mp_->skip_pixel_ / map_->mp_->skip_pixel_);
@@ -84,8 +86,11 @@ namespace fast_planner
     odom_sub_.reset(
         new message_filters::Subscriber<nav_msgs::Odometry>(node_, "/map_ros/odom", 25));
 
-    // register callback function
-    // depth+pose
+
+    if(map_ ->is_simulation_)
+    {
+      // register callback function
+    //depth+pose
     sync_image_pose_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyImagePose>(
         MapROS::SyncPolicyImagePose(100), *depth_sub_, *pose_sub_));
     sync_image_pose_->registerCallback(boost::bind(&MapROS::depthPoseCallback, this, _1, _2));
@@ -97,20 +102,18 @@ namespace fast_planner
     sync_cloud_pose_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudPose>(
         MapROS::SyncPolicyCloudPose(100), *cloud_sub_, *pose_sub_));
     sync_cloud_pose_->registerCallback(boost::bind(&MapROS::cloudPoseCallback, this, _1, _2));
-    // // cloud+odom
+    // cloud+odom
     // sync_cloud_odom_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudOdom>(
     //     MapROS::SyncPolicyCloudOdom(100), *cloud_sub_, *odom_sub_));
     // sync_cloud_odom_->registerCallback(boost::bind(&MapROS::cloudOdomCallback, this, _1, _2));
-
-
-
+    }else{
     // use odometry and point cloud
     indep_cloud_sub_ =
         node_.subscribe<sensor_msgs::PointCloud2>("/map_ros/cloud", 10, &MapROS::cloudCallback, this);
     indep_odom_sub_ =
         node_.subscribe<nav_msgs::Odometry>("/map_ros/odom", 10, &MapROS::odomCallback, this);
-
-
+    }
+    
     map_start_time_ = ros::Time::now();
   }
 

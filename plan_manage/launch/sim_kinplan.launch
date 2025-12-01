@@ -9,7 +9,7 @@
     <arg name="simulation" value="true"/>
     <!-- 检测高度，与默认rviz平面高度（即z=0）一致 -->
     <arg name="slice_height" value="0"/>
-    <arg name="horizon" value="5.0"/>
+    <arg name="horizon" value="200.0"/>
     <!-- 与障碍物距离的安全阈值 -->
     <arg name="collision_margin" value="0.3"/>
     <!-- map size -->
@@ -73,9 +73,11 @@
         <param name="map_ros/show_esdf_time" value="false"/>
         <param name="map_ros/show_all_map" value="true"/>
         <param name="map_ros/frame_id" value="world"/>
+        
+        <param name="map_ros/is_simulation" value="$(arg simulation)" type="bool"/>
         <!-- kin astar  -->
         <param name="kinastar/resolution_astar" value="0.1"/>
-        <param name="kinastar/lambda_heu" value="2.5"/>
+        <param name="kinastar/lambda_heu" value="0.5"/>
         <param name="kinastar/allocate_num" value="100000"/>
         <!-- kin astar contorl param -->
         <param name="kinastar/horizon" value="$(arg horizon)"/>
