@@ -38,7 +38,7 @@
         <param name="sdf_map/obstacles_inflation" value="0.1" />
         <!-- sdf_map/local_bound_inflate原本0.4 -->
         <param name="sdf_map/local_bound_inflate" value="0.0"/>
-        <param name="sdf_map/local_map_margin" value="50"/>
+        <param name="sdf_map/local_map_margin" value="10"/>
         <!-- 预定义空间的z轴最低高度 -->
         <param name="sdf_map/ground_height" value="-1"/>
         <param name="sdf_map/default_dist" value="5.0"/>

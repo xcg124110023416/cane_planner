@@ -20,7 +20,7 @@
         <arg name="cloud_topic" value = "/cloud_registered_body"/>
         <!-- experice set -->
         <arg name="simulation" value="false"/>
-        <arg name="collision_margin" value="0.2"/>
+        <arg name="collision_margin" value="0.05"/>
         <arg name="slice_height" value="0.0"/>
         <arg name="kin_horizon" value="4.0"/>
         <!-- map size -->

@@ -11,6 +11,9 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   geometry_msgs
   pcl_conversions
+  nav_msgs
+  tf2_ros           # 必须添加
+  tf2_geometry_msgs # 建议添加
 )
 find_package(PCL REQUIRED)
 find_package(Eigen3 REQUIRED)
