@@ -72,7 +72,7 @@
         <param name="map_ros/show_occ_time" value="false"/>
         <param name="map_ros/show_esdf_time" value="false"/>
         <param name="map_ros/show_all_map" value="true"/>
-        <param name="map_ros/frame_id" value="world"/>
+        <param name="map_ros/frame_id" value="body"/>
 
         <param name="map_ros/is_simulation" value="$(arg simulation)" type="bool"/>
         <!-- kin astar  -->

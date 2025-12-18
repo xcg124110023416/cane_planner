@@ -41,7 +41,7 @@ namespace fast_planner
     node_.param("map_ros/show_occ_time", show_occ_time_, false);
     node_.param("map_ros/show_esdf_time", show_esdf_time_, false);
     node_.param("map_ros/show_all_map", show_all_map_, false);
-    node_.param("map_ros/frame_id", frame_id_, std::string("world"));
+    node_.param("map_ros/frame_id", frame_id_, std::string("body"));  //基于雷达坐标系发布的点云信息
 
     node_.getParam("map_ros/is_simulation", map_->is_simulation_);
 
@@ -119,19 +119,18 @@ namespace fast_planner
 
   void MapROS::visCallback(const ros::TimerEvent &e)
   {
-    std::lock_guard<std::mutex> lock(map_mutex_); // 【等待锁释放后，再上锁】
     publishMapLocal();
     if (show_all_map_)
     {
       // Limit the frequency of all map
       static double tpass = 0.0;
       tpass += (e.current_real - e.last_real).toSec();
-      if (tpass > 0.1)
+      if (!esdf_need_update_)
       {
         publishMapAll();
-        publishUnknown();
+        // publishUnknown();
         publishESDF();
-        publishUpdateRange();
+        // publishUpdateRange();
         tpass = 0.0;
       }
     }
@@ -141,7 +140,6 @@ namespace fast_planner
 
   void MapROS::updateESDFCallback(const ros::TimerEvent & /*event*/)
   {
-    std::lock_guard<std::mutex> lock(map_mutex_); // 【自动上锁】
     if (!esdf_need_update_)  return;
     auto t1 = ros::Time::now();
 
@@ -706,7 +704,7 @@ void MapROS::cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img) {
 
         // 计算显示位置
         Eigen::Vector3d pos;
-        // 这里 Z 轴依然固定在切片高度，或者设为 0，方便在平面上查看
+        // 这里 Z 轴依然固定在切片高度，方便在平面上查看
         map_->indexToPos(Eigen::Vector3i(x, y, 1), pos); 
         pt.x = pos(0);
         pt.y = pos(1);
@@ -720,7 +718,7 @@ void MapROS::cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img) {
     cloud.width = cloud.points.size();
     cloud.height = 1;
     cloud.is_dense = true;
-    cloud.header.frame_id = frame_id_;
+    cloud.header.frame_id = "world";
     sensor_msgs::PointCloud2 cloud_msg;
     pcl::toROSMsg(cloud, cloud_msg);
 

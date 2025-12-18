@@ -114,14 +114,14 @@ int main(int argc, char **argv)
     
     transformStamped.header.stamp = ros::Time::now();
     transformStamped.header.frame_id = "world";       // 父坐标系
-    transformStamped.child_frame_id = "cane_base";    // 子坐标系 (你的机器人base)
+    transformStamped.child_frame_id = "cane_base";    // 子坐标系
     
     // 将 odom 中的位置赋值给 TF
     transformStamped.transform.translation.x = odom.pose.pose.position.x;
     transformStamped.transform.translation.y = odom.pose.pose.position.y;
     transformStamped.transform.translation.z = odom.pose.pose.position.z;
     
-    // 将 odom 中的朝向(四元数)赋值给 TF (这是解决你问题的关键！)
+    // 将 odom 中的朝向(四元数)赋值给 TF 
     transformStamped.transform.rotation = odom.pose.pose.orientation;
 
     // 发送变换
