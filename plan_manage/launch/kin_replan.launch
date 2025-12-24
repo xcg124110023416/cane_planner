@@ -17,10 +17,10 @@
         <arg name="sensor_pose_topic" value="/plvins_estimator/camera_pose"/>
         <!-- using cloud and odom -->
         <arg name="odometry_topic" value = "$(arg odometry_topic)"/>
-        <arg name="cloud_topic" value = "/cloud_registered_body"/>
+        <arg name="cloud_topic" value = "/cloud_registered"/>
         <!-- experice set -->
         <arg name="simulation" value="false"/>
-        <arg name="collision_margin" value="0.05"/>
+        <arg name="collision_margin" value="0.1"/>
         <arg name="slice_height" value="0.0"/>
         <arg name="kin_horizon" value="4.0"/>
         <!-- map size -->

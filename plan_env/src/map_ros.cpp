@@ -102,16 +102,16 @@ namespace fast_planner
     sync_cloud_pose_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudPose>(
         MapROS::SyncPolicyCloudPose(100), *cloud_sub_, *pose_sub_));
     sync_cloud_pose_->registerCallback(boost::bind(&MapROS::cloudPoseCallback, this, _1, _2));
-    // cloud+odom
-    // sync_cloud_odom_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudOdom>(
-    //     MapROS::SyncPolicyCloudOdom(100), *cloud_sub_, *odom_sub_));
-    // sync_cloud_odom_->registerCallback(boost::bind(&MapROS::cloudOdomCallback, this, _1, _2));
     }else{
     // use odometry and point cloud
-    indep_cloud_sub_ =
-        node_.subscribe<sensor_msgs::PointCloud2>("/map_ros/cloud", 10, &MapROS::cloudCallback, this);
-    indep_odom_sub_ =
-        node_.subscribe<nav_msgs::Odometry>("/map_ros/odom", 10, &MapROS::odomCallback, this);
+    // indep_cloud_sub_ =
+    //     node_.subscribe<sensor_msgs::PointCloud2>("/map_ros/cloud", 10, &MapROS::cloudCallback, this);
+    // indep_odom_sub_ =
+    //     node_.subscribe<nav_msgs::Odometry>("/map_ros/odom", 10, &MapROS::odomCallback, this);
+    // cloud+odom
+    sync_cloud_odom_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudOdom>(
+        MapROS::SyncPolicyCloudOdom(100), *cloud_sub_, *odom_sub_));
+    sync_cloud_odom_->registerCallback(boost::bind(&MapROS::cloudOdomCallback, this, _1, _2));
     }
     
     map_start_time_ = ros::Time::now();
