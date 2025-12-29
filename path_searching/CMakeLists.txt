@@ -13,13 +13,14 @@ find_package(catkin REQUIRED COMPONENTS
   visualization_msgs
   plan_env
   cv_bridge
+  plan_ctrl
 )
 
 
 catkin_package(
  INCLUDE_DIRS include
  LIBRARIES path_searching
- CATKIN_DEPENDS plan_env
+ CATKIN_DEPENDS plan_env plan_ctrl
 #  DEPENDS system_lib
 )
 

@@ -41,9 +41,9 @@ namespace fast_planner
     node_.param("map_ros/show_occ_time", show_occ_time_, false);
     node_.param("map_ros/show_esdf_time", show_esdf_time_, false);
     node_.param("map_ros/show_all_map", show_all_map_, false);
-    node_.param("map_ros/frame_id", frame_id_, std::string("body"));  //基于雷达坐标系发布的点云信息
+    node_.param("map_ros/frame_id", frame_id_, std::string("world"));  //基于雷达坐标系发布的点云信息
 
-    node_.getParam("map_ros/is_simulation", map_->is_simulation_);
+    node_.param("map_ros/is_simulation", map_->is_simulation_, true);
 
     proj_points_.resize(640 * 480 / (skip_pixel_ * skip_pixel_));
     point_cloud_.points.resize(640 * 480 / (skip_pixel_ * skip_pixel_));
@@ -89,32 +89,33 @@ namespace fast_planner
 
     if(map_ ->is_simulation_)
     {
-      // register callback function
-    //depth+pose
-    sync_image_pose_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyImagePose>(
-        MapROS::SyncPolicyImagePose(100), *depth_sub_, *pose_sub_));
-    sync_image_pose_->registerCallback(boost::bind(&MapROS::depthPoseCallback, this, _1, _2));
-    // depth+odom
-    sync_image_odom_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyImageOdom>(
-        MapROS::SyncPolicyImageOdom(100), *depth_sub_, *odom_sub_));
-    sync_image_odom_->registerCallback(boost::bind(&MapROS::depthOdomCallback, this, _1, _2));
-    // cloud+pose
-    sync_cloud_pose_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudPose>(
-        MapROS::SyncPolicyCloudPose(100), *cloud_sub_, *pose_sub_));
-    sync_cloud_pose_->registerCallback(boost::bind(&MapROS::cloudPoseCallback, this, _1, _2));
-    }else{
-    // use odometry and point cloud
-    // indep_cloud_sub_ =
-    //     node_.subscribe<sensor_msgs::PointCloud2>("/map_ros/cloud", 10, &MapROS::cloudCallback, this);
-    // indep_odom_sub_ =
-    //     node_.subscribe<nav_msgs::Odometry>("/map_ros/odom", 10, &MapROS::odomCallback, this);
-    // cloud+odom
-    sync_cloud_odom_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudOdom>(
-        MapROS::SyncPolicyCloudOdom(100), *cloud_sub_, *odom_sub_));
-    sync_cloud_odom_->registerCallback(boost::bind(&MapROS::cloudOdomCallback, this, _1, _2));
+        // register callback function
+      //depth+pose
+      sync_image_pose_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyImagePose>(
+          MapROS::SyncPolicyImagePose(100), *depth_sub_, *pose_sub_));
+      sync_image_pose_->registerCallback(boost::bind(&MapROS::depthPoseCallback, this, _1, _2));
+      // depth+odom
+      sync_image_odom_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyImageOdom>(
+          MapROS::SyncPolicyImageOdom(100), *depth_sub_, *odom_sub_));
+      sync_image_odom_->registerCallback(boost::bind(&MapROS::depthOdomCallback, this, _1, _2));
+      // cloud+pose
+      sync_cloud_pose_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudPose>(
+          MapROS::SyncPolicyCloudPose(100), *cloud_sub_, *pose_sub_));
+      sync_cloud_pose_->registerCallback(boost::bind(&MapROS::cloudPoseCallback, this, _1, _2));
     }
-    
-    map_start_time_ = ros::Time::now();
+    else{
+      // use odometry and point cloud
+      // indep_cloud_sub_ =
+      //     node_.subscribe<sensor_msgs::PointCloud2>("/map_ros/cloud", 10, &MapROS::cloudCallback, this);
+      // indep_odom_sub_ =
+      //     node_.subscribe<nav_msgs::Odometry>("/map_ros/odom", 10, &MapROS::odomCallback, this);
+      // cloud+odom
+      sync_cloud_odom_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudOdom>(
+          MapROS::SyncPolicyCloudOdom(100), *cloud_sub_, *odom_sub_));
+      sync_cloud_odom_->registerCallback(boost::bind(&MapROS::cloudOdomCallback, this, _1, _2));
+    }
+      
+      map_start_time_ = ros::Time::now();
   }
 
   void MapROS::visCallback(const ros::TimerEvent &e)
@@ -383,6 +384,7 @@ void MapROS::cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img) {
                                  const nav_msgs::OdometryConstPtr &odom)
   {
     // tf from cam to odom
+    cout<< "cloudOdomCallback" << endl;
     geometry_msgs::PoseStamped pose_cam;
     pose_cam.header = odom->header;//camera_init
     pose_cam.pose = odom->pose.pose;

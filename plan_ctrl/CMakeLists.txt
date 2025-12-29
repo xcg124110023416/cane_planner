@@ -44,11 +44,9 @@ find_package(catkin REQUIRED COMPONENTS
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-  CATKIN_DEPENDS visualization_msgs
-#  INCLUDE_DIRS include
-#  LIBRARIES hypha_racecar
-#  CATKIN_DEPENDS geometry_msgs move_base roscp rospy std_msgs visualization_msgs
-#  DEPENDS system_lib
+  INCLUDE_DIRS include
+  LIBRARIES plan_ctrl_lib
+  CATKIN_DEPENDS visualization_msgs geometry_msgs tf roscpp serial std_msgs
 )
 
 ###########
@@ -57,23 +55,22 @@ catkin_package(
 
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
-# include_directories(include)
 include_directories(
   include
   ${catkin_INCLUDE_DIRS}
   ${EIGEN3_INCLUDE_DIR}
-
 )
 
 ## Declare a C++ library
-# add_library(${PROJECT_NAME}
-#   src/${PROJECT_NAME}/hypha_racecar.cpp
-# )
+add_library(plan_ctrl_lib
+  src/L1_controller_v2.cpp
+)
+target_link_libraries(plan_ctrl_lib ${catkin_LIBRARIES})
 
-add_executable(L1_controller_v2 src/L1_controller_v2.cpp)
-target_link_libraries(L1_controller_v2 ${catkin_LIBRARIES})
-add_dependencies(L1_controller_v2 hypha_racecar_generate_messages_cpp)
+add_executable(L1_controller_v2 src/L1_controller_node.cpp)
+target_link_libraries(L1_controller_v2 plan_ctrl_lib ${catkin_LIBRARIES})
+# add_dependencies(L1_controller_v2_node hypha_racecar_generate_messages_cpp) # This seems to be from a template, maybe not needed if no messages are generated in this package.
 
 add_executable(controller_xcg src/controller_xcg.cpp)
 target_link_libraries(controller_xcg ${catkin_LIBRARIES})
-add_dependencies(controller_xcg hypha_racecar_generate_messages_cpp)
+# add_dependencies(controller_xcg hypha_racecar_generate_messages_cpp)

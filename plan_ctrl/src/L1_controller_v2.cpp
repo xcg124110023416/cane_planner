@@ -53,54 +53,7 @@ along with hypha_racecar.  If not, see <http://www.gnu.org/licenses/>.
 /********************/
 /* CLASS DEFINITION */
 /********************/
-class L1Controller
-{
-public:
-    L1Controller();
-    void initMarker();
-    bool isForwardWayPt(const geometry_msgs::Point &wayPt, const geometry_msgs::Pose &carPose);
-    bool isWayPtAwayFromLfwDist(const geometry_msgs::Point &wayPt, const geometry_msgs::Point &car_pos);
-    double getYawFromPose(const geometry_msgs::Pose &carPose);
-    double getEta(const geometry_msgs::Pose &carPose);
-    double getCar2GoalDist();
-    double getL1Distance(const double &_Vcmd);
-    double getSteeringAngle(double eta);
-    double getGasInput(const float &current_v);
-    void Set(uint8_t cmd, int16_t data);
-    geometry_msgs::Point get_odom_car2WayPtVec(const geometry_msgs::Pose &carPose);
-
-private:
-    ros::NodeHandle n_;
-    ros::Subscriber odom_sub, path_sub, goal_sub, way_sub;
-    ros::Publisher pub_, marker_pub;
-    ros::Timer timer1, timer2;
-    tf::TransformListener tf_listener;
-
-    visualization_msgs::Marker points, line_strip, goal_circle;
-    geometry_msgs::Twist cmd_vel;
-    geometry_msgs::Point odom_goal_pos;
-    nav_msgs::Odometry odom;
-    nav_msgs::Path map_path, odom_path;
-
-    // serial
-    serial::Serial ser_;
-    bool use_ser_flag_;
-    int plan_;
-
-    double L, Lfw, Lrv, Vcmd, lfw, lrv, steering, u, v;
-    double Gas_gain, baseAngle, Angle_gain, goalRadius, link_length, wheel_radius;
-    int controller_freq, baseSpeed;
-    bool foundForwardPt, goal_received, goal_reached;
-    bool have_odom;
-
-    void odomCB(const nav_msgs::Odometry::ConstPtr &odomMsg);
-    void pathCB(const nav_msgs::Path::ConstPtr &pathMsg);
-    void goalCB(const geometry_msgs::PoseStamped::ConstPtr &goalMsg);
-    void waypointCB(const nav_msgs::PathConstPtr &msg);
-    void goalReachingCB(const ros::TimerEvent &);
-    void controlLoopCB(const ros::TimerEvent &);
-
-}; // end of class
+#include "plan_ctrl/L1_controller_v2.h"
 
 L1Controller::L1Controller()
 {
@@ -167,19 +120,22 @@ L1Controller::L1Controller()
         {
             ROS_ERROR_STREAM("Unable to open port ");
         }
+        
         if (ser_.isOpen())
         {
             ROS_INFO_STREAM("Serial Port initialized");
+            // 只有串口成功打开后，才发送初始化指令
+            std::string send_data = "z000\n";
+            u_char send_data_char[send_data.size()];
+            for (size_t i = 0; i < send_data.size(); i++)
+                send_data_char[i] = send_data.c_str()[i];
+            ser_.write(send_data_char, send_data.size());
         }
         else
         {
             ROS_ERROR_STREAM("Serial Port fail");
+            use_ser_flag_ = false; // 关键修复：如果打开失败，强制关闭串口标志位，防止后续回调函数崩溃
         }
-        std::string send_data = "z000\n";
-        u_char send_data_char[send_data.size()];
-        for (size_t i = 0; i < send_data.size(); i++)
-            send_data_char[i] = send_data.c_str()[i];
-        ser_.write(send_data_char, send_data.size());
     }
     else
     {
@@ -606,14 +562,25 @@ void L1Controller::Set(uint8_t cmd, int16_t data)
 
 }
 
-/*****************/
-/* MAIN FUNCTION */
-/*****************/
-int main(int argc, char **argv)
+double L1Controller::CalculateEta(const geometry_msgs::Pose &carPose, const geometry_msgs::Point &targetPos)
 {
-    // Initiate ROS
-    ros::init(argc, argv, "L1Controller_v2");
-    L1Controller controller;
-    ros::spin();
-    return 0;
+    // Extract Yaw from Pose
+    Eigen::Quaterniond ori;
+    ori.x() = carPose.orientation.x;
+    ori.y() = carPose.orientation.y;
+    ori.z() = carPose.orientation.z;
+    ori.w() = carPose.orientation.w;
+    Eigen::Vector3d rot_x = ori.toRotationMatrix().block(0, 0, 3, 1);
+    double carPose_yaw = atan2(rot_x(1), rot_x(0));
+
+    // Coordinate transformation: World to Car
+    double dx = targetPos.x - carPose.position.x;
+    double dy = targetPos.y - carPose.position.y;
+    
+    double local_x = cos(carPose_yaw) * dx + sin(carPose_yaw) * dy;
+    double local_y = -sin(carPose_yaw) * dx + cos(carPose_yaw) * dy;
+    
+    return atan2(local_y, local_x);
 }
+
+

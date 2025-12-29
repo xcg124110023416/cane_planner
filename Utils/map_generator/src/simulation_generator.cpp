@@ -51,8 +51,8 @@ int main(int argc, char **argv)
 
   ros::Publisher cloud_pub =
       node.advertise<sensor_msgs::PointCloud2>("/simulation_generator/global_cloud", 10, true);
-  pose_pub =
-      node.advertise<geometry_msgs::PoseStamped>("/simulation_generator/pose", 10, true);
+  // pose_pub =
+  //     node.advertise<geometry_msgs::PoseStamped>("/simulation_generator/pose", 10, true);
   odom_pub =
       node.advertise<nav_msgs::Odometry>("/simulation_generator/odom", 10, true);
 

@@ -15,6 +15,7 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   plan_env
   path_searching
+  plan_ctrl
 )
 
 catkin_package(
@@ -22,6 +23,7 @@ catkin_package(
  LIBRARIES plan_manage
  CATIKIN_DEPENDS plan_env
  path_searching
+ plan_ctrl
 #  CATKIN_DEPENDS other_catkin_pkg
 #  DEPENDS system_lib
 

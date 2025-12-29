@@ -1,4 +1,5 @@
 #include <path_searching/kinodynamic_astar.h>
+#include <plan_ctrl/L1_controller_v2.h> // Added include
 #include <sstream>
 
 using namespace std;
@@ -23,7 +24,10 @@ namespace cane_planner
         // todo
         // lfpc iter parameters
         cur_node->iter_state = start_state;
-        cur_node->support_feet = LEFT_LEG;
+        // cur_node->support_feet = LEFT_LEG;
+        cur_node->support_feet = initial_support_leg_; // Use the set initial support leg
+
+
         cur_node->support_pos << start_pos(0), start_pos(1);
         // start_pos(2) is theta ,in here change 1.0
         start_pos(2) = 0.0;

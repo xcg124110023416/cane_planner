@@ -1,5 +1,6 @@
 #include <plan_manager.h>
 #include <sstream>
+#include <plan_ctrl/L1_controller_v2.h>
 
 namespace cane_planner
 {
@@ -464,6 +465,60 @@ namespace cane_planner
         input << 0.0, 0.0, start_state_(2);//vx,vy,theta
         //
         ros::Time time_1 = ros::Time::now();
+
+        // 1. Run A* first to get a geometric path
+        bool astar_success = astar_finder_->search(start_pt_, end_pt_);
+        if (astar_success)
+        {
+            vector<Eigen::Vector2d> astar_path = astar_finder_->getPath();
+            
+            // 2. Find a local target point on the A* path (e.g., 1.0m away)
+            Eigen::Vector3d local_target = end_state_; // Default to end point
+            double lookahead_dist = 1.0;
+            
+            for (const auto& pt : astar_path)
+            {
+                double dist = sqrt(pow(pt(0) - start_state_(0), 2) + pow(pt(1) - start_state_(1), 2));
+                if (dist > lookahead_dist)
+                {
+                    local_target(0) = pt(0);
+                    local_target(1) = pt(1);
+                    break;
+                }
+            }
+
+            // 3. Calculate Eta using L1Controller
+            geometry_msgs::Pose car_pose;
+            car_pose.position.x = start_state_(0);
+            car_pose.position.y = start_state_(1);
+            car_pose.position.z = 0;
+            double yaw = start_state_(2);
+            car_pose.orientation.w = cos(yaw / 2.0);
+            car_pose.orientation.x = 0.0;
+            car_pose.orientation.y = 0.0;
+            car_pose.orientation.z = sin(yaw / 2.0);
+
+            geometry_msgs::Point target_pt;
+            target_pt.x = local_target(0);
+            target_pt.y = local_target(1);
+            target_pt.z = 0;
+
+            double eta = L1Controller::CalculateEta(car_pose, target_pt);
+
+            // 4. Set initial support leg for Kinodynamic A*
+            if (eta > 0.1)
+                kin_finder_->setInitialSupportLeg(RIGHT_LEG); // Target left -> step left -> support right
+            else if (eta < -0.1)
+                kin_finder_->setInitialSupportLeg(LEFT_LEG);  // Target right -> step right -> support left
+            else
+                kin_finder_->setInitialSupportLeg(LEFT_LEG);
+        }
+        else
+        {
+            ROS_WARN("A* failed to find a geometric path, using default initial leg.");
+            kin_finder_->setInitialSupportLeg(LEFT_LEG);
+        }
+
         bool plan_success = kin_finder_->search(start_state_, input, end_state_);
         ros::Time time_2 = ros::Time::now();
         if (plan_success)
