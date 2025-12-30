@@ -1,6 +1,5 @@
 #include <plan_manager.h>
 #include <sstream>
-#include <plan_ctrl/L1_controller_v2.h>
 
 namespace cane_planner
 {
@@ -452,94 +451,29 @@ namespace cane_planner
     bool PlannerManager::callKinodynamicAstarPlan()
     {
         static int num = 0;
-        kin_finder_->reset();
-        astar_finder_->reset();
-        num++;
-        
-        // --- 1. 准备初始运动状态 ---
-        Eigen::Vector3d input;
-        input << 0.0, 0.0, start_state_(2); // 假设由静止开始
 
+        kin_finder_->reset();
+        num++;
+        std::cout << "kin," << num << ",";
+        // todo
+        Eigen::Vector3d input;
+        // double vx, vy;
+        // vx = 0.5 * sin(start_state_(2));
+        // vy = 0.5 * cos(start_state_(2));
+        // input << 0.0, vx, 0.0, vy;
+        input << 0.0, 0.0, start_state_(2);//vx,vy,theta
+        //
         ros::Time time_1 = ros::Time::now();
 
-        // --- 2. 运行几何 A* (Geometric A*) ---
-        bool astar_success = astar_finder_->search(start_pt_, end_pt_);
-
-        // [逻辑改进]：如果简单的几何路径都搜不到，复杂的动力学路径更搜不到。
-        // 直接返回 false，防止浪费资源或导致更严重的崩溃。
-        if (!astar_success)
-        {
-            ROS_WARN("[Planner] Geometric A* failed to find a path. Aborting Kinodynamic search.");
-            return false;
-        }
-
-        // --- 3. 计算 Eta 并决定初始支撑腿 (Initial Support Leg) ---
-        vector<Eigen::Vector2d> astar_path = astar_finder_->getPath();
-        
-        // 寻找前瞻点 (Local Target)
-        Eigen::Vector2d local_target(end_state_(0), end_state_(1)); // 默认设为终点
-        double lookahead_dist = 1.0;
-        bool found_lookahead = false;
-
-        // 遍历路径寻找第一个距离大于 lookahead_dist 的点
-        for (const auto& pt : astar_path)
-        {
-            double dist = (pt - start_state_.head(2)).norm(); // 使用 Eigen 的 norm 计算距离
-            if (dist > lookahead_dist)
-            {
-                local_target = pt;
-                found_lookahead = true;
-                break;
-            }
-        }
-        
-        // 如果路径很短（没找到大于1m的点），且路径点不为空，取路径最后一个点作为目标
-        if (!found_lookahead && !astar_path.empty()) {
-            local_target = astar_path.back();
-        }
-
-        // Eta 是 目标点方向 与 当前车身朝向 的夹角
-        double car_yaw = start_state_(2);
-        double dy = local_target(1) - start_state_(1);
-        double dx = local_target(0) - start_state_(0);
-        double target_yaw = std::atan2(dy, dx);
-        
-        // 计算角度差并归一化到 [-PI, PI]
-        double eta = target_yaw - car_yaw;
-        while (eta > M_PI) eta -= 2.0 * M_PI;
-        while (eta < -M_PI) eta += 2.0 * M_PI;
-
-        // 打印调试信息，确认 Eta 计算正确
-        // std::cout << "Target Yaw: " << target_yaw << ", Car Yaw: " << car_yaw << ", Eta: " << eta << std::endl;
-
-        // 根据 Eta 设置初始支撑腿
-        // 逻辑：如果目标在左边 (eta > 0)，可能需要左腿支撑/右腿先迈，或者反之，取决于您的步态定义
-        if (eta > 0.1) 
-            kin_finder_->setInitialSupportLeg(RIGHT_LEG); 
-        else if (eta < -0.1) 
-            kin_finder_->setInitialSupportLeg(LEFT_LEG);  
-        else 
-            kin_finder_->setInitialSupportLeg(LEFT_LEG); // 直走默认左腿
-
-        // --- 4. 运行动力学 A* (Kinodynamic A*) ---
-        // [调试建议]：在 kin_finder_->search 内部也加上内存/时间限制
         bool plan_success = kin_finder_->search(start_state_, input, end_state_);
-        
         ros::Time time_2 = ros::Time::now();
-        
         if (plan_success)
         {
-            double time_cost = (time_2 - time_1).toSec();
-            vector<Eigen::Vector3d> path_list = kin_finder_->getPath();
-            double len = getPathLen(path_list);
-            
-            // 格式化输出，方便调试
-            // ROS_INFO("[Planner] Success! Time: %.4f s, Len: %.2f m, Iter: %d", time_cost, len, num);
-            std::cout << "kin_success," << num << "," << time_cost << "," << len << std::endl;
-        }
-        else
-        {
-            ROS_WARN("[Planner] Kinodynamic A* failed.");
+            std::cout << (time_2 - time_1).toSec() << ",";
+            vector<Eigen::Vector3d> list;
+            list = kin_finder_->getPath();  //多个com_pos组成的路径点
+            double len = getPathLen(list);  //路径长度
+            std::cout << len << ",1" << std::endl;
         }
         return plan_success;
     }

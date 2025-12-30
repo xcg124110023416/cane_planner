@@ -1,5 +1,4 @@
 #include <path_searching/kinodynamic_astar.h>
-#include <plan_ctrl/L1_controller_v2.h> // Added include
 #include <sstream>
 
 using namespace std;
@@ -19,35 +18,56 @@ namespace cane_planner
                                   Eigen::Vector3d end_pos)
     {
         /* ---------- initialize --------*/
-        KdNodePtr cur_node = path_node_pool_[0];
-        cur_node->parent = NULL;
-        // todo
-        // lfpc iter parameters
-        cur_node->iter_state = start_state;
-        // cur_node->support_feet = LEFT_LEG;
-        cur_node->support_feet = initial_support_leg_; // Use the set initial support leg
-
-
-        cur_node->support_pos << start_pos(0), start_pos(1);
-        // start_pos(2) is theta ,in here change 1.0
+        // Bidirectional Attempt: Add both Left and Right support legs to OpenSet
+        
+        // 1. Left Leg Support Node
+        KdNodePtr node_left = path_node_pool_[0];
+        node_left->parent = NULL;
+        node_left->iter_state = start_state;
+        node_left->support_feet = LEFT_LEG;
+        
+        node_left->support_pos << start_pos(0), start_pos(1);
         start_pos(2) = 0.0;
-        cur_node->com_pos << start_pos;
-        // astar variable
-        cur_node->index = stateToIndex(start_pos);
-        cur_node->g_score = 0.0;
-        cur_node->step_num = 0;
+        node_left->com_pos << start_pos;
+        node_left->index = stateToIndex(start_pos);
+        node_left->g_score = 0.0;
+        node_left->step_num = 0;
+        node_left->f_score = lambda_heu_ * getDiagHeu(start_pos, end_pos);
+        node_left->kdnode_state = IN_OPEN_SET;
+        
+        open_set_.push(node_left);
+        expanded_nodes_.insert(node_left->index, node_left);
+
+        // 2. Right Leg Support Node
+        KdNodePtr node_right = path_node_pool_[1];
+        node_right->parent = NULL;
+        node_right->iter_state = start_state;
+        node_right->support_feet = RIGHT_LEG;
+        
+        node_right->support_pos << start_pos(0), start_pos(1);
+        node_right->com_pos << start_pos;
+        node_right->index = stateToIndex(start_pos); // Same index
+        node_right->g_score = 0.0;
+        node_right->step_num = 0;
+        node_right->f_score = lambda_heu_ * getDiagHeu(start_pos, end_pos);
+        node_right->kdnode_state = IN_OPEN_SET;
+        
+        open_set_.push(node_right);
+        // Note: We don't insert node_right into expanded_nodes_ because it has the same index.
+        
+        use_node_num_ = 2; // Used 2 nodes
 
         // end set
         Eigen::Vector2i end_index;
         end_index = stateToIndex(end_pos);
         // TODO(1): Heuristic compute
-        cur_node->f_score = lambda_heu_ * getDiagHeu(start_pos, end_pos);
-        cur_node->kdnode_state = IN_OPEN_SET;
+        // cur_node->f_score = lambda_heu_ * getDiagHeu(start_pos, end_pos);
+        // cur_node->kdnode_state = IN_OPEN_SET;
 
-        open_set_.push(cur_node);
-        use_node_num_ += 1;
+        // open_set_.push(cur_node);
+        // use_node_num_ += 1;
 
-        expanded_nodes_.insert(cur_node->index, cur_node);
+        // expanded_nodes_.insert(cur_node->index, cur_node);
 
         KdNodePtr terminate_node = NULL;
 
@@ -58,7 +78,7 @@ namespace cane_planner
         /* ---------- search loop ---------- */
         while (!open_set_.empty())
         {
-            cur_node = open_set_.top();
+            KdNodePtr cur_node = open_set_.top();
             // std::cout << "Explore while is " << use_node_num_ << std::endl;
             // std::cout << "----------------------------" << std::endl;
 

@@ -177,8 +177,6 @@ namespace cane_planner
 
     void setCollision(const CollisionDetection::Ptr &col);
     void setModel(const LFPC::Ptr &col);
-    void setInitialSupportLeg(int leg) { initial_support_leg_ = leg; }
-    int initial_support_leg_ = LEFT_LEG; // Default value
 
     typedef shared_ptr<KinodynamicAstar> Ptr;
   };
