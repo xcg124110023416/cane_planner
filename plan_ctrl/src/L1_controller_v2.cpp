@@ -354,7 +354,7 @@ geometry_msgs::Point L1Controller::get_odom_car2WayPtVec(const geometry_msgs::Po
     {
         forwardPt = odom_goal_pos;
         foundForwardPt = false;
-        ROS_WARN("goal REACHED!");
+        // ROS_WARN("goal REACHED!");
     }
 
     /*Visualized Target Point on RVIZ*/
@@ -537,13 +537,14 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
 
                     Set(CMD_VEL,int(cmd_vel.angular.z)*-1);
                 }
-                else
-                {
-                    // pub_.publish(cmd_vel);
-                    Set(CMD_VEL,0);
-
-                }
             }
+        }
+        if(goal_reached)
+        {
+            // pub_.publish(cmd_vel);
+            ROS_WARN("goal REACHED!");
+            Set(CMD_VEL,0);
+
         }
     }
 }

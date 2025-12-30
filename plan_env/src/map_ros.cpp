@@ -384,7 +384,7 @@ void MapROS::cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img) {
                                  const nav_msgs::OdometryConstPtr &odom)
   {
     // tf from cam to odom
-    cout<< "cloudOdomCallback" << endl;
+    // cout<< "cloudOdomCallback" << endl;
     geometry_msgs::PoseStamped pose_cam;
     pose_cam.header = odom->header;//camera_init
     pose_cam.pose = odom->pose.pose;
