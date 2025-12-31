@@ -13,7 +13,7 @@
         <arg name="depth_topic" value="depth"/>
         <arg name="sensor_pose_topic" value="pose"/>
         <!-- simulation opion -->
-        <arg name="simulation" value="true"/>
+        <arg name="simulation" value="false"/>
         <arg name="slice_height" value="0.0"/>
         <arg name="collision_margin" value="0.3"/>
         <arg name="kin_horizon" value="200.0"/>

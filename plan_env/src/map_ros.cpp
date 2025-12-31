@@ -43,7 +43,7 @@ namespace fast_planner
     node_.param("map_ros/show_all_map", show_all_map_, false);
     node_.param("map_ros/frame_id", frame_id_, std::string("world"));  //基于雷达坐标系发布的点云信息
 
-    node_.param("map_ros/is_simulation", map_->is_simulation_, true);
+    node_.param("map_ros/is_simulation", map_->is_simulation_, false);
 
     proj_points_.resize(640 * 480 / (skip_pixel_ * skip_pixel_));
     point_cloud_.points.resize(640 * 480 / (skip_pixel_ * skip_pixel_));
@@ -98,7 +98,7 @@ namespace fast_planner
       sync_image_odom_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyImageOdom>(
           MapROS::SyncPolicyImageOdom(100), *depth_sub_, *odom_sub_));
       sync_image_odom_->registerCallback(boost::bind(&MapROS::depthOdomCallback, this, _1, _2));
-      // cloud+pose
+      // // cloud+pose
       sync_cloud_pose_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudPose>(
           MapROS::SyncPolicyCloudPose(100), *cloud_sub_, *pose_sub_));
       sync_cloud_pose_->registerCallback(boost::bind(&MapROS::cloudPoseCallback, this, _1, _2));
@@ -110,6 +110,7 @@ namespace fast_planner
       // indep_odom_sub_ =
       //     node_.subscribe<nav_msgs::Odometry>("/map_ros/odom", 10, &MapROS::odomCallback, this);
       // cloud+odom
+      // cout<< "Register cloudOdomCallback" << endl;
       sync_cloud_odom_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudOdom>(
           MapROS::SyncPolicyCloudOdom(100), *cloud_sub_, *odom_sub_));
       sync_cloud_odom_->registerCallback(boost::bind(&MapROS::cloudOdomCallback, this, _1, _2));

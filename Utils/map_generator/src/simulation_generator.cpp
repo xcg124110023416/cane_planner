@@ -105,8 +105,10 @@ int main(int argc, char **argv)
     // 当前是 0.2s sleep (5Hz)，对于测试勉强够用，但建议 10Hz-50Hz。
     ros::Duration(0.02).sleep(); // 改为 50Hz，让 TF 更顺滑
 
+    ros::Time now = ros::Time::now();  // 统一时间戳
+
     // 1. 发布 Odom 消息
-    odom.header.stamp = ros::Time::now();
+    odom.header.stamp = now;   
     odom_pub.publish(odom);
     
     // [ADDED] 2. 发布 TF 变换 (/world -> /cane_base)
@@ -127,9 +129,11 @@ int main(int argc, char **argv)
     // 发送变换
     br.sendTransform(transformStamped);
 
-    // 降低点云发布频率 (没必要 50Hz 发一次大点云)
+    // 降低点云发布频率
     if (count % 50 == 0) { 
+        msg.header.stamp = now;
         cloud_pub.publish(msg);
+        count = 0;
     }
 
     count++;
