@@ -250,7 +250,7 @@ void SDFMap::setCacheOccupancy(const int& adr, const int& occ) {
   if (md_->count_hit_[adr] == 0 && md_->count_miss_[adr] == 0) md_->cache_voxel_.push(adr);
 
   if (occ == 0)
-    md_->count_miss_[adr] = 1;
+    md_->count_miss_[adr] += 1;
   else if (occ == 1)
     md_->count_hit_[adr] += 1;
 
@@ -356,99 +356,115 @@ void SDFMap::inputPointCloud(
   if (point_num == 0) return;
   md_->raycast_num_ += 1;
 
-  Eigen::Vector3d update_min = camera_pos;//局部变量
+  Eigen::Vector3d update_min = camera_pos;
   Eigen::Vector3d update_max = camera_pos;
   if (md_->reset_updated_box_) {
-    md_->update_min_ = camera_pos;//全局变量
+    md_->update_min_ = camera_pos;
     md_->update_max_ = camera_pos;
     md_->reset_updated_box_ = false;
   }
 
-  Eigen::Vector3d pt_w, tmp;
+  Eigen::Vector3d pt_w;
   Eigen::Vector3i idx;
   int vox_adr;
   double length;
+  bool point_adjusted;
+
   for (int i = 0; i < point_num; ++i) {
     auto& pt = points.points[i];
     pt_w << pt.x, pt.y, pt.z;
-    int tmp_flag;
+    if (std::isnan(pt_w(0)) || std::isnan(pt_w(1)) || std::isnan(pt_w(2))) continue;
+    point_adjusted = false;
+
     // Set flag for projected point
     if (!isInMap(pt_w)) {
-      // Find closest point in map and set free
-      pt_w = closetPointInMap(pt_w, camera_pos);//找到地图边界上的最近点
-      length = (pt_w - camera_pos).norm();
-      if (length > mp_->max_ray_length_)
-        pt_w = (pt_w - camera_pos) / length * mp_->max_ray_length_ + camera_pos;//将其距离限制在最大射线长度内
-      if (pt_w[2] < 0.2) continue;
-      tmp_flag = 0;
-    } else {
-      length = (pt_w - camera_pos).norm();
-      if (length > mp_->max_ray_length_) {
-        pt_w = (pt_w - camera_pos) / length * mp_->max_ray_length_ + camera_pos;//同样操作：将其距离限制在最大射线长度内
-        if (pt_w[2] < 0.2) continue;
-        tmp_flag = 0;
-      } else
-        tmp_flag = 1;//（1为击中，0为未击中(自由空间)）
+      pt_w = closetPointInMap(pt_w, camera_pos);
+      point_adjusted = true;
     }
-    posToIndex(pt_w, idx);
-    vox_adr = toAddress(idx);
-    setCacheOccupancy(vox_adr, tmp_flag);//将本次点云的索引和状态记录到缓存cache_voxel_
+    
+    length = (pt_w - camera_pos).norm();
+    if (length > mp_->max_ray_length_) {
+        pt_w = (pt_w - camera_pos) / length * mp_->max_ray_length_ + camera_pos;
+        point_adjusted = true;
+    }
+    
+    if (pt_w[2] < 0.2) continue;
 
-    for (int k = 0; k < 3; ++k) {//更新本次点云的空间边界，得到点云覆盖的最小/最大坐标
+    for (int k = 0; k < 3; ++k) {
       update_min[k] = min(update_min[k], pt_w[k]);
       update_max[k] = max(update_max[k], pt_w[k]);
     }
-    // Raycasting between camera center and point（从相机位置到点进行射线遍历）
+
+    posToIndex(pt_w, idx);
+    vox_adr = toAddress(idx);
+    setCacheOccupancy(vox_adr, point_adjusted ? 0 : 1);
+
     if (md_->flag_rayend_[vox_adr] == md_->raycast_num_)
       continue;
     else
-      md_->flag_rayend_[vox_adr] = md_->raycast_num_;//使用 flag_rayend_ 避免重复处理同一个体素（voxel）
+      md_->flag_rayend_[vox_adr] = md_->raycast_num_;
 
     caster_->input(pt_w, camera_pos);
     caster_->nextId(idx);
-    while (caster_->nextId(idx))//沿途所有体素都被标记为“未击中”（自由空间）
-      setCacheOccupancy(toAddress(idx), 0);
+    while (caster_->nextId(idx)) {
+        int traverse_adr = toAddress(idx);
+        if (md_->flag_visited_[traverse_adr] == md_->raycast_num_) {
+            break;
+        } else {
+            md_->flag_visited_[traverse_adr] = md_->raycast_num_;
+        }
+        setCacheOccupancy(traverse_adr, 0);
+    }
   }
-  //for循环结束，md_->cache_voxel_中存有所有本次回调函数中所有体素（voxel）的索引和状态
 
-  Eigen::Vector3d bound_inf(mp_->local_bound_inflate_, mp_->local_bound_inflate_, 0);//x,y,z边界膨胀，扩大边界（留安全余量）
+  Eigen::Vector3d bound_inf(mp_->local_bound_inflate_, mp_->local_bound_inflate_, 0);
   posToIndex(update_max + bound_inf, md_->local_bound_max_);
-  posToIndex(update_min - bound_inf, md_->local_bound_min_);//更新局部地图（包含边界膨胀）的最小/最大索引
+  posToIndex(update_min - bound_inf, md_->local_bound_min_);
   boundIndex(md_->local_bound_min_);
-  boundIndex(md_->local_bound_max_);//更新为全局信息
+  boundIndex(md_->local_bound_max_);
 
-  // for ros callback function do local_updated，标记局部地图更新
   mr_->local_updated_ = true;
 
-  // Bounding box for subsequent updating，将本次点云的局部空间范围与全局范围合并（不包含边界膨胀），便于后续整体地图维护
   for (int k = 0; k < 3; ++k) {
     md_->update_min_[k] = min(update_min[k], md_->update_min_[k]);
     md_->update_max_[k] = max(update_max[k], md_->update_max_[k]);
   }
 
-  /*
-    如果这个格子被“打中”次数更多 → 增加它的占据概率（更像障碍物）；
-    如果它更多是“射线经过” → 降低它的占据概率（更像自由空间）。
-  */
   while (!md_->cache_voxel_.empty()) {
     int adr = md_->cache_voxel_.front();
     md_->cache_voxel_.pop();
-    //根据体素状态信息，设置不同的对数值hit: 0.619039, miss: -0.281851
-    double log_odds_update =
-        md_->count_hit_[adr] >= md_->count_miss_[adr] ? mp_->prob_hit_log_ : mp_->prob_miss_log_;
-    //清除本次回调函数中所有体素（voxel）的状态信息
+    
+    int hit = md_->count_hit_[adr];
+    int miss = md_->count_miss_[adr];
     md_->count_hit_[adr] = md_->count_miss_[adr] = 0;
 
-    //md_->occupancy_buffer_默认值为mp_->clamp_min_log_ - mp_->unknown_flag_，其中mp_->unknown_flag_ = 0.01;
+    int v2 = mp_->map_voxel_num_(2);
+    int v1 = mp_->map_voxel_num_(1);
+    int z_idx = adr % v2;
+    int tmp_xy = adr / v2;
+    int y_idx = tmp_xy % v1;
+    int x_idx = tmp_xy / v1;
+    Eigen::Vector3i idx(x_idx, y_idx, z_idx);
+    Eigen::Vector3d pos;
+    indexToPos(idx, pos);
+
+    if (std::abs(pos(0) - camera_pos(0)) > mp_->local_update_range_(0) ||
+        std::abs(pos(1) - camera_pos(1)) > mp_->local_update_range_(1) ||
+        std::abs(pos(2) - camera_pos(2)) > mp_->local_update_range_(2)) {
+      continue;
+    }
+
+    double log_odds_update = (hit >= miss && hit != 0) ? mp_->prob_hit_log_ : mp_->prob_miss_log_;
+
     if (md_->occupancy_buffer_[adr] < mp_->clamp_min_log_ - 1e-3)
-    //初始化默认值为min_occupancy_log_ = 1.38629
       md_->occupancy_buffer_[adr] = mp_->min_occupancy_log_;
 
-    //clamp_min_log_: -2.19722, clamp_max_log_: 2.19722
+    if (log_odds_update >= 0 && md_->occupancy_buffer_[adr] >= mp_->clamp_max_log_) continue;
+    if (log_odds_update <= 0 && md_->occupancy_buffer_[adr] <= mp_->clamp_min_log_) continue;
+
     md_->occupancy_buffer_[adr] = std::min(
-        //第一次为min_occupancy_log_+hit或者min_occupancy_log_+miss
         std::max(md_->occupancy_buffer_[adr] + log_odds_update, mp_->clamp_min_log_),
-        mp_->clamp_max_log_);//最终输出的occupancy_buffer_（值的大小反映了该体素被障碍物占据的可能性）
+        mp_->clamp_max_log_);
   }
 }
 

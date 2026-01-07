@@ -400,6 +400,8 @@ void MapROS::cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img) {
                                     pose_cam.pose.orientation.x,
                                     pose_cam.pose.orientation.y,
                                     pose_cam.pose.orientation.z);
+
+
     pcl::PointCloud<pcl::PointXYZ> cloud;
     pcl::fromROSMsg(*msg, cloud);//转换为pcl类型cloud，点云意味着障碍物
     int num = cloud.points.size();
