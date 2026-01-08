@@ -109,8 +109,7 @@ namespace fast_planner
       //     node_.subscribe<sensor_msgs::PointCloud2>("/map_ros/cloud", 10, &MapROS::cloudCallback, this);
       // indep_odom_sub_ =
       //     node_.subscribe<nav_msgs::Odometry>("/map_ros/odom", 10, &MapROS::odomCallback, this);
-      // cloud+odom
-      // cout<< "Register cloudOdomCallback" << endl;
+
       sync_cloud_odom_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudOdom>(
           MapROS::SyncPolicyCloudOdom(100), *cloud_sub_, *odom_sub_));
       sync_cloud_odom_->registerCallback(boost::bind(&MapROS::cloudOdomCallback, this, _1, _2));

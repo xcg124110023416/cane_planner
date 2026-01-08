@@ -388,7 +388,7 @@ void SDFMap::inputPointCloud(
         point_adjusted = true;
     }
     
-    if (pt_w[2] < 0.2) continue;
+    if (pt_w[2] < -0.5) continue;
 
     for (int k = 0; k < 3; ++k) {
       update_min[k] = min(update_min[k], pt_w[k]);
@@ -407,6 +407,13 @@ void SDFMap::inputPointCloud(
     caster_->input(pt_w, camera_pos);
     caster_->nextId(idx);
     while (caster_->nextId(idx)) {
+        // Fix: geometric protection for ground layer
+        // Raycasting might pass through the ground layer, clearing it incorrectly.
+        // We check the height of the traversed voxel and skip clearing if it's near ground.
+        // Eigen::Vector3d pos;
+        // indexToPos(idx, pos);
+        // if (pos(2) < 0.2) continue;
+
         int traverse_adr = toAddress(idx);
         if (md_->flag_visited_[traverse_adr] == md_->raycast_num_) {
             break;

@@ -549,7 +549,7 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
         /*Estimate Steering Angle*/
         double eta = 0.3;
         cmd_vel.angular.z = (eta*link_length*360)/(2*PI*wheel_radius);
-        std::cout << "cmd_vel.angular.z = " << int(cmd_vel.angular.z) << std::endl;
+        // std::cout << "cmd_vel.angular.z = " << int(cmd_vel.angular.z) << std::endl;
         // if (foundForwardPt)
         // {
 
