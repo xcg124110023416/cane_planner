@@ -59,11 +59,11 @@ public:
 private:
     ros::NodeHandle n_;
     ros::Subscriber odom_sub, path_sub, goal_sub, way_sub;
-    ros::Publisher pub_, marker_pub;
+    ros::Publisher pub_, marker_pub, goal_marker_pub;
     ros::Timer timer1, timer2;
     tf::TransformListener tf_listener;
 
-    visualization_msgs::Marker points, line_strip, goal_circle;
+    visualization_msgs::Marker points, line_strip, goal_circle, text_marker;
     geometry_msgs::Twist cmd_vel;
     geometry_msgs::Point odom_goal_pos;
     nav_msgs::Odometry odom;
@@ -77,7 +77,7 @@ private:
     double L, Lfw, Lrv, Vcmd, lfw, lrv, steering, u, v;
     double Gas_gain, baseAngle, Angle_gain, goalRadius, link_length, wheel_radius;
     int controller_freq, baseSpeed;
-    bool foundForwardPt, goal_received, goal_reached;
+    bool foundForwardPt, goal_received, goal_reached, stop_sent_flag_;
     bool have_odom;
 
     void odomCB(const nav_msgs::Odometry::ConstPtr &odomMsg);

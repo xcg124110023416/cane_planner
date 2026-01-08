@@ -43,10 +43,10 @@
         <param name="sdf_map/ground_height" value="-1"/>
         <param name="sdf_map/default_dist" value="5.0"/>
         <!-- local fusion -->
-        <param name="sdf_map/p_hit" value="0.65"/>
-        <param name="sdf_map/p_miss" value="0.43"/>
-        <param name="sdf_map/p_min" value="0.10"/>
-        <param name="sdf_map/p_max" value="0.90"/>
+        <param name="sdf_map/p_hit" value="0.7"/>
+        <param name="sdf_map/p_miss" value="0.35"/>
+        <param name="sdf_map/p_min" value="0.12"/>
+        <param name="sdf_map/p_max" value="0.97"/>
         <param name="sdf_map/p_occ" value="0.80"/>
         <param name="sdf_map/min_ray_length" value="0.5"/>
         <param name="sdf_map/max_ray_length" value="5.0"/>

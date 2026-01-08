@@ -62,7 +62,7 @@ namespace cane_planner
         /*---------- Ros utils -----------*/
         ros::Timer exec_timer_;
         ros::Timer replan_timer_;
-        ros::Subscriber odom_sub_, waypoint_sub_;
+        ros::Subscriber odom_sub_, goal_sub;
         ros::Subscriber goal_sub_, start_sub_;
         ros::Publisher astar_pub_, kin_vis_pub_, kin_foot_pub_;
         ros::Publisher kin_path_pub_, a_path_pub_;
@@ -89,7 +89,7 @@ namespace cane_planner
         void execFSMCallback(const ros::TimerEvent &e);
         void checkCollisionCallback(const ros::TimerEvent &e);
         // sub callback
-        void waypointCallback(const nav_msgs::PathConstPtr &msg);
+        void GoalCallback(const geometry_msgs::PoseStamped::ConstPtr &msg);
         void odometryCallback(const nav_msgs::OdometryConstPtr &msg);
         // sim sub callback
         void goalCallback(const geometry_msgs::PoseStamped::ConstPtr &goal);

@@ -89,9 +89,10 @@ L1Controller::L1Controller()
         ROS_WARN("using kin_astar");
     }
     goal_sub = n_.subscribe("/move_base_simple/goal", 1, &L1Controller::goalCB, this);
-    way_sub = n_.subscribe("/waypoint_generator/waypoints", 1, &L1Controller::waypointCB, this);
+    // way_sub = n_.subscribe("/waypoint_generator/waypoints", 1, &L1Controller::waypointCB, this);
 
     marker_pub = n_.advertise<visualization_msgs::Marker>("car_path", 10);
+    goal_marker_pub = n_.advertise<visualization_msgs::Marker>("goal_marker", 10);
     pub_ = n_.advertise<geometry_msgs::Twist>("car/cmd_vel", 1);
 
     // Timer
@@ -147,6 +148,7 @@ L1Controller::L1Controller()
     foundForwardPt = false;
     goal_received = false;
     goal_reached = false;
+    stop_sent_flag_ = false;
     have_odom = false;
     cmd_vel.linear.x = 0; // 1500 for stop
     cmd_vel.angular.z = baseAngle;
@@ -166,17 +168,20 @@ L1Controller::L1Controller()
 
 void L1Controller::initMarker()
 {
-    points.header.frame_id = line_strip.header.frame_id = goal_circle.header.frame_id = "world";
-    points.ns = line_strip.ns = goal_circle.ns = "Markers";
-    points.action = line_strip.action = goal_circle.action = visualization_msgs::Marker::ADD;
-    points.pose.orientation.w = line_strip.pose.orientation.w = goal_circle.pose.orientation.w = 1.0;
+    points.header.frame_id = line_strip.header.frame_id = goal_circle.header.frame_id = text_marker.header.frame_id = "world";
+    points.ns = line_strip.ns = goal_circle.ns = text_marker.ns = "Markers";
+    points.action = line_strip.action = goal_circle.action = text_marker.action = visualization_msgs::Marker::ADD;
+    points.pose.orientation.w = line_strip.pose.orientation.w = goal_circle.pose.orientation.w = text_marker.pose.orientation.w = 1.0;
     points.id = 0;
     line_strip.id = 1;
     goal_circle.id = 2;
+    text_marker.id = 3;
 
     points.type = visualization_msgs::Marker::POINTS;
     line_strip.type = visualization_msgs::Marker::LINE_STRIP;
     goal_circle.type = visualization_msgs::Marker::CYLINDER;
+    text_marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+
     // POINTS markers use x and y scale for width/height respectively
     points.scale.x = 0.2;
     points.scale.y = 0.2;
@@ -187,6 +192,8 @@ void L1Controller::initMarker()
     goal_circle.scale.x = goalRadius;
     goal_circle.scale.y = goalRadius;
     goal_circle.scale.z = 0.1;
+
+    text_marker.scale.z = 0.5; // Text height
 
     // Points are green
     points.color.g = 1.0f;
@@ -201,6 +208,13 @@ void L1Controller::initMarker()
     goal_circle.color.g = 1.0;
     goal_circle.color.b = 0.0;
     goal_circle.color.a = 0.5;
+
+    // text_marker is red
+    text_marker.color.r = 1.0;
+    text_marker.color.g = 0.0;
+    text_marker.color.b = 0.0;
+    text_marker.color.a = 1.0;
+    text_marker.text = "Goal";
 }
 
 void L1Controller::odomCB(const nav_msgs::Odometry::ConstPtr &odomMsg)
@@ -223,26 +237,41 @@ void L1Controller::waypointCB(const nav_msgs::PathConstPtr &msg)
     odom_goal_pos = msg->poses[0].pose.position;
     goal_received = true;
     goal_reached = false;
+    stop_sent_flag_ = false;
+    
+    // Clear old path to avoid tracking ghost path
+    map_path.poses.clear();
+    foundForwardPt = false;
 
     /*Draw Goal on RVIZ*/
-    goal_circle.pose = odom_goal.pose;
-    marker_pub.publish(goal_circle);
+    // goal_circle.pose = odom_goal.pose;
+    // marker_pub.publish(goal_circle);
 }
 
 void L1Controller::goalCB(const geometry_msgs::PoseStamped::ConstPtr &goalMsg)
 {
     // try
     // {
-    geometry_msgs::PoseStamped odom_goal;
+    // geometry_msgs::PoseStamped odom_goal;
     // tf_listener.transformPose("world", ros::Time(0), *goalMsg, "world", odom_goal);
     // odom_goal_pos = odom_goal.pose.position;
     odom_goal_pos = goalMsg->pose.position;
     goal_received = true;
     goal_reached = false;
+    stop_sent_flag_ = false;
+
+    // Clear old path to avoid tracking ghost path
+    map_path.poses.clear();
+    foundForwardPt = false;
+    // text_marker.points.clear();
+
+    // Publish text marker
+    text_marker.pose.position = odom_goal_pos;
+    goal_marker_pub.publish(text_marker);
 
     /*Draw Goal on RVIZ*/
-    goal_circle.pose = odom_goal.pose;
-    marker_pub.publish(goal_circle);
+    // goal_circle.pose = odom_goal.pose;
+    // marker_pub.publish(odom_goal_pos);
     // }
     // catch (tf::TransformException &ex)
     // {
@@ -501,7 +530,13 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
 
     // if (goal_received)
     if (ser_.isOpen())
-    {    /*Estimate Steering Angle*/
+    {
+        if (map_path.poses.empty() && !goal_reached) {
+            // 如果没有路径且没到达终点，什么都不做，防止电机乱动
+            return;
+        }
+
+        /*Estimate Steering Angle*/
         /*已经验证eta，当雷达朝向与杖一致时，不需要＋1.57，得出的数值即相对于雷达坐标系需要转动的弧度值，只需要转换为角度值即可。
         +1.57和雷达安装位置有关系。
         eta是以camera_base为参考系，当前相对于目标路径上最近一点的角度（弧度值），话题car_path可以显示。
@@ -539,12 +574,12 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
                 }
             }
         }
-        if(goal_reached)
+        if(goal_reached && !stop_sent_flag_)
         {
             // pub_.publish(cmd_vel);
             ROS_WARN("goal REACHED!");
             Set(CMD_VEL,0);
-
+            stop_sent_flag_ = true;
         }
     }
 }
