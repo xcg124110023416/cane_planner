@@ -22,7 +22,7 @@ namespace fast_planner
     this->map_ = map;
   }
 
-  void MapROS::setDetector(const onboardDetector::dynamicDetector::Ptr& detector) {
+  void MapROS::setDetector(const std::shared_ptr<onboardDetector::dynamicDetector>& detector) {
     this->detector_ = detector;
   }
 

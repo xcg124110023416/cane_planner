@@ -101,7 +101,7 @@ void SDFMap::initMap(ros::NodeHandle& nh) {
   caster_->setParams(mp_->resolution_, mp_->map_origin_);
 }
 
-void SDFMap::setDetector(const onboardDetector::dynamicDetector::Ptr& detector) {
+void SDFMap::setDetector(const std::shared_ptr<onboardDetector::dynamicDetector>& detector) {
   detector_ = detector;
   if(mr_){
     mr_->setDetector(detector);

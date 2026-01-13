@@ -32,7 +32,7 @@ public:
 
   enum OCCUPANCY { UNKNOWN, FREE, OCCUPIED };
 
-  void setDetector(const onboardDetector::dynamicDetector::Ptr& detector);
+  void setDetector(const std::shared_ptr<onboardDetector::dynamicDetector>& detector);
   void initMap(ros::NodeHandle& nh);
   void inputPointCloud(const pcl::PointCloud<pcl::PointXYZ>& points, const int& point_num,
                        const Eigen::Vector3d& camera_pos);
@@ -89,7 +89,7 @@ private:
   unique_ptr<MapData> md_;
   unique_ptr<MapROS> mr_;
   unique_ptr<RayCaster> caster_;
-  onboardDetector::dynamicDetector::Ptr detector_;
+  std::shared_ptr<onboardDetector::dynamicDetector> detector_;
   friend MapROS;
 
   bool is_simulation_;  

@@ -33,7 +33,7 @@ public:
   MapROS();
   ~MapROS();
   void setMap(SDFMap* map);
-  void setDetector(const onboardDetector::dynamicDetector::Ptr& detector);
+  void setDetector(const std::shared_ptr<onboardDetector::dynamicDetector>& detector);
   void init();
 
     // subscribe external dynamic obstacles (e.g., published by onboard_detector node)
@@ -66,7 +66,7 @@ private:
   void proessDepthImage();
 
   SDFMap* map_;
-  onboardDetector::dynamicDetector::Ptr detector_;
+  std::shared_ptr<onboardDetector::dynamicDetector> detector_;
     // subscribed dynamic obstacles (converted from MarkerArray)
     std::vector<onboardDetector::box3D> latest_obstacles_;
     std::mutex obstacles_mutex_;

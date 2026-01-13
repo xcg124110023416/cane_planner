@@ -42,7 +42,7 @@ namespace cane_planner
         fast_planner::SDFMap::Ptr sdf_map_;
         CollisionDetection::Ptr collision_;
         LFPC::Ptr lfpc_model_;
-        onboardDetector::dynamicDetector::Ptr detector_;
+        std::shared_ptr<onboardDetector::dynamicDetector> detector_;
 
         
         unique_ptr<Astar> astar_finder_;
