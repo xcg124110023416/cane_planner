@@ -1,6 +1,11 @@
 <launch>
+    <rosparam file="$(find onboard_detector)/cfg/detector_param.yaml" ns="kin_replan_node/onboard_detector" />
     <include file="$(find plan_manage)/launch/kin_replan.launch"/>
-    <include file="$(find onboard_detector)/launch/run_detector.launch"/>
-    <include file="$(find plan_manage)/launch/rviz.launch"/>
+    <node pkg="onboard_detector" type="yolo_detector_node.py" name="yolo_detector_node" output="screen" />
+
+
+
+    <!-- <include file="$(find onboard_detector)/launch/run_detector.launch"/> -->
+    <!-- <include file="$(find plan_manage)/launch/rviz.launch"/> -->
     
 </launch>

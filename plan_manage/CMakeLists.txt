@@ -12,6 +12,7 @@ find_package(catkin REQUIRED COMPONENTS
 	roscpp
 	std_msgs
   tf
+  onboard_detector
   geometry_msgs
   plan_env
   path_searching

@@ -13,6 +13,7 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   std_msgs
   tf
+  onboard_detector
   visualization_msgs
   cv_bridge
   message_filters

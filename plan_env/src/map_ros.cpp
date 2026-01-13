@@ -22,6 +22,27 @@ namespace fast_planner
     this->map_ = map;
   }
 
+  void MapROS::setDetector(const onboardDetector::dynamicDetector::Ptr& detector) {
+    this->detector_ = detector;
+  }
+
+  void MapROS::dynamicBBoxesCallback(const visualization_msgs::MarkerArrayConstPtr& msg) {
+    std::lock_guard<std::mutex> lock(obstacles_mutex_);
+    latest_obstacles_.clear();
+    for (const auto& m : msg->markers) {
+      onboardDetector::box3D box;
+      box.x = m.pose.position.x;
+      box.y = m.pose.position.y;
+      box.z = m.pose.position.z;
+      // visualization_msgs/Marker scale gives box dimensions
+      box.x_width = m.scale.x;
+      box.y_width = m.scale.y;
+      box.z_width = m.scale.z;
+      box.is_dynamic = true;
+      latest_obstacles_.push_back(box);
+    }
+  }
+
   void MapROS::init()
   {
     node_.param("map_ros/fx", fx_, -1.0);
@@ -66,6 +87,7 @@ namespace fast_planner
 
     esdf_timer_ = node_.createTimer(ros::Duration(0.05), &MapROS::updateESDFCallback, this);//计算每个体素到最近障碍物的距离
     vis_timer_ = node_.createTimer(ros::Duration(0.05), &MapROS::visCallback, this);
+    // freeMapTimer_ = node_.createTimer(ros::Duration(0.01), &MapROS::freeMapCallback, this);
 
     // publish init
     map_all_pub_ = node_.advertise<sensor_msgs::PointCloud2>("/sdf_map/occupancy_all", 10);
@@ -76,6 +98,10 @@ namespace fast_planner
     esdf_pub_ = node_.advertise<sensor_msgs::PointCloud2>("/sdf_map/esdf", 10);
     update_range_pub_ = node_.advertise<visualization_msgs::Marker>("/sdf_map/update_range", 10);
     depth_pub_ = node_.advertise<sensor_msgs::PointCloud2>("/sdf_map/depth_cloud", 10);
+
+  // subscribe dynamic obstacles from external detector node
+  dynamic_bbox_sub_ = node_.subscribe("/onboard_detector/dynamic_bboxes", 1,
+                    &MapROS::dynamicBBoxesCallback, this);
 
     // sub init
     depth_sub_.reset(new message_filters::Subscriber<sensor_msgs::Image>(node_, "/map_ros/depth", 50));
@@ -155,6 +181,24 @@ namespace fast_planner
                max_esdf_time_);
     esdf_need_update_ = false;
   }
+
+  void MapROS::freeMapCallback(const ros::TimerEvent&){
+    std::vector<onboardDetector::box3D> obstacles;
+    {
+      std::lock_guard<std::mutex> lock(obstacles_mutex_);
+      obstacles = latest_obstacles_;
+    }
+    std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> freeRegions;
+    for (const auto& ob: obstacles){
+      Eigen::Vector3d lowerBound (ob.x - ob.x_width/2 - 0.3, ob.y - ob.y_width/2 - 0.3, ob.z);
+      Eigen::Vector3d upperBound (ob.x + ob.x_width/2 + 0.3, ob.y + ob.y_width/2 + 0.3, ob.z + ob.z_width + 0.3);
+      freeRegions.push_back(std::make_pair(lowerBound, upperBound));
+    }
+    if (!freeRegions.empty()) {
+      this->map_->updateFreeRegions(freeRegions);
+      this->map_->freeRegions(freeRegions);
+    }
+	}
 
   void MapROS::depthPoseCallback(const sensor_msgs::ImageConstPtr &img,
                                  const geometry_msgs::PoseStampedConstPtr &pose)

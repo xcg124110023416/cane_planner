@@ -14,6 +14,8 @@
 #include <visualization_msgs/Marker.h>
 #include <tf/transform_datatypes.h>
 #include <tf/transform_listener.h>
+#include <onboard_detector/dynamicDetector.h>
+
 
 // #include <nav_msgs/OccupancyGrid.h>
 
@@ -40,9 +42,12 @@ namespace cane_planner
         fast_planner::SDFMap::Ptr sdf_map_;
         CollisionDetection::Ptr collision_;
         LFPC::Ptr lfpc_model_;
+        onboardDetector::dynamicDetector::Ptr detector_;
 
+        
         unique_ptr<Astar> astar_finder_;
         unique_ptr<KinodynamicAstar> kin_finder_;
+        
 
         FSM_STATE exec_state_;
         bool have_odom_, have_target_;

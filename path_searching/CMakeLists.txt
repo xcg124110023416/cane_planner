@@ -14,6 +14,7 @@ find_package(catkin REQUIRED COMPONENTS
   plan_env
   cv_bridge
   plan_ctrl
+  onboard_detector 
 )
 
 

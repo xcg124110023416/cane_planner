@@ -16,6 +16,9 @@ void SDFMap::initMap(ros::NodeHandle& nh) {
 
   // Params of map properties
   double x_size, y_size, z_size;
+  nh.param("sdf_map/robot_size_x", mp_->robotSize_(0), 1.0);
+  nh.param("sdf_map/robot_size_y", mp_->robotSize_(1), 1.0);
+  nh.param("sdf_map/robot_size_z", mp_->robotSize_(2), 1.8);
   nh.param("sdf_map/resolution", mp_->resolution_, -1.0);
   nh.param("sdf_map/map_size_x", x_size, -1.0);
   nh.param("sdf_map/map_size_y", y_size, -1.0);
@@ -92,9 +95,17 @@ void SDFMap::initMap(ros::NodeHandle& nh) {
   mr_->setMap(this);
   mr_->node_ = nh;
   mr_->init();//初始化MapRos对象
+  mr_->setDetector(detector_);
 
   caster_.reset(new RayCaster);
   caster_->setParams(mp_->resolution_, mp_->map_origin_);
+}
+
+void SDFMap::setDetector(const onboardDetector::dynamicDetector::Ptr& detector) {
+  detector_ = detector;
+  if(mr_){
+    mr_->setDetector(detector);
+  }
 }
 
 void SDFMap::resetBuffer() {

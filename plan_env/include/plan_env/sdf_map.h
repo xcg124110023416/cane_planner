@@ -10,6 +10,7 @@
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <onboard_detector/dynamicDetector.h>
 
 using namespace std;
 
@@ -31,6 +32,7 @@ public:
 
   enum OCCUPANCY { UNKNOWN, FREE, OCCUPIED };
 
+  void setDetector(const onboardDetector::dynamicDetector::Ptr& detector);
   void initMap(ros::NodeHandle& nh);
   void inputPointCloud(const pcl::PointCloud<pcl::PointXYZ>& points, const int& point_num,
                        const Eigen::Vector3d& camera_pos);
@@ -67,10 +69,15 @@ public:
 
   double getGroundHeight(); 
 
+  void updateFreeRegions(const std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>>& freeRegions);
+  void freeRegions(const std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>>& freeRegions);
+  void freeRegion(const Eigen::Vector3d& pos1, const Eigen::Vector3d& pos2);
+  void setFree(const Eigen::Vector3i& idx);
+
   typedef std::shared_ptr<SDFMap> Ptr;
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-  private:
+private:
   void clearAndInflateLocalMap();
   void inflatePoint(const Eigen::Vector3i& pt, int step, vector<Eigen::Vector3i>& pts);
   void setCacheOccupancy(const int& adr, const int& occ);
@@ -82,14 +89,18 @@ public:
   unique_ptr<MapData> md_;
   unique_ptr<MapROS> mr_;
   unique_ptr<RayCaster> caster_;
-
+  onboardDetector::dynamicDetector::Ptr detector_;
   friend MapROS;
 
   bool is_simulation_;  
-
+  std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> freeRegions_;
+  std::deque<std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>>> histFreeRegions_;
+  bool useFreeRegions_ = false;
 };
 
 struct MapParam {
+  // ROBOT SIZE
+	Eigen::Vector3d robotSize_;
   // map properties
   Eigen::Vector3d map_origin_, map_size_;
   Eigen::Vector3d map_min_boundary_, map_max_boundary_;
@@ -134,145 +145,214 @@ struct MapData {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
-inline void SDFMap::posToIndex(const Eigen::Vector3d& pos, Eigen::Vector3i& id) {
-  for (int i = 0; i < 3; ++i)
-    id(i) = floor((pos(i) - mp_->map_origin_(i)) * mp_->resolution_inv_);
-}
+  inline void SDFMap::posToIndex(const Eigen::Vector3d& pos, Eigen::Vector3i& id) {
+    for (int i = 0; i < 3; ++i)
+      id(i) = floor((pos(i) - mp_->map_origin_(i)) * mp_->resolution_inv_);
+  }
 
-inline void SDFMap::indexToPos(const Eigen::Vector3i& id, Eigen::Vector3d& pos) {
-  for (int i = 0; i < 3; ++i)
-    pos(i) = (id(i) + 0.5) * mp_->resolution_ + mp_->map_origin_(i);
-}
+  inline void SDFMap::indexToPos(const Eigen::Vector3i& id, Eigen::Vector3d& pos) {
+    for (int i = 0; i < 3; ++i)
+      pos(i) = (id(i) + 0.5) * mp_->resolution_ + mp_->map_origin_(i);
+  }
 
-inline void SDFMap::boundIndex(Eigen::Vector3i& id) {
-  Eigen::Vector3i id1;
-  id1(0) = max(min(id(0), mp_->map_voxel_num_(0) - 1), 0);
-  id1(1) = max(min(id(1), mp_->map_voxel_num_(1) - 1), 0);
-  id1(2) = max(min(id(2), mp_->map_voxel_num_(2) - 1), 0);
-  id = id1;
-}
+  inline void SDFMap::boundIndex(Eigen::Vector3i& id) {
+    Eigen::Vector3i id1;
+    id1(0) = max(min(id(0), mp_->map_voxel_num_(0) - 1), 0);
+    id1(1) = max(min(id(1), mp_->map_voxel_num_(1) - 1), 0);
+    id1(2) = max(min(id(2), mp_->map_voxel_num_(2) - 1), 0);
+    id = id1;
+  }
 
-inline int SDFMap::toAddress(const int& x, const int& y, const int& z) {
-  return x * mp_->map_voxel_num_(1) * mp_->map_voxel_num_(2) + y * mp_->map_voxel_num_(2) + z;
-}
+  inline int SDFMap::toAddress(const int& x, const int& y, const int& z) {
+    return x * mp_->map_voxel_num_(1) * mp_->map_voxel_num_(2) + y * mp_->map_voxel_num_(2) + z;
+  }
 
-inline int SDFMap::toAddress(const Eigen::Vector3i& id) {
-  return toAddress(id[0], id[1], id[2]);
-}
+  inline int SDFMap::toAddress(const Eigen::Vector3i& id) {
+    return toAddress(id[0], id[1], id[2]);
+  }
 
-inline bool SDFMap::isInMap(const Eigen::Vector3d& pos) {
-  if (pos(0) < mp_->map_min_boundary_(0) + 1e-4 || pos(1) < mp_->map_min_boundary_(1) + 1e-4 ||
-      pos(2) < mp_->map_min_boundary_(2) + 1e-4)
-    return false;
-  if (pos(0) > mp_->map_max_boundary_(0) - 1e-4 || pos(1) > mp_->map_max_boundary_(1) - 1e-4 ||
-      pos(2) > mp_->map_max_boundary_(2) - 1e-4)
-    return false;
-  return true;
-}
-
-inline bool SDFMap::isInMap(const Eigen::Vector3i& idx) {
-  if (idx(0) < 0 || idx(1) < 0 || idx(2) < 0) return false;
-  if (idx(0) > mp_->map_voxel_num_(0) - 1 || idx(1) > mp_->map_voxel_num_(1) - 1 ||
-      idx(2) > mp_->map_voxel_num_(2) - 1)
-    return false;
-  return true;
-}
-
-inline bool SDFMap::isInBox(const Eigen::Vector3i& id) {
-  for (int i = 0; i < 3; ++i) {
-    if (id[i] < mp_->box_min_[i] || id[i] >= mp_->box_max_[i]) {
+  inline bool SDFMap::isInMap(const Eigen::Vector3d& pos) {
+    if (pos(0) < mp_->map_min_boundary_(0) + 1e-4 || pos(1) < mp_->map_min_boundary_(1) + 1e-4 ||
+        pos(2) < mp_->map_min_boundary_(2) + 1e-4)
       return false;
-    }
-  }
-  return true;
-}
-
-inline bool SDFMap::isInBox(const Eigen::Vector3d& pos) {
-  for (int i = 0; i < 3; ++i) {
-    if (pos[i] <= mp_->box_mind_[i] || pos[i] >= mp_->box_maxd_[i]) {
+    if (pos(0) > mp_->map_max_boundary_(0) - 1e-4 || pos(1) > mp_->map_max_boundary_(1) - 1e-4 ||
+        pos(2) > mp_->map_max_boundary_(2) - 1e-4)
       return false;
-    }
+    return true;
   }
-  return true;
-}
 
-inline void SDFMap::boundBox(Eigen::Vector3d& low, Eigen::Vector3d& up) {
-  for (int i = 0; i < 3; ++i) {
-    low[i] = max(low[i], mp_->box_mind_[i]);
-    up[i] = min(up[i], mp_->box_maxd_[i]);
+  inline bool SDFMap::isInMap(const Eigen::Vector3i& idx) {
+    if (idx(0) < 0 || idx(1) < 0 || idx(2) < 0) return false;
+    if (idx(0) > mp_->map_voxel_num_(0) - 1 || idx(1) > mp_->map_voxel_num_(1) - 1 ||
+        idx(2) > mp_->map_voxel_num_(2) - 1)
+      return false;
+    return true;
   }
-}
 
-inline int SDFMap::getOccupancy(const Eigen::Vector3i& id) {
-  if (!isInMap(id)) return -1;
-  double occ = md_->occupancy_buffer_[toAddress(id)];
-  if (occ < mp_->clamp_min_log_ - 1e-3) return UNKNOWN;
-  if (occ > mp_->min_occupancy_log_) return OCCUPIED;
-  return FREE;
-}
-
-inline int SDFMap::getOccupancy(const Eigen::Vector3d& pos) {
-  Eigen::Vector3i id;
-  posToIndex(pos, id);
-  return getOccupancy(id);
-}
-
-inline void SDFMap::setOccupied(const Eigen::Vector3d& pos, const int& occ) {
-  if (!isInMap(pos)) return;
-  Eigen::Vector3i id;
-  posToIndex(pos, id);
-  md_->occupancy_buffer_inflate_[toAddress(id)] = occ;
-}
-
-inline int SDFMap::getInflateOccupancy(const Eigen::Vector3i& id) {
-  if (!isInMap(id)) return -1;
-  return int(md_->occupancy_buffer_inflate_[toAddress(id)]);
-}
-
-inline int SDFMap::getInflateOccupancy(const Eigen::Vector3d& pos) {
-  Eigen::Vector3i id;
-  posToIndex(pos, id);
-  return getInflateOccupancy(id);
-}
-
-inline double SDFMap::getDistance(const Eigen::Vector3i& id) {
-  if (!isInMap(id)) return -1;
-  return md_->distance_buffer_[toAddress(id)];
-}
-
-inline double SDFMap::getDistance(const Eigen::Vector3d& pos) {
-  Eigen::Vector3i id;
-  posToIndex(pos, id);
-  return getDistance(id);
-}
-
-inline void SDFMap::inflatePoint(const Eigen::Vector3i& pt, int step, vector<Eigen::Vector3i>& pts) {
-  int num = 0;
-
-  /* ---------- + shape inflate ---------- */
-  // for (int x = -step; x <= step; ++x)
-  // {
-  //   if (x == 0)
-  //     continue;
-  //   pts[num++] = Eigen::Vector3i(pt(0) + x, pt(1), pt(2));
-  // }
-  // for (int y = -step; y <= step; ++y)
-  // {
-  //   if (y == 0)
-  //     continue;
-  //   pts[num++] = Eigen::Vector3i(pt(0), pt(1) + y, pt(2));
-  // }
-  // for (int z = -1; z <= 1; ++z)
-  // {
-  //   pts[num++] = Eigen::Vector3i(pt(0), pt(1), pt(2) + z);
-  // }
-
-  /* ---------- all inflate ---------- */
-  for (int x = -step; x <= step; ++x)
-    for (int y = -step; y <= step; ++y)
-      for (int z = -step; z <= step; ++z) {
-        pts[num++] = Eigen::Vector3i(pt(0) + x, pt(1) + y, pt(2) + z);
+  inline bool SDFMap::isInBox(const Eigen::Vector3i& id) {
+    for (int i = 0; i < 3; ++i) {
+      if (id[i] < mp_->box_min_[i] || id[i] >= mp_->box_max_[i]) {
+        return false;
       }
-}
+    }
+    return true;
+  }
+
+  inline bool SDFMap::isInBox(const Eigen::Vector3d& pos) {
+    for (int i = 0; i < 3; ++i) {
+      if (pos[i] <= mp_->box_mind_[i] || pos[i] >= mp_->box_maxd_[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  inline void SDFMap::boundBox(Eigen::Vector3d& low, Eigen::Vector3d& up) {
+    for (int i = 0; i < 3; ++i) {
+      low[i] = max(low[i], mp_->box_mind_[i]);
+      up[i] = min(up[i], mp_->box_maxd_[i]);
+    }
+  }
+
+  inline int SDFMap::getOccupancy(const Eigen::Vector3i& id) {
+    if (!isInMap(id)) return -1;
+    double occ = md_->occupancy_buffer_[toAddress(id)];
+    if (occ < mp_->clamp_min_log_ - 1e-3) return UNKNOWN;
+    if (occ > mp_->min_occupancy_log_) return OCCUPIED;
+    return FREE;
+  }
+
+  inline int SDFMap::getOccupancy(const Eigen::Vector3d& pos) {
+    Eigen::Vector3i id;
+    posToIndex(pos, id);
+    return getOccupancy(id);
+  }
+
+  inline void SDFMap::setOccupied(const Eigen::Vector3d& pos, const int& occ) {
+    if (!isInMap(pos)) return;
+    Eigen::Vector3i id;
+    posToIndex(pos, id);
+    md_->occupancy_buffer_inflate_[toAddress(id)] = occ;
+  }
+
+  inline int SDFMap::getInflateOccupancy(const Eigen::Vector3i& id) {
+    if (!isInMap(id)) return -1;
+    return int(md_->occupancy_buffer_inflate_[toAddress(id)]);
+  }
+
+  inline int SDFMap::getInflateOccupancy(const Eigen::Vector3d& pos) {
+    Eigen::Vector3i id;
+    posToIndex(pos, id);
+    return getInflateOccupancy(id);
+  }
+
+  inline double SDFMap::getDistance(const Eigen::Vector3i& id) {
+    if (!isInMap(id)) return -1;
+    return md_->distance_buffer_[toAddress(id)];
+  }
+
+  inline double SDFMap::getDistance(const Eigen::Vector3d& pos) {
+    Eigen::Vector3i id;
+    posToIndex(pos, id);
+    return getDistance(id);
+  }
+
+  inline void SDFMap::inflatePoint(const Eigen::Vector3i& pt, int step, vector<Eigen::Vector3i>& pts) {
+    int num = 0;
+
+    /* ---------- + shape inflate ---------- */
+    // for (int x = -step; x <= step; ++x)
+    // {
+    //   if (x == 0)
+    //     continue;
+    //   pts[num++] = Eigen::Vector3i(pt(0) + x, pt(1), pt(2));
+    // }
+    // for (int y = -step; y <= step; ++y)
+    // {
+    //   if (y == 0)
+    //     continue;
+    //   pts[num++] = Eigen::Vector3i(pt(0), pt(1) + y, pt(2));
+    // }
+    // for (int z = -1; z <= 1; ++z)
+    // {
+    //   pts[num++] = Eigen::Vector3i(pt(0), pt(1), pt(2) + z);
+    // }
+
+    /* ---------- all inflate ---------- */
+    for (int x = -step; x <= step; ++x)
+      for (int y = -step; y <= step; ++y)
+        for (int z = -step; z <= step; ++z) {
+          pts[num++] = Eigen::Vector3i(pt(0) + x, pt(1) + y, pt(2) + z);
+        }
+  }
+
+  inline void SDFMap::updateFreeRegions(const std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>>& freeRegions){
+		this->freeRegions_ = freeRegions;
+		if (this->histFreeRegions_.size() <= 5){
+			this->histFreeRegions_.push_back(freeRegions);
+		}
+		else{
+			this->histFreeRegions_.pop_front();
+			this->histFreeRegions_.push_back(freeRegions);
+		}
+
+
+		if (this->histFreeRegions_.size() != 0){
+			this->useFreeRegions_ = true;
+		}
+		else{
+			this->useFreeRegions_ = false;
+		}
+	}
+
+  	inline void SDFMap::freeRegions(const std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>>& freeRegions){
+		for (std::pair<Eigen::Vector3d, Eigen::Vector3d> freeRegion : freeRegions){
+			this->freeRegion(freeRegion.first, freeRegion.second);
+		}
+	}
+
+  inline void SDFMap::freeRegion(const Eigen::Vector3d& pos1, const Eigen::Vector3d& pos2){
+		Eigen::Vector3i idx1, idx2;
+		this->posToIndex(pos1, idx1);
+		this->posToIndex(pos2, idx2);
+		this->boundIndex(idx1);
+		this->boundIndex(idx2);
+		for (int xID=idx1(0); xID<=idx2(0); ++xID){
+			for (int yID=idx1(1); yID<=idx2(1); ++yID){
+				for (int zID=idx1(2); zID<=idx2(2); ++zID){
+					this->setFree(Eigen::Vector3i (xID, yID, zID));
+				}	
+			}
+		}
+	}
+
+  inline void SDFMap::setFree(const Eigen::Vector3i& idx){
+		if (not this->isInMap(idx)) return;
+		int address = this->toAddress(idx);
+		md_->occupancy_buffer_[address] = mp_->clamp_min_log_;
+
+		// also set inflated map to free
+		int xInflateSize = ceil(mp_->robotSize_(0)/(2*mp_->resolution_));
+		int yInflateSize = ceil(mp_->robotSize_(1)/(2*mp_->resolution_));
+		int zInflateSize = ceil(mp_->robotSize_(2)/(2*mp_->resolution_));
+		Eigen::Vector3i inflateIndex;
+		int inflateAddress;
+		const int maxIndex = mp_->map_voxel_num_(0) * mp_->map_voxel_num_(1) * mp_->map_voxel_num_(2);
+		for (int ix=-xInflateSize; ix<=xInflateSize; ++ix){
+			for (int iy=-yInflateSize; iy<=yInflateSize; ++iy){
+				for (int iz=-zInflateSize; iz<=zInflateSize; ++iz){
+					inflateIndex(0) = idx(0) + ix;
+					inflateIndex(1) = idx(1) + iy;
+					inflateIndex(2) = idx(2) + iz;
+					inflateAddress = this->toAddress(inflateIndex);
+					if ((inflateAddress < 0) or (inflateAddress > maxIndex)){
+						continue; // those points are not in the reserved map
+					} 
+					md_->occupancy_buffer_inflate_[inflateAddress] = false;
+				}
+			}
+		}
+	}
+
 }
 #endif

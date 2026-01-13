@@ -120,9 +120,13 @@ namespace cane_planner
         exec_state_ = FSM_STATE::INIT;
         have_odom_ = false;
         have_target_ = false;
+        // init detector
+        ROS_WARN(" onboard detector start");
+        // detector_.reset(new onboardDetector::dynamicDetector(nh));
         // init esdf_map and collision
         ROS_WARN(" sdf_map and collision start");
         sdf_map_.reset(new fast_planner::SDFMap);
+        // sdf_map_->setDetector(detector_);
         sdf_map_->initMap(nh);
         collision_.reset(new CollisionDetection);
         collision_->init(nh);

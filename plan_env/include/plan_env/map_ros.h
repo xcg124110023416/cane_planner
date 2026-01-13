@@ -13,6 +13,9 @@
 #include <cv_bridge/cv_bridge.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <nav_msgs/Odometry.h>
+#include <visualization_msgs/MarkerArray.h>
+#include <onboard_detector/dynamicDetector.h>
+
 
 #include <memory>
 #include <random>
@@ -30,7 +33,11 @@ public:
   MapROS();
   ~MapROS();
   void setMap(SDFMap* map);
+  void setDetector(const onboardDetector::dynamicDetector::Ptr& detector);
   void init();
+
+    // subscribe external dynamic obstacles (e.g., published by onboard_detector node)
+    void dynamicBBoxesCallback(const visualization_msgs::MarkerArrayConstPtr& msg);
 
 private:
   void depthPoseCallback(const sensor_msgs::ImageConstPtr& img,
@@ -43,6 +50,7 @@ private:
                           const nav_msgs::OdometryConstPtr& odom);                  
   void updateESDFCallback(const ros::TimerEvent& /*event*/);
   void visCallback(const ros::TimerEvent& /*event*/);
+  void freeMapCallback(const ros::TimerEvent& /*event*/);
 
   void odomCallback(const nav_msgs::OdometryConstPtr& odom);
   void cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img);
@@ -58,6 +66,10 @@ private:
   void proessDepthImage();
 
   SDFMap* map_;
+  onboardDetector::dynamicDetector::Ptr detector_;
+    // subscribed dynamic obstacles (converted from MarkerArray)
+    std::vector<onboardDetector::box3D> latest_obstacles_;
+    std::mutex obstacles_mutex_;
   // may use ExactTime?
   typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, geometry_msgs::PoseStamped>
       SyncPolicyImagePose;
@@ -87,7 +99,8 @@ private:
   ros::Publisher map_local_pub_, map_local_inflate_pub_, esdf_pub_, map_all_pub_, unknown_pub_,
       update_range_pub_, depth_pub_;
   ros::Subscriber indep_depth_sub_, indep_odom_sub_, indep_pose_sub_, indep_cloud_sub_;
-  ros::Timer esdf_timer_, vis_timer_;
+    ros::Subscriber dynamic_bbox_sub_;
+  ros::Timer esdf_timer_, vis_timer_, freeMapTimer_;
 
   // params, depth projection
   double cx_, cy_, fx_, fy_;
