@@ -73,6 +73,7 @@ namespace fast_planner
 
     local_updated_ = false;
     esdf_need_update_ = false;
+    map_inflate_ = false;
     fuse_time_ = 0.0;
     esdf_time_ = 0.0;
     max_fuse_time_ = 0.0;
@@ -85,23 +86,17 @@ namespace fast_planner
     random_device rd;
     eng_ = default_random_engine(rd());
 
-    esdf_timer_ = node_.createTimer(ros::Duration(0.05), &MapROS::updateESDFCallback, this);//计算每个体素到最近障碍物的距离
-    vis_timer_ = node_.createTimer(ros::Duration(0.05), &MapROS::visCallback, this);
-    freeMapTimer_ = node_.createTimer(ros::Duration(0.01), &MapROS::freeMapCallback, this);
-
     // publish init
     map_all_pub_ = node_.advertise<sensor_msgs::PointCloud2>("/sdf_map/occupancy_all", 10);
     map_local_pub_ = node_.advertise<sensor_msgs::PointCloud2>("/sdf_map/occupancy_local", 10);
-    map_local_inflate_pub_ =
-        node_.advertise<sensor_msgs::PointCloud2>("/sdf_map/occupancy_local_inflate", 10);
+    map_local_inflate_pub_ = node_.advertise<sensor_msgs::PointCloud2>("/sdf_map/occupancy_local_inflate", 10);
     unknown_pub_ = node_.advertise<sensor_msgs::PointCloud2>("/sdf_map/unknown", 10);
     esdf_pub_ = node_.advertise<sensor_msgs::PointCloud2>("/sdf_map/esdf", 10);
     update_range_pub_ = node_.advertise<visualization_msgs::Marker>("/sdf_map/update_range", 10);
     depth_pub_ = node_.advertise<sensor_msgs::PointCloud2>("/sdf_map/depth_cloud", 10);
 
     // subscribe dynamic obstacles from external detector node
-    // dynamic_bbox_sub_ = node_.subscribe("/onboard_detector/dynamic_bboxes", 1,
-    //                   &MapROS::dynamicBBoxesCallback, this);
+    dynamic_bbox_sub_ = node_.subscribe("/onboard_detector/dynamic_bboxes", 1,&MapROS::dynamicBBoxesCallback, this);
 
     // sub init
     depth_sub_.reset(new message_filters::Subscriber<sensor_msgs::Image>(node_, "/map_ros/depth", 50));
@@ -140,8 +135,16 @@ namespace fast_planner
           MapROS::SyncPolicyCloudOdom(100), *cloud_sub_, *odom_sub_));
       sync_cloud_odom_->registerCallback(boost::bind(&MapROS::cloudOdomCallback, this, _1, _2));
     }
+
+
+    local_update_timer_ = node_.createTimer(ros::Duration(0.05), &MapROS::localUpdateCallback, this);
+		inflateTimer_ = this->node_.createTimer(ros::Duration(0.05), &MapROS::inflateMapCallback, this);
+    esdf_timer_ = node_.createTimer(ros::Duration(0.05), &MapROS::updateESDFCallback, this);//计算每个体素到最近障碍物的距离
+    freeMapTimer_ = node_.createTimer(ros::Duration(0.033), &MapROS::freeMapCallback, this);
+    vis_timer_ = node_.createTimer(ros::Duration(0.1), &MapROS::visCallback, this);
+
       
-      map_start_time_ = ros::Time::now();
+    map_start_time_ = ros::Time::now();
   }
 
   void MapROS::visCallback(const ros::TimerEvent &e)
@@ -150,19 +153,40 @@ namespace fast_planner
     if (show_all_map_)
     {
       // Limit the frequency of all map
-      static double tpass = 0.0;
-      tpass += (e.current_real - e.last_real).toSec();
+      // static double tpass = 0.0;
+      // tpass += (e.current_real - e.last_real).toSec();
       if (!esdf_need_update_)
       {
-        publishMapAll();
+        // publishMapAll();
         // publishUnknown();
         publishESDF();
         // publishUpdateRange();
-        tpass = 0.0;
+        // tpass = 0.0;
       }
     }
 
     // publishDepth();
+  }
+
+  void MapROS::localUpdateCallback(const ros::TimerEvent & /*event*/){
+    if( !local_updated_){
+      return;
+    }
+
+    int num = point_cloud_.points.size();
+    map_->inputPointCloud(point_cloud_, num, camera_pos_);
+
+    local_updated_ = false;
+    map_inflate_ = true;
+  }
+
+  void MapROS::inflateMapCallback(const ros::TimerEvent &){
+    if(map_inflate_){
+      map_->clearAndInflateLocalMap();
+      map_inflate_ = false;
+      esdf_need_update_ = true;
+    }
+
   }
 
   void MapROS::updateESDFCallback(const ros::TimerEvent & /*event*/)
@@ -183,34 +207,35 @@ namespace fast_planner
   }
 
   void MapROS::freeMapCallback(const ros::TimerEvent&){
-    // std::vector<onboardDetector::box3D> obstacles;
-    // {
-    //   std::lock_guard<std::mutex> lock(obstacles_mutex_);
-    //   obstacles = latest_obstacles_;
-    // }
-    // std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> freeRegions;
-    // for (const auto& ob: obstacles){
-    //   Eigen::Vector3d lowerBound (ob.x - ob.x_width/2 - 0.3, ob.y - ob.y_width/2 - 0.3, ob.z);
-    //   Eigen::Vector3d upperBound (ob.x + ob.x_width/2 + 0.3, ob.y + ob.y_width/2 + 0.3, ob.z + ob.z_width + 0.3);
-    //   freeRegions.push_back(std::make_pair(lowerBound, upperBound));
-    // }
-    // if (!freeRegions.empty()) {
-    //   this->map_->updateFreeRegions(freeRegions);
-    //   this->map_->freeRegions(freeRegions);
-    // }
     std::vector<onboardDetector::box3D> obstacles;
-		std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> freeRegions;
-		this->detector_->getDynamicObstacles(obstacles);
-		// double fov = 1.57;
-		for (onboardDetector::box3D ob: obstacles){
-			// if (this->detector_->isObstacleInSensorRange(ob, fov)){
-				Eigen::Vector3d lowerBound (ob.x-ob.x_width/2-0.3, ob.y-ob.y_width/2-0.3, ob.z);
-				Eigen::Vector3d upperBound (ob.x+ob.x_width/2+0.3, ob.y+ob.y_width/2+0.3, ob.z+ob.z_width+0.3);
-				freeRegions.push_back(std::make_pair(lowerBound, upperBound));
-			// }
-		}
-		this->map_->updateFreeRegions(freeRegions);
-		this->map_->freeRegions(freeRegions);
+    {
+      std::lock_guard<std::mutex> lock(obstacles_mutex_);
+      obstacles = latest_obstacles_;
+    }
+    std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> freeRegions;
+    for (const auto& ob: obstacles){
+      Eigen::Vector3d lowerBound (ob.x - ob.x_width/2 - 0.3, ob.y - ob.y_width/2 - 0.3, ob.z);
+      Eigen::Vector3d upperBound (ob.x + ob.x_width/2 + 0.3, ob.y + ob.y_width/2 + 0.3, ob.z + ob.z_width + 0.3);
+      freeRegions.push_back(std::make_pair(lowerBound, upperBound));
+      cout<<"free region: "<<lowerBound.transpose()<<" to "<<upperBound.transpose()<<endl;
+    }
+    if (!freeRegions.empty()) {
+      this->map_->updateFreeRegions(freeRegions);
+      this->map_->freeRegions(freeRegions);
+    }
+    // std::vector<onboardDetector::box3D> obstacles;
+		// std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> freeRegions;
+		// this->detector_->getDynamicObstacles(obstacles);
+		// // double fov = 1.57;
+		// for (onboardDetector::box3D ob: obstacles){
+		// 	// if (this->detector_->isObstacleInSensorRange(ob, fov)){
+		// 		Eigen::Vector3d lowerBound (ob.x-ob.x_width/2-0.3, ob.y-ob.y_width/2-0.3, ob.z);
+		// 		Eigen::Vector3d upperBound (ob.x+ob.x_width/2+0.3, ob.y+ob.y_width/2+0.3, ob.z+ob.z_width+0.3);
+		// 		freeRegions.push_back(std::make_pair(lowerBound, upperBound));
+		// 	// }
+		// }
+		// this->map_->updateFreeRegions(freeRegions);
+		// this->map_->freeRegions(freeRegions);
 	}
 
   void MapROS::depthPoseCallback(const sensor_msgs::ImageConstPtr &img,
@@ -315,6 +340,47 @@ namespace fast_planner
       esdf_need_update_ = true;
       local_updated_ = false;
     }
+  }
+
+
+  void MapROS::cloudOdomCallback(const sensor_msgs::PointCloud2ConstPtr &msg,
+                                const nav_msgs::OdometryConstPtr &odom)
+  {
+    // tf from cam to odom
+    // cout<< "cloudOdomCallback" << endl;
+    pcl::fromROSMsg(*msg, point_cloud_);//转换为pcl类型cloud，点云意味着障碍物
+    geometry_msgs::PoseStamped pose_cam;
+    pose_cam.header = odom->header;//camera_init
+    pose_cam.pose = odom->pose.pose;
+    geometry_msgs::PoseStamped pose_world;
+    tf_listener_.transformPose("world", pose_cam, pose_world);//camera_init to world，实际没有变化
+    camera_pos_(0) = pose_world.pose.position.x;
+    camera_pos_(1) = pose_world.pose.position.y;
+    camera_pos_(2) = pose_world.pose.position.z;
+    camera_q_ = Eigen::Quaterniond( pose_cam.pose.orientation.w,
+                                    pose_cam.pose.orientation.x,
+                                    pose_cam.pose.orientation.y,
+                                    pose_cam.pose.orientation.z);
+
+    if (map_->isInMap(camera_pos_))// exceed mapped region
+    {
+      local_updated_ = true;
+    }else{
+      local_updated_ = false;
+    }
+          
+    // pcl::PointCloud<pcl::PointXYZ> cloud;
+    // pcl::fromROSMsg(*msg, cloud);//转换为pcl类型cloud，点云意味着障碍物
+    // int num = cloud.points.size();
+    // //将输入的点云数据融合到三维栅格地图（SDFMap）中,把相机看到的点云变成一张“概率地图”occupancy_buffer_，更新出哪些地方是障碍、哪些地方是空的，并维护更新范围和缓存，方便下一步地图计算。
+    // map_->inputPointCloud(cloud, num, camera_pos_);
+
+    // if (local_updated_)
+    // {
+    //   map_->clearAndInflateLocalMap();//主要用于实现三维栅格地图中障碍物的膨胀过程，occupancy_buffer_inflate_为膨胀障碍栅格
+    //   esdf_need_update_ = true;
+    //   local_updated_ = false;
+    // }
   }
 
 
@@ -436,41 +502,6 @@ void MapROS::cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img) {
 
   esdf_need_update_ = true;
 }
-
-  void MapROS::cloudOdomCallback(const sensor_msgs::PointCloud2ConstPtr &msg,
-                                 const nav_msgs::OdometryConstPtr &odom)
-  {
-    // tf from cam to odom
-    // cout<< "cloudOdomCallback" << endl;
-    geometry_msgs::PoseStamped pose_cam;
-    pose_cam.header = odom->header;//camera_init
-    pose_cam.pose = odom->pose.pose;
-    geometry_msgs::PoseStamped pose_world;
-    tf_listener_.transformPose("world", pose_cam, pose_world);//camera_init to world，实际没有变化
-    camera_pos_(0) = pose_world.pose.position.x;
-    camera_pos_(1) = pose_world.pose.position.y;
-    camera_pos_(2) = pose_world.pose.position.z;
-    if (!map_->isInMap(camera_pos_)) // exceed mapped region
-      return;
-    camera_q_ = Eigen::Quaterniond( pose_cam.pose.orientation.w,
-                                    pose_cam.pose.orientation.x,
-                                    pose_cam.pose.orientation.y,
-                                    pose_cam.pose.orientation.z);
-
-
-    pcl::PointCloud<pcl::PointXYZ> cloud;
-    pcl::fromROSMsg(*msg, cloud);//转换为pcl类型cloud，点云意味着障碍物
-    int num = cloud.points.size();
-    //将输入的点云数据融合到三维栅格地图（SDFMap）中,把相机看到的点云变成一张“概率地图”occupancy_buffer_，更新出哪些地方是障碍、哪些地方是空的，并维护更新范围和缓存，方便下一步地图计算。
-    map_->inputPointCloud(cloud, num, camera_pos_);
-
-    if (local_updated_)
-    {
-      map_->clearAndInflateLocalMap();//主要用于实现三维栅格地图中障碍物的膨胀过程，occupancy_buffer_inflate_为膨胀障碍栅格
-      esdf_need_update_ = true;
-      local_updated_ = false;
-    }
-  }
 
   void MapROS::proessDepthImage()
   {
