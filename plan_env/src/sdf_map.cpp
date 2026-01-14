@@ -93,9 +93,9 @@ void SDFMap::initMap(ros::NodeHandle& nh) {
 
   // Initialize ROS wrapper
   mr_->setMap(this);
+  mr_->setDetector(detector_);
   mr_->node_ = nh;
   mr_->init();//初始化MapRos对象
-  mr_->setDetector(detector_);
 
   caster_.reset(new RayCaster);
   caster_->setParams(mp_->resolution_, mp_->map_origin_);
@@ -103,9 +103,9 @@ void SDFMap::initMap(ros::NodeHandle& nh) {
 
 void SDFMap::setDetector(const std::shared_ptr<onboardDetector::dynamicDetector>& detector) {
   detector_ = detector;
-  if(mr_){
-    mr_->setDetector(detector);
-  }
+  // if(mr_){
+  //   mr_->setDetector(detector);
+  // }
 }
 
 void SDFMap::resetBuffer() {
