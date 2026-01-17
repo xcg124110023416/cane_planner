@@ -236,16 +236,16 @@ namespace cane_planner
                 
                 // ==================== 添加动态障碍物代价到启发式函数 ====================
                 // 动态障碍物信息通过 setDynamicObstacles() 从 planner_manager 传入
-                double dynObsCost = getDynamicObstacleCost(
-                    pur_state.com_pos,
-                    dynObstaclesPos_,      // 成员变量：动态障碍物位置向量
-                    dynObstaclesVel_,      // 成员变量：动态障碍物速度向量
-                    dynObstaclesSize_,     // 成员变量：动态障碍物大小向量
-                    predHorizon_,          // 预测地平线
-                    ts_,                   // 时间采样间隔
-                    distThreshDynamic_     // 距离阈值
-                );
-                tmp_f_score += weight_dyn_obs_ * dynObsCost;  // 加权合并到总代价
+                // double dynObsCost = getDynamicObstacleCost(
+                //     pur_state.com_pos,
+                //     dynObstaclesPos_,      // 成员变量：动态障碍物位置向量
+                //     dynObstaclesVel_,      // 成员变量：动态障碍物速度向量
+                //     dynObstaclesSize_,     // 成员变量：动态障碍物大小向量
+                //     predHorizon_,          // 预测地平线
+                //     ts_,                   // 时间采样间隔
+                //     distThreshDynamic_     // 距离阈值
+                // );
+                // tmp_f_score += weight_dyn_obs_ * dynObsCost;  // 加权合并到总代价
                 // ===================================================================
                 if (pro_node == NULL)
                 {

@@ -134,7 +134,7 @@ namespace cane_planner
         exec_state_ = FSM_STATE::INIT;
         have_odom_ = false;
         have_target_ = false;
-        Param_init(nh);
+        // Param_init(nh);
         // init detector
         // ROS_WARN(" onboard detector start");
         // detector_.reset(new onboardDetector::dynamicDetector(nh));
@@ -485,6 +485,7 @@ namespace cane_planner
             std::lock_guard<std::mutex> lock(dynObsMutex_);
             // 将缓存的动态障碍物信息传给kinodynamic_astar
             kin_finder_->setDynamicObstacles(dynObsPos_, dynObsVel_, dynObsSize_);
+            // cout<<"Set " << dynObsPos_.size() << " dynamic obstacles to kinodynamic A*." << endl;
         }
         // =========================================================================
         
@@ -746,6 +747,7 @@ namespace cane_planner
             dynObsPos_.push_back(pos);
             dynObsVel_.push_back(vel);
             dynObsSize_.push_back(size);
+            // cout<<"Dynamic Obstacle " << i << ": Pos(" << pos.transpose() << "), Vel(" << vel.transpose() << "), Size(" << size.transpose() << ")" << endl; 
         }
     }
 

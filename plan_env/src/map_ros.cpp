@@ -139,8 +139,8 @@ namespace fast_planner
 
     local_update_timer_ = node_.createTimer(ros::Duration(0.05), &MapROS::localUpdateCallback, this);
 		inflateTimer_ = this->node_.createTimer(ros::Duration(0.05), &MapROS::inflateMapCallback, this);
+    // freeMapTimer_ = node_.createTimer(ros::Duration(0.033), &MapROS::freeMapCallback, this);
     esdf_timer_ = node_.createTimer(ros::Duration(0.05), &MapROS::updateESDFCallback, this);//计算每个体素到最近障碍物的距离
-    freeMapTimer_ = node_.createTimer(ros::Duration(0.033), &MapROS::freeMapCallback, this);
     vis_timer_ = node_.createTimer(ros::Duration(0.1), &MapROS::visCallback, this);
 
       
@@ -185,6 +185,23 @@ namespace fast_planner
       map_->clearAndInflateLocalMap();
       map_inflate_ = false;
       esdf_need_update_ = true;
+    }
+
+    std::vector<onboardDetector::box3D> obstacles;
+    {
+      std::lock_guard<std::mutex> lock(obstacles_mutex_);
+      obstacles = latest_obstacles_;
+    }
+    std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> freeRegions;
+    for (const auto& ob: obstacles){
+      Eigen::Vector3d lowerBound (ob.x - ob.x_width/2 - 0.3, ob.y - ob.y_width/2 - 0.3, ob.z);
+      Eigen::Vector3d upperBound (ob.x + ob.x_width/2 + 0.3, ob.y + ob.y_width/2 + 0.3, ob.z + ob.z_width + 0.3);
+      freeRegions.push_back(std::make_pair(lowerBound, upperBound));
+      // cout<<"free region: "<<lowerBound.transpose()<<" to "<<upperBound.transpose()<<endl;
+    }
+    if (!freeRegions.empty()) {
+      this->map_->updateFreeRegions(freeRegions);
+      this->map_->freeRegions(freeRegions);
     }
 
   }

@@ -98,7 +98,7 @@
         <param name="kinastar/max_aw" value="0.2"/>
         <param name="kinastar/max_theta" value="0.5"/>
 
-        <param name="kinastar/weight_dyn_obs" value="1.0"/>
+        <param name="kinastar/weight_dyn_obs" value="0.0"/>
         <param name="kinastar/pred_horizon" value="2.0"/>
         <param name="kinastar/ts" value="0.1"/>
         <param name="kinastar/distThresh_Dynamic" value="1.0"/>
