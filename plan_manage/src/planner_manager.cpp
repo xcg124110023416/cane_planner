@@ -114,14 +114,29 @@ namespace cane_planner
     }
 
     //------------------- real experience ---------------------
+    void PlannerManager::Param_init(ros::NodeHandle &nh)
+    {
+        nh.param("manager/max_vel", pp_.max_vel_, -1.0);
+        nh.param("manager/max_acc", pp_.max_acc_, -1.0);
+        nh.param("manager/max_jerk", pp_.max_jerk_, -1.0);
+        nh.param("manager/dynamic_environment", pp_.dynamic_, -1);
+        nh.param("manager/clearance_threshold", pp_.clearance_, -1.0);
+        nh.param("manager/local_segment_length", pp_.local_traj_len_, -1.0);
+        nh.param("manager/control_points_distance", pp_.ctrl_pt_dist, -1.0);
+
+        // local_data_.traj_id_ = 0;
+    }
+
+
     void PlannerManager::init(ros::NodeHandle &nh)
     {
         // init FSM
         exec_state_ = FSM_STATE::INIT;
         have_odom_ = false;
         have_target_ = false;
+        Param_init(nh);
         // init detector
-        ROS_WARN(" onboard detector start");
+        // ROS_WARN(" onboard detector start");
         // detector_.reset(new onboardDetector::dynamicDetector(nh));
         // init esdf_map and collision
         ROS_WARN(" sdf_map and collision start");
@@ -154,6 +169,9 @@ namespace cane_planner
             nh.subscribe("/move_base_simple/goal", 1, &PlannerManager::GoalCallback, this);
         odom_sub_ =
             nh.subscribe("/odom_world", 1, &PlannerManager::odometryCallback, this);
+        // 订阅动态障碍物信息话题
+        dyn_obs_sub_ = nh.subscribe("/onboard_detector/dynamic_obstacles_info", 10, 
+                                     &PlannerManager::dynamicObstaclesCallback, this);
         // Timer
         exec_timer_ =
             nh.createTimer(ros::Duration(0.2), &PlannerManager::execFSMCallback, this);
@@ -166,6 +184,8 @@ namespace cane_planner
         // Path
         kin_path_pub_ = nh.advertise<nav_msgs::Path>("/kin_astar/path", 20);
         a_path_pub_ = nh.advertise<nav_msgs::Path>("/astar/path", 20);
+        
+        
     }
     // real experience callback waypoint or goal
     void PlannerManager::GoalCallback(const geometry_msgs::PoseStamped::ConstPtr &msg)
@@ -459,6 +479,15 @@ namespace cane_planner
         kin_finder_->reset();
         num++;
         std::cout << "kin," << num << ",";
+        
+        // ==================== 从缓存获取动态障碍物信息（通过话题订阅更新） ====================
+        {
+            std::lock_guard<std::mutex> lock(dynObsMutex_);
+            // 将缓存的动态障碍物信息传给kinodynamic_astar
+            kin_finder_->setDynamicObstacles(dynObsPos_, dynObsVel_, dynObsSize_);
+        }
+        // =========================================================================
+        
         // todo
         Eigen::Vector3d input;
         // double vx, vy;
@@ -471,6 +500,11 @@ namespace cane_planner
 
         bool plan_success = kin_finder_->search(start_state_, input, end_state_);
         ros::Time time_2 = ros::Time::now();
+
+        // double ts = pp_.ctrl_pt_dist / pp_.max_vel_;
+        // vector<Eigen::Vector3d> point_set, start_end_derivatives;
+        // kin_finder_->getSamples(ts, point_set, start_end_derivatives);
+
         if (plan_success)
         {
             std::cout << (time_2 - time_1).toSec() << ",";
@@ -685,6 +719,34 @@ namespace cane_planner
             last = cur;
         }
         return len;
+    }
+
+    // 动态障碍物话题回调函数
+    void PlannerManager::dynamicObstaclesCallback(const onboard_detector::DynamicObstacles::ConstPtr &msg)
+    {
+        std::lock_guard<std::mutex> lock(dynObsMutex_);
+        
+        // 清空旧数据
+        dynObsPos_.clear();
+        dynObsVel_.clear();
+        dynObsSize_.clear();
+        
+        // 机器人尺寸用于膨胀障碍物
+        Eigen::Vector3d robotSize(0.3, 0.3, 0.6);
+        
+        // 从消息中提取动态障碍物信息
+        for (size_t i = 0; i < msg->num; ++i) {
+            Eigen::Vector3d pos(msg->position[i].x, msg->position[i].y, msg->position[i].z);
+            Eigen::Vector3d vel(msg->velocity[i].x, msg->velocity[i].y, msg->velocity[i].z);
+            // 尺寸膨胀机器人大小
+            Eigen::Vector3d size(msg->size[i].x + robotSize(0), 
+                                 msg->size[i].y + robotSize(1), 
+                                 msg->size[i].z + robotSize(2));
+            
+            dynObsPos_.push_back(pos);
+            dynObsVel_.push_back(vel);
+            dynObsSize_.push_back(size);
+        }
     }
 
 } // namespace cane_planner

@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <vector>
+#include <mutex>
 
 #include <Eigen/Eigen>
 #include <Eigen/Geometry>
@@ -14,7 +15,7 @@
 #include <visualization_msgs/Marker.h>
 #include <tf/transform_datatypes.h>
 #include <tf/transform_listener.h>
-#include <onboard_detector/dynamicDetector.h>
+#include <onboard_detector/DynamicObstacles.h>  // 动态障碍物话题消息
 
 
 // #include <nav_msgs/OccupancyGrid.h>
@@ -23,6 +24,7 @@
 #include <path_searching/kinodynamic_astar.h>
 #include <path_searching/lfpc.h>
 #include <plan_env/collision_detection.h>
+#include <plan_container.hpp>
 
 namespace cane_planner
 {
@@ -42,7 +44,6 @@ namespace cane_planner
         fast_planner::SDFMap::Ptr sdf_map_;
         CollisionDetection::Ptr collision_;
         LFPC::Ptr lfpc_model_;
-        std::shared_ptr<onboardDetector::dynamicDetector> detector_;
 
         
         unique_ptr<Astar> astar_finder_;
@@ -64,11 +65,18 @@ namespace cane_planner
         Eigen::Vector3d start_state_; // start state
         Eigen::Vector3d end_state_;   // end state
 
+        // 动态障碍物缓存（从话题订阅获取）
+        std::vector<Eigen::Vector3d> dynObsPos_;
+        std::vector<Eigen::Vector3d> dynObsVel_;
+        std::vector<Eigen::Vector3d> dynObsSize_;
+        std::mutex dynObsMutex_;  // 线程安全锁
+
         /*---------- Ros utils -----------*/
         ros::Timer exec_timer_;
         ros::Timer replan_timer_;
         ros::Subscriber odom_sub_, goal_sub;
         ros::Subscriber goal_sub_, start_sub_;
+        ros::Subscriber dyn_obs_sub_;  // 动态障碍物订阅者
         ros::Publisher astar_pub_, kin_vis_pub_, kin_foot_pub_;
         ros::Publisher kin_path_pub_, a_path_pub_;
         tf::TransformListener tf_listener_;
@@ -99,6 +107,8 @@ namespace cane_planner
         // sim sub callback
         void goalCallback(const geometry_msgs::PoseStamped::ConstPtr &goal);
         void startCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr &start);
+        // 动态障碍物话题回调
+        void dynamicObstaclesCallback(const onboard_detector::DynamicObstacles::ConstPtr &msg);
 
     public:
         PlannerManager(bool simulation, int planner)
@@ -109,8 +119,11 @@ namespace cane_planner
         ~PlannerManager();
         void init(ros::NodeHandle &nh);
         void simInit(ros::NodeHandle &nh);
-
         void callPath();
+        void Param_init(ros::NodeHandle &nh);
+
+
+        PlanParameters pp_;
     };
 
 } // namespace cane_planner

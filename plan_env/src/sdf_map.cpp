@@ -93,7 +93,7 @@ void SDFMap::initMap(ros::NodeHandle& nh) {
 
   // Initialize ROS wrapper
   mr_->setMap(this);
-  mr_->setDetector(detector_);
+  // mr_->setDetector(detector_);
   mr_->node_ = nh;
   mr_->init();//初始化MapRos对象
 

@@ -38,6 +38,7 @@ include_directories(
   include
   SYSTEM
   ${catkin_INCLUDE_DIRS}
+  ${CATKIN_DEVEL_PREFIX}/include  # 确保包含生成的消息头文件
   ${PROJECT_SOURCE_DIR}/include
   ${EIGEN3_INCLUDE_DIR}
   ${PCL_INCLUDE_DIRS}
@@ -48,6 +49,7 @@ add_executable(kin_replan_node
 		src/kin_replan_node.cpp
     src/planner_manager.cpp
 )
+add_dependencies(kin_replan_node ${catkin_EXPORTED_TARGETS} onboard_detector_generate_messages_cpp)
 target_link_libraries(kin_replan_node 
   ${catkin_LIBRARIES}
   )
@@ -57,6 +59,7 @@ add_executable(sim_plan_node
     src/sim_plan_node.cpp
     src/planner_manager.cpp
 )
+add_dependencies(sim_plan_node ${catkin_EXPORTED_TARGETS} onboard_detector_generate_messages_cpp)
 target_link_libraries(sim_plan_node 
   ${catkin_LIBRARIES}
 )

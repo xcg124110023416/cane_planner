@@ -233,6 +233,20 @@ namespace cane_planner
 
                 double tmp_g_score = cur_node->g_score + estimateHeuristic(um, pur_state.com_pos, cur_node->com_pos);
                 double tmp_f_score = tmp_g_score + lambda_heu_ * getDiagHeu(pur_state.com_pos, end_pos);
+                
+                // ==================== 添加动态障碍物代价到启发式函数 ====================
+                // 动态障碍物信息通过 setDynamicObstacles() 从 planner_manager 传入
+                double dynObsCost = getDynamicObstacleCost(
+                    pur_state.com_pos,
+                    dynObstaclesPos_,      // 成员变量：动态障碍物位置向量
+                    dynObstaclesVel_,      // 成员变量：动态障碍物速度向量
+                    dynObstaclesSize_,     // 成员变量：动态障碍物大小向量
+                    predHorizon_,          // 预测地平线
+                    ts_,                   // 时间采样间隔
+                    distThreshDynamic_     // 距离阈值
+                );
+                tmp_f_score += weight_dyn_obs_ * dynObsCost;  // 加权合并到总代价
+                // ===================================================================
                 if (pro_node == NULL)
                 {
                     // std::cout << "find new pro_node" << std::endl;
@@ -390,6 +404,103 @@ namespace cane_planner
         return path;
     }
 
+//     void KinodynamicAstar::getSamples(double& ts, vector<Eigen::Vector3d>& point_set,
+//                                   vector<Eigen::Vector3d>& start_end_derivatives)
+//     {
+//     /* ---------- path duration ---------- */
+//     double T_sum = 0.0;
+//     KdNodePtr node = path_nodes_.back();
+//     while (node->parent != NULL)
+//     {
+//         T_sum += node->duration;
+//         node = node->parent;
+//     }
+//     // cout << "duration:" << T_sum << endl;
+
+//     // Calculate boundary vel and acc
+//     Eigen::Vector3d end_vel, end_acc;
+//     double t;
+    
+//     t = path_nodes_.back()->duration;
+//     end_vel = node->state.tail(3);
+//     end_acc = path_nodes_.back()->input;
+
+//     // Get point samples
+//     int seg_num = floor(T_sum / ts);
+//     seg_num = max(8, seg_num);
+//     ts = T_sum / double(seg_num);
+//     bool sample_shot_traj = is_shot_succ_;
+//     node = path_nodes_.back();
+
+//     for (double ti = T_sum; ti > -1e-5; ti -= ts)
+//     {
+//         if (sample_shot_traj)
+//         {
+//         // samples on shot traj
+//         Vector3d coord;
+//         Vector4d poly1d, time;
+
+//         for (int j = 0; j < 4; j++)
+//             time(j) = pow(t, j);
+
+//         for (int dim = 0; dim < 3; dim++)
+//         {
+//             poly1d = coef_shot_.row(dim);
+//             coord(dim) = poly1d.dot(time);
+//         }
+
+//         point_set.push_back(coord);
+//         t -= ts;
+
+//         /* end of segment */
+//         if (t < -1e-5)
+//         {
+//             sample_shot_traj = false;
+//             if (node->parent != NULL)
+//             t += node->duration;
+//         }
+//         }
+//         else
+//         {
+//         // samples on searched traj
+//         Eigen::Matrix<double, 6, 1> x0 = node->parent->state;
+//         Eigen::Matrix<double, 6, 1> xt;
+//         Vector3d ut = node->input;
+
+//         stateTransit(x0, xt, ut, t);
+
+//         point_set.push_back(xt.head(3));
+//         t -= ts;
+
+//         // cout << "t: " << t << ", t acc: " << T_accumulate << endl;
+//         if (t < -1e-5 && node->parent->parent != NULL)
+//         {
+//             node = node->parent;
+//             t += node->duration;
+//         }
+//         }
+//     }
+//     reverse(point_set.begin(), point_set.end());
+
+//     // calculate start acc
+//     Eigen::Vector3d start_acc;
+//     if (path_nodes_.back()->parent == NULL)
+//     {
+//         // no searched traj, calculate by shot traj
+//         start_acc = 2 * coef_shot_.col(2);
+//     }
+//     else
+//     {
+//         // input of searched traj
+//         start_acc = node->input;
+//     }
+
+//     start_end_derivatives.push_back(start_vel_);
+//     start_end_derivatives.push_back(end_vel);
+//     start_end_derivatives.push_back(start_acc);
+//     start_end_derivatives.push_back(end_acc);
+// }
+
     void KinodynamicAstar::setParam(ros::NodeHandle &nh)
     {
         // 用于放大f_score的一个倍速
@@ -405,6 +516,11 @@ namespace cane_planner
         nh.param("kinastar/max_al", max_al_, -1.0);//步长
         nh.param("kinastar/max_aw", max_aw_, -1.0);//步宽
         nh.param("kinastar/max_theta", max_api_, -1.0);//最大旋转弧度制
+        // 动态障碍物相关参数
+        nh.param("kinastar/weight_dyn_obs", weight_dyn_obs_, -1.0);
+        nh.param("kinastar/pred_horizon", predHorizon_, -3.0);
+        nh.param("kinastar/ts", ts_, -0.5);
+        nh.param("kinastar/distThresh_Dynamic", distThreshDynamic_, -1.0);
 
         tie_breaker_ = 1.0 + 1.0 / 10000;
     }
@@ -461,6 +577,15 @@ namespace cane_planner
         this->lfpc_model_ = col;
     }
 
+    void KinodynamicAstar::setDynamicObstacles(const std::vector<Eigen::Vector3d>& pos,
+                                               const std::vector<Eigen::Vector3d>& vel,
+                                               const std::vector<Eigen::Vector3d>& size)
+    {
+        this->dynObstaclesPos_ = pos;
+        this->dynObstaclesVel_ = vel;
+        this->dynObstaclesSize_ = size;
+    }
+
     double KinodynamicAstar::getDiagHeu(Eigen::Vector3d x1, Eigen::Vector3d x2)
     {
         double dx = fabs(x1(0) - x2(0));
@@ -509,6 +634,96 @@ namespace cane_planner
         // std::cout << "this heu is " << heu << std::endl;
 
         return heu;
+    }
+
+    /* ==================== Dynamic Obstacle Cost Function for Front-End ====================
+     * 这是从后端优化（B样条）移植到前端规划的动态障碍物代价函数
+     * 用于在A*搜索中评估节点与动态障碍物的冲突风险
+     * 
+     * 输入参数：
+     *   pos: 当前节点位置 (3D)
+     *   dynObsPos: 所有动态障碍物的当前位置
+     *   dynObsVel: 所有动态障碍物的速度
+     *   dynObsSize: 所有动态障碍物的大小 (宽, 高, 深)
+     *   predHorizon: 预测地平线（秒）
+     *   ts: 时间采样间隔（秒）
+     *   distThresh: 距离阈值（米），用于定义"危险区域"
+     * 
+     * 返回值：
+     *   cost: 标量代价值（越小越安全）
+     * ================================================================================== */
+    double KinodynamicAstar::getDynamicObstacleCost(
+        const Eigen::Vector3d& pos,
+        const std::vector<Eigen::Vector3d>& dynObsPos,
+        const std::vector<Eigen::Vector3d>& dynObsVel,
+        const std::vector<Eigen::Vector3d>& dynObsSize,
+        double predHorizon,
+        double ts,
+        double distThreshDynamic)
+    {
+        double cost = 0.0;
+        
+        // 如果没有动态障碍物，直接返回零代价
+        if (dynObsPos.size() == 0) return cost;
+        
+        // 确保输入数据大小一致
+        if (dynObsPos.size() != dynObsVel.size() || dynObsPos.size() != dynObsSize.size()) {
+            ROS_WARN("[KinodynamicAstar] Dynamic obstacle data size mismatch!");
+            return cost;
+        }
+        
+        int predictionNum = static_cast<int>(predHorizon / ts);
+        const int skipFactor = 1;  // 可调整：采样密度（1=每个时间步，2=每两个时间步...）
+        
+        // 遍历所有动态障碍物
+        for (size_t j = 0; j < dynObsPos.size(); ++j) {
+            // 计算障碍物的有效半径（投影到XY平面）
+            double obsRadius = std::sqrt(
+                std::pow(dynObsSize[j](0) / 2.0, 2) + 
+                std::pow(dynObsSize[j](1) / 2.0, 2)
+            );
+            
+            Eigen::Vector3d obstacleVel = dynObsVel[j];
+            
+            // 在预测地平线内，按时间间隔采样，评估节点与障碍物的接近程度
+            for (int n = 0; n <= predictionNum; n += skipFactor) {
+                // 预测障碍物在时刻 t = n*ts 的位置
+                Eigen::Vector3d predictedObsPos = dynObsPos[j] + static_cast<double>(n * ts) * obstacleVel;
+                // linearly decrease to half
+                double distThresh = (1 - double(n/predictionNum) * 0.2) * distThreshDynamic; 
+                // 计算节点与预测障碍物位置的差异（忽略Z轴）
+                Eigen::Vector3d diff = pos - predictedObsPos;
+                diff(2) = 0.0;  // 忽略Z轴差异
+                
+                // 计算实际距离（减去障碍物本身大小）
+                double dist = diff.norm() - obsRadius;
+                
+                // 距离偏差：如果dist < distThresh，说明危险
+                double distErr = distThresh - dist;
+                
+                // 根据接近程度分段计算代价
+                // 这个设计来自于B样条的后端优化，用三次多项式进行平滑过度
+                if (distErr <= 0) {
+                    // 距离足够远，无惩罚
+                    // cost += 0;
+                } 
+                else if (distErr > 0 && distErr <= distThresh) {
+                    // 在危险区域内，使用三次惩罚
+                    // 这样距离越近，惩罚越大（三次增长）
+                    cost += std::pow(distErr, 3);
+                } 
+                else if (distErr >= distThresh) {
+                    // 非常接近，使用更强的二次惩罚
+                    // a, b, c 是为了保证平滑过渡的系数
+                    double a = 3.0 * distThreshDynamic;
+                    double b = -3.0 * std::pow(distThreshDynamic, 2);
+                    double c = std::pow(distThreshDynamic, 3);
+                    cost += (a * std::pow(distErr, 2) + b * distErr + c);
+                }
+            }
+        }
+        
+        return cost;
     }
 
 } // namespace cane_planner

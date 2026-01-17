@@ -126,7 +126,13 @@ namespace cane_planner
     double horizon_;
     double resolution_, inv_resolution_;
     double max_al_, max_aw_, max_api_;
+    double weight_dyn_obs_, predHorizon_, ts_, distThreshDynamic_;
     Eigen::Vector2d origin_, map_size_2d_;
+
+    // 动态障碍物信息存储
+    std::vector<Eigen::Vector3d> dynObstaclesPos_;   // 动态障碍物当前位置
+    std::vector<Eigen::Vector3d> dynObstaclesVel_;   // 动态障碍物速度
+    std::vector<Eigen::Vector3d> dynObstaclesSize_;  // 动态障碍物尺寸
 
     CollisionDetection::Ptr collision_;
     LFPC::Ptr lfpc_model_;
@@ -147,6 +153,15 @@ namespace cane_planner
     double getDiagHeu(Eigen::Vector3d x1, Eigen::Vector3d x2);
     double getManhHeu(Eigen::Vector3d x1, Eigen::Vector3d x2);
     double getEuclHeu(Eigen::Vector3d x1, Eigen::Vector3d x2);
+
+    /* dynamic obstacle cost function for front-end planning */
+    double getDynamicObstacleCost(const Eigen::Vector3d& pos, 
+                                   const std::vector<Eigen::Vector3d>& dynObsPos,
+                                   const std::vector<Eigen::Vector3d>& dynObsVel,
+                                   const std::vector<Eigen::Vector3d>& dynObsSize,
+                                   double predHorizon,
+                                   double ts,
+                                   double distThreshDynamic);
 
     /* state propagation */
     void stateTransit(Eigen::Vector3d &state1, Eigen::Vector3d &state2,
@@ -169,6 +184,8 @@ namespace cane_planner
     std::vector<Eigen::Vector3d> getPath();
     std::vector<Eigen::Vector3d> getComPos();
     std::vector<Eigen::Vector3d> getFeetPos();
+    void getSamples(double& ts, vector<Eigen::Vector3d>& point_set,
+                                  vector<Eigen::Vector3d>& start_end_derivatives);
 
 
     void setParam(ros::NodeHandle &nh);
@@ -177,6 +194,11 @@ namespace cane_planner
 
     void setCollision(const CollisionDetection::Ptr &col);
     void setModel(const LFPC::Ptr &col);
+    
+    // 设置动态障碍物信息（从dynamicDetector获取）
+    void setDynamicObstacles(const std::vector<Eigen::Vector3d>& pos,
+                             const std::vector<Eigen::Vector3d>& vel,
+                             const std::vector<Eigen::Vector3d>& size);
 
     typedef shared_ptr<KinodynamicAstar> Ptr;
   };
