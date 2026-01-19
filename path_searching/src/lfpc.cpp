@@ -25,8 +25,8 @@ namespace cane_planner
     }
     void LFPC::initializeModel(ros::NodeHandle &nh)
     {
-        nh.param("lfpc/delta_t", delta_t_, 0.05);
-        nh.param("lfpc/t_sup", t_sup_, 0.3);
+        nh.param("lfpc/delta_t", delta_t_, 0.1);
+        nh.param("lfpc/t_sup", t_sup_, 0.35);
         nh.param("lfpc/h_", h_, 1.0);
         support_leg_ = LEFT_LEG;
         step_num_ = 0;
@@ -81,23 +81,60 @@ namespace cane_planner
     }
     void LFPC::updateOneStep()
     {
-        int swing_data_len = int(t_sup_ / delta_t_);//在一个支撑相中需要计算的离散时间点数量，0.35/0.1=3.5，取整为3
+        // 在一个支撑相中需要计算的离散时间点数量
+        // 如t_sup_ = 0.35s (支撑相持续时间), delta_t_ = 0.07s (离散步长)
+        // swing_data_len = 0.35 / 0.07 = 5, 取整为 5 个时间点
+        int swing_data_len = int(t_sup_ / delta_t_);
+        
+        // 使用当前的初始速度 vx_0_, vy_0_ 来计算下一步脚的着地位置
+        // vx_0_, vy_0_ 是质心的全局速度（在本支撑相开始时的速度）
         auto state_f = calculateLFPC(vx_0_, vy_0_);//初始均为0，根据当前速度预测下一步脚的落点
+        
+        // 计算下一步支撑脚的全局位置
         // update step support_leg_pos
         support_leg_pos_(0) = COM_pos_(0) + state_f(0);//state_f表示当前步态下的足底目标偏移
         support_leg_pos_(1) = COM_pos_(1) + state_f(1);
         support_leg_pos_(2) = 0.0;
+        
+        // 计算在LIPM相对坐标系中的初始位置
+        // x_0_ 和 y_0_ 是质心相对于支撑脚的初始位置（都是负值）
         // update step param;
         x_0_ = -state_f(0);
         y_0_ = -state_f(1);
-        // update motion com_pos into step_path_
-        for (int i = 0; i < swing_data_len; i++)//支撑相期间，逐时间步长计算质心轨迹,由COM_pos_，用x_0_和y_0_得到最终到support_leg_pos_路径点上的COM_pos_。
+        
+        // 在支撑相期间，逐时间步长计算质心轨迹
+        // 从COM_pos_出发，用x_0_和y_0_计算最终到support_leg_pos_的轨迹
+        for (int i = 0; i < swing_data_len; i++)
         {
             updateOneDt();//按 LIPM 方程推进质心的运动
             step_path_.push_back(COM_pos_);//保存本步质心轨迹
-        }//循环结束最终得到的是COM_pos_，以t_ += delta_t_的最终一轮时间0.3为准推算出来的
+        }
+        // 更新下一个支撑相的初始速度：当前支撑相结束时的速度
+        // 这样确保LIPM轨迹的连续性和动态性（速度会影响下一步的落脚位置）
+        vx_0_ = vx_t_;
+        vy_0_ = vy_t_;
         step_num_ += 1;
     }
+
+    void LFPC::updateOneStepForOnce(double t)
+    {     
+        auto state_f = calculateLFPC(vx_0_, vy_0_);
+        
+        support_leg_pos_(0) = COM_pos_(0) + state_f(0);
+        support_leg_pos_(1) = COM_pos_(1) + state_f(1);
+        support_leg_pos_(2) = 0.0;
+
+        x_0_ = -state_f(0);
+        y_0_ = -state_f(1);
+
+        updateOneDtForOnce(t);
+        // step_path_.push_back(COM_pos_);
+
+        vx_0_ = vx_t_;
+        vy_0_ = vy_t_;
+        step_num_ += 1;
+    }
+
     // -------------------------------------API function------------------------------------//
     Vector2d LFPC::getFootPosition()
     {
@@ -133,7 +170,21 @@ namespace cane_planner
     // -------------------------------------private function------------------------------------//
     void LFPC::updateOneDt()
     {
-        t_ += delta_t_;//0.1、0.2、0.3
+        t_ += delta_t_;//一直累加...直到下轮reset重置为0
+        Vector4d iter_state = calculateXtVt(t_);
+        x_t_ = iter_state(0);
+        vx_t_ = iter_state(1);
+        y_t_ = iter_state(2);
+        vy_t_ = iter_state(3);
+
+        COM_pos_(0) = x_t_ + support_leg_pos_(0);
+        COM_pos_(1) = y_t_ + support_leg_pos_(1);
+        COM_pos_(2) = collision_->getSliceHeight();//设置路径高度
+    }
+
+    void LFPC::updateOneDtForOnce(double t)
+    {
+        t_ = t;
         Vector4d iter_state = calculateXtVt(t_);
         x_t_ = iter_state(0);
         vx_t_ = iter_state(1);
@@ -170,19 +221,53 @@ namespace cane_planner
     Vector2d LFPC::calculateLFPC(double vx, double vy)
     {
         Vector2d state_f;
-        // Linear foot placement control
-        // TODO 这里的支撑脚我忘记是上一个周期的还是这个周期的了；
+        // Linear Foot Placement Control (LFPC)
+        // 根据当前的质心速度(vx, vy)来计算下一步脚的目标落脚位置相对于当前质心的偏移量
+        // 
+        // 关键参数：
+        //   al_: 步长参数（来自规划器的输入）
+        //   aw_: 步宽参数（来自规划器的输入）
+        //   theta_: 当前躯干方向（累积的偏航角）
+        //   b_: LIPM稳定性系数 = t_c_ * cosh(t_sup_/t_c_) / sinh(t_sup_/t_c_)
+        //       其中 t_c_ = sqrt(h/10)，h为腿长(1.0m)，t_sup_为支撑相时间(0.35s)
+        //       b_ ≈ 0.3 (具体值由robots dynamics决定)
+        //   vx, vy: 当前质心速度（来自上一步的末速度）
+        //
+        // 输出含义：
+        //   state_f: 下一步脚的目标位置相对于当前质心COM_pos的偏移
+        //           state_f = support_leg_pos - COM_pos
+        //
+        // 重要观察：即使al=0, aw=0，只要有速度输入(vx或vy非零)，就会有运动输出！
+        // 这是因为 state_f 包含 b_*vx 和 b_*vy 项，反映了"为了维持平衡，脚需要提前着地"的物理原理
+        
         if (support_leg_ == LEFT_LEG)
         {
+            // 左腿支撑：脚在身体右侧，步宽为正时向右偏移
             state_f(0) = -al_ * cos(theta_) + aw_ * sin(theta_) + b_ * vx;
             state_f(1) = -al_ * sin(theta_) - aw_ * cos(theta_) + b_ * vy;
         }
         else if (support_leg_ == RIGHT_LEG)
         {
+            // 右腿支撑：脚在身体左侧，步宽为负时向左偏移
             state_f(0) = -al_ * cos(theta_) - aw_ * sin(theta_) + b_ * vx;
             state_f(1) = -al_ * sin(theta_) + aw_ * cos(theta_) + b_ * vy;
         }
         // std::cout << "LFPC set:" << state_f.transpose() << std::endl;
         return state_f;
     }
+
+    double LFPC::getTimeUpdate(){
+        return this->t_sup_;
+    }
+
+    Eigen::Matrix<double, 6, 1> LFPC::getState(){
+        Eigen::Matrix<double, 6, 1> state;
+        state(0) = vx_0_;
+        state(1) = vy_0_;
+        state(2) = al_;
+        state(3) = aw_;
+        state(4) = theta_;
+        return state;
+    }
+
 } // namespace cane_planner

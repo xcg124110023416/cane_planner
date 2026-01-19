@@ -257,6 +257,9 @@ namespace cane_planner
                     pro_node->parent = cur_node;
                     pro_node->kdnode_state = IN_OPEN_SET;
                     // update  state
+                    pro_node->time_update_once = lfpc_model_->getTimeUpdate();
+                    pro_node->input = um;
+                    // pro_node->state = lfpc_model_->getState();
                     pro_node->iter_state = lfpc_model_->getNextIterState();
                     pro_node->com_pos = lfpc_model_->getCOMPos();
                     pro_node->support_feet = lfpc_model_->getSupportFeet();
@@ -280,6 +283,8 @@ namespace cane_planner
                     if (tmp_g_score < pro_node->g_score)
                     {
                         // std::cout << "update new_node" << std::endl;
+                        pro_node->time_update_once = lfpc_model_->getTimeUpdate();
+                        // pro_node->state = lfpc_model_->getState();
                         pro_node->iter_state = lfpc_model_->getNextIterState();
                         pro_node->com_pos = lfpc_model_->getCOMPos();
                         pro_node->support_feet = lfpc_model_->getSupportFeet();
@@ -404,102 +409,79 @@ namespace cane_planner
         return path;
     }
 
-//     void KinodynamicAstar::getSamples(double& ts, vector<Eigen::Vector3d>& point_set,
-//                                   vector<Eigen::Vector3d>& start_end_derivatives)
-//     {
-//     /* ---------- path duration ---------- */
-//     double T_sum = 0.0;
-//     KdNodePtr node = path_nodes_.back();
-//     while (node->parent != NULL)
-//     {
-//         T_sum += node->duration;
-//         node = node->parent;
-//     }
-//     // cout << "duration:" << T_sum << endl;
+    void KinodynamicAstar::getSamples(double& ts, vector<Eigen::Vector3d>& point_set,
+                                  vector<Eigen::Vector3d>& start_end_derivatives)
+    {
+        /* ---------- path duration ---------- */
+        double T_sum = 0.0;
+        KdNodePtr node = path_nodes_.back();
+        while (node->parent != NULL)
+        {
+            T_sum += node->time_update_once;
+            node = node->parent;
+        }
+        cout << "T_sum:" << T_sum << endl;
 
-//     // Calculate boundary vel and acc
-//     Eigen::Vector3d end_vel, end_acc;
-//     double t;
-    
-//     t = path_nodes_.back()->duration;
-//     end_vel = node->state.tail(3);
-//     end_acc = path_nodes_.back()->input;
+        // Calculate boundary vel and acc
+        Eigen::Vector3d end_vel, end_acc;
+        double t;
+        
+        t = path_nodes_.back()->time_update_once;
+        // cout << "initial t: " << t << endl;
+        end_vel = node->state.head(3);
+        end_vel(3) = 0;
+        // end_acc = path_nodes_.back()->input;
 
-//     // Get point samples
-//     int seg_num = floor(T_sum / ts);
-//     seg_num = max(8, seg_num);
-//     ts = T_sum / double(seg_num);
-//     bool sample_shot_traj = is_shot_succ_;
-//     node = path_nodes_.back();
+        // Get point samples
+        int seg_num = floor(T_sum / ts);
+        seg_num = max(12, seg_num);
+        ts = T_sum / double(seg_num);
+        // cout << "revised ts: " << ts << ", seg num: " << seg_num << endl;
 
-//     for (double ti = T_sum; ti > -1e-5; ti -= ts)
-//     {
-//         if (sample_shot_traj)
-//         {
-//         // samples on shot traj
-//         Vector3d coord;
-//         Vector4d poly1d, time;
+        node = path_nodes_.back();
 
-//         for (int j = 0; j < 4; j++)
-//             time(j) = pow(t, j);
+        for (double ti = T_sum; ti > -1e-5; ti -= ts)
+        {
+            // samples on searched traj
+            Eigen::Vector3d um = node->input;
+            Eigen::Vector3d iter_state = node->parent->iter_state;
+            Eigen::Vector3d com_pos = node->parent->com_pos;
+            char support_feet = node->parent->support_feet;
+            int step_num = node->parent->step_num;
 
-//         for (int dim = 0; dim < 3; dim++)
-//         {
-//             poly1d = coef_shot_.row(dim);
-//             coord(dim) = poly1d.dot(time);
-//         }
+            lfpc_model_->reset(iter_state, com_pos, support_feet, step_num);
+            lfpc_model_->SetCtrlParams(um);
+            lfpc_model_->updateOneStepForOnce(t);
+            
+            point_set.push_back(lfpc_model_->getCOMPos());
+            // cout<< "ti: " << ti << ", t: " << t << ", com_pos: " << lfpc_model_->getCOMPos().transpose() << endl;
+            t -= ts;
 
-//         point_set.push_back(coord);
-//         t -= ts;
+            lfpc_model_->setThetaZero();
+            // cout << "t: " << t << endl;
+            if (t < -1e-5)  // ← 改为无条件检查
+            {
+                if (node->parent->parent != NULL)
+                {
+                    node = node->parent;
+                    t += node->time_update_once;
+                    // cout<< "parent node, new t: " << node->time_update_once << endl;
+                }
+                else
+                {
+                    ROS_INFO("Kinodynamic Astar get samples finished.");
+                    break;  
+                }
+            }
+        }
+        reverse(point_set.begin(), point_set.end());
 
-//         /* end of segment */
-//         if (t < -1e-5)
-//         {
-//             sample_shot_traj = false;
-//             if (node->parent != NULL)
-//             t += node->duration;
-//         }
-//         }
-//         else
-//         {
-//         // samples on searched traj
-//         Eigen::Matrix<double, 6, 1> x0 = node->parent->state;
-//         Eigen::Matrix<double, 6, 1> xt;
-//         Vector3d ut = node->input;
 
-//         stateTransit(x0, xt, ut, t);
-
-//         point_set.push_back(xt.head(3));
-//         t -= ts;
-
-//         // cout << "t: " << t << ", t acc: " << T_accumulate << endl;
-//         if (t < -1e-5 && node->parent->parent != NULL)
-//         {
-//             node = node->parent;
-//             t += node->duration;
-//         }
-//         }
-//     }
-//     reverse(point_set.begin(), point_set.end());
-
-//     // calculate start acc
-//     Eigen::Vector3d start_acc;
-//     if (path_nodes_.back()->parent == NULL)
-//     {
-//         // no searched traj, calculate by shot traj
-//         start_acc = 2 * coef_shot_.col(2);
-//     }
-//     else
-//     {
-//         // input of searched traj
-//         start_acc = node->input;
-//     }
-
-//     start_end_derivatives.push_back(start_vel_);
-//     start_end_derivatives.push_back(end_vel);
-//     start_end_derivatives.push_back(start_acc);
-//     start_end_derivatives.push_back(end_acc);
-// }
+        start_end_derivatives.push_back({0,0,0});
+        start_end_derivatives.push_back(end_vel);
+        start_end_derivatives.push_back({0,0,0});
+        start_end_derivatives.push_back({0,0,0});
+    }
 
     void KinodynamicAstar::setParam(ros::NodeHandle &nh)
     {
@@ -522,7 +504,11 @@ namespace cane_planner
         nh.param("kinastar/ts", ts_, -0.5);
         nh.param("kinastar/distThresh_Dynamic", distThreshDynamic_, -1.0);
 
+        nh.param("kinastar/ts_sample", tsSample_, -0.1);
+
         tie_breaker_ = 1.0 + 1.0 / 10000;
+
+        kin_SamplePath_pub_ = nh.advertise<nav_msgs::Path>("/kin_astar/SamplePath", 20);
     }
     void KinodynamicAstar::init()
     {
@@ -724,6 +710,30 @@ namespace cane_planner
         }
         
         return cost;
+    }
+
+    void KinodynamicAstar::publishKinodynamicAstarPath(const vector<Eigen::Vector3d>& path)
+    {
+        vector<Eigen::Vector3d> list;
+        list = path;
+        nav_msgs::Path path_msg;
+        path_msg.header.frame_id = "world";
+        path_msg.header.stamp = ros::Time::now();
+        for (size_t i = 0; i < list.size(); i++)
+        {
+            geometry_msgs::PoseStamped this_pose_stamped;
+            this_pose_stamped.pose.position.x = list[i](0);
+            this_pose_stamped.pose.position.y = list[i](1);
+            this_pose_stamped.pose.position.z = collision_->getSliceHeight();
+            this_pose_stamped.pose.orientation.x = 0.0;
+            this_pose_stamped.pose.orientation.y = 0.0;
+            this_pose_stamped.pose.orientation.z = 0.0;
+            this_pose_stamped.pose.orientation.w = 1.0;
+            this_pose_stamped.header.frame_id = "world";
+            this_pose_stamped.header.stamp = ros::Time::now();
+            path_msg.poses.push_back(this_pose_stamped);
+        }
+        kin_SamplePath_pub_.publish(path_msg);
     }
 
 } // namespace cane_planner

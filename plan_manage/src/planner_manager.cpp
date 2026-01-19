@@ -134,7 +134,7 @@ namespace cane_planner
         exec_state_ = FSM_STATE::INIT;
         have_odom_ = false;
         have_target_ = false;
-        // Param_init(nh);
+        Param_init(nh);
         // init detector
         // ROS_WARN(" onboard detector start");
         // detector_.reset(new onboardDetector::dynamicDetector(nh));
@@ -464,10 +464,10 @@ namespace cane_planner
         if (plan_success)
         {
             std::cout << (time_2 - time_1).toSec() << ",";
-            vector<Eigen::Vector2d> list;
-            list = astar_finder_->getPath();
-            double len = getPathLen(list);
-            std::cout << len << ",1" << std::endl;
+            // vector<Eigen::Vector2d> list;
+            // list = astar_finder_->getPath();
+            // double len = getPathLen(list);
+            // std::cout << len << ",1" << std::endl;
         }
 
         return plan_success;
@@ -478,7 +478,7 @@ namespace cane_planner
 
         kin_finder_->reset();
         num++;
-        std::cout << "kin," << num << ",";
+        std::cout << "kin," << num << ","<<endl;
         
         // ==================== 从缓存获取动态障碍物信息（通过话题订阅更新） ====================
         {
@@ -502,17 +502,19 @@ namespace cane_planner
         bool plan_success = kin_finder_->search(start_state_, input, end_state_);
         ros::Time time_2 = ros::Time::now();
 
-        // double ts = pp_.ctrl_pt_dist / pp_.max_vel_;
-        // vector<Eigen::Vector3d> point_set, start_end_derivatives;
-        // kin_finder_->getSamples(ts, point_set, start_end_derivatives);
+        double ts = pp_.ctrl_pt_dist / pp_.max_vel_;
+        // cout<< "ts: " << ts << endl;
+        vector<Eigen::Vector3d> point_set, start_end_derivatives;
+        kin_finder_->getSamples(ts, point_set, start_end_derivatives);
+        // kin_finder_->publishKinodynamicAstarPath(point_set);
 
         if (plan_success)
         {
             std::cout << (time_2 - time_1).toSec() << ",";
-            vector<Eigen::Vector3d> list;
-            list = kin_finder_->getPath();  //多个com_pos组成的路径点
-            double len = getPathLen(list);  //路径长度
-            std::cout << len << ",1" << std::endl;
+            // vector<Eigen::Vector3d> list;
+            // list = kin_finder_->getPath();  //多个com_pos组成的路径点
+            // double len = getPathLen(list);  //路径长度
+            // std::cout << len << ",1" << std::endl;
         }
         return plan_success;
     }
@@ -638,9 +640,9 @@ namespace cane_planner
         // publish traj
         kin_vis_pub_.publish(mk);
 
-        mk.color.r = 1.0;
+        mk.color.r = 0.0;
         mk.color.g = 0.0;
-        mk.color.b = 0.0;
+        mk.color.b = 1.0;
         mk.color.a = 1;
         mk.scale.x = 0.1;
         mk.scale.y = 0.1;
@@ -668,7 +670,7 @@ namespace cane_planner
         // publish feet
         kin_foot_pub_.publish(mk);
 
-        ros::Duration(0.001).sleep();
+        // ros::Duration(0.001).sleep();
     }
     // calculate YAW by different function
     double PlannerManager::QuatenionToYaw(geometry_msgs::Quaternion ori)

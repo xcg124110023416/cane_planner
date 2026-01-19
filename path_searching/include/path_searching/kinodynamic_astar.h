@@ -11,6 +11,7 @@
 
 #include <ros/console.h>
 #include <ros/ros.h>
+#include <nav_msgs/Path.h>
 
 #include <path_searching/matrix_hash.h>
 #include <plan_env/collision_detection.h>
@@ -38,6 +39,10 @@ namespace cane_planner
     // lfpc iter param
     Eigen::Vector3d com_pos;
     //  iter_state variable: vx0，vy0,theta
+    double time_update_once;
+    Eigen::Matrix<double, 6, 1> state;
+    Eigen::Vector3d input;
+
     Eigen::Vector3d  iter_state;
     char support_feet;
     Eigen::Vector2d support_pos;
@@ -127,7 +132,9 @@ namespace cane_planner
     double resolution_, inv_resolution_;
     double max_al_, max_aw_, max_api_;
     double weight_dyn_obs_, predHorizon_, ts_, distThreshDynamic_;
+    double tsSample_;
     Eigen::Vector2d origin_, map_size_2d_;
+    ros::Publisher kin_SamplePath_pub_;
 
     // 动态障碍物信息存储
     std::vector<Eigen::Vector3d> dynObstaclesPos_;   // 动态障碍物当前位置
@@ -199,6 +206,8 @@ namespace cane_planner
     void setDynamicObstacles(const std::vector<Eigen::Vector3d>& pos,
                              const std::vector<Eigen::Vector3d>& vel,
                              const std::vector<Eigen::Vector3d>& size);
+
+    void publishKinodynamicAstarPath(const vector<Eigen::Vector3d>& path);
 
     typedef shared_ptr<KinodynamicAstar> Ptr;
   };

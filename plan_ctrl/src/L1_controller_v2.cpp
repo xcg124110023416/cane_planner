@@ -226,7 +226,7 @@ void L1Controller::odomCB(const nav_msgs::Odometry::ConstPtr &odomMsg)
 void L1Controller::pathCB(const nav_msgs::Path::ConstPtr &pathMsg)
 {
     map_path = *pathMsg;
-    std::cout << "path_receive" <<std::endl;
+    // std::cout << "path_receive" <<std::endl;
 }
 
 void L1Controller::waypointCB(const nav_msgs::PathConstPtr &msg)

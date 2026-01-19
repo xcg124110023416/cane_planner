@@ -52,6 +52,7 @@ namespace cane_planner
         Vector4d calculateXtVt(double t);
         Vector4d calculateFinalState();
         void updateOneDt();
+        void updateOneDtForOnce(double t);
 
     public:
         LFPC();
@@ -60,7 +61,8 @@ namespace cane_planner
         void initializeModel(ros::NodeHandle &nh);
 
         void updateOneStep();
-
+        void updateOneStepForOnce(double t);
+        
         void SetCtrlParams(Vector3d input);
         void reset(Vector3d init_v_state, Vector3d COM_init_pos,
                    char cur_support_leg, int step_num);
@@ -77,7 +79,12 @@ namespace cane_planner
         Vector3d getCOMPos();
         Vector3d getNextIterState();
         int getStepNum();
+        double getTimeUpdate();
+        Eigen::Matrix<double, 6, 1> getState();
 
+        inline void setThetaZero(){
+            this->theta_ = 0;
+        }
         typedef shared_ptr<LFPC> Ptr;
     };
 

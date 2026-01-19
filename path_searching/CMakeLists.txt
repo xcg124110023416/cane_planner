@@ -15,6 +15,7 @@ find_package(catkin REQUIRED COMPONENTS
   cv_bridge
   plan_ctrl
   onboard_detector 
+  nav_msgs
 )
 
 
