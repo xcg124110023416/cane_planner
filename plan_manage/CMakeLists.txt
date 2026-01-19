@@ -16,13 +16,14 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   plan_env
   path_searching
+  bspline
+  bspline_opt
 )
 
 catkin_package(
  INCLUDE_DIRS include
  LIBRARIES plan_manage
- CATIKIN_DEPENDS plan_env
- path_searching
+ CATIKIN_DEPENDS plan_env path_searching bspline bspline_opt
 #  CATKIN_DEPENDS other_catkin_pkg
 #  DEPENDS system_lib
 

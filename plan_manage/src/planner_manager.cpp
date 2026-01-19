@@ -164,6 +164,10 @@ namespace cane_planner
         kin_finder_->setCollision(collision_);
         kin_finder_->setModel(lfpc_model_);
         kin_finder_->init();
+        // init bspline optimizer
+        ROS_WARN(" Bspline optimizer start");
+        bspline_optimizers_.reset(new BsplineOptimizer);
+        bspline_optimizers_->setParam(nh);
         // replan
         goal_sub =
             nh.subscribe("/move_base_simple/goal", 1, &PlannerManager::GoalCallback, this);
@@ -184,8 +188,7 @@ namespace cane_planner
         // Path
         kin_path_pub_ = nh.advertise<nav_msgs::Path>("/kin_astar/path", 20);
         a_path_pub_ = nh.advertise<nav_msgs::Path>("/astar/path", 20);
-        
-        
+        traj_pub_ = nh.advertise<nav_msgs::Path>("/planning_vis/trajectory", 20);    
     }
     // real experience callback waypoint or goal
     void PlannerManager::GoalCallback(const geometry_msgs::PoseStamped::ConstPtr &msg)
@@ -508,6 +511,20 @@ namespace cane_planner
         kin_finder_->getSamples(ts, point_set, start_end_derivatives);
         // kin_finder_->publishKinodynamicAstarPath(point_set);
 
+        Eigen::MatrixXd ctrl_pts;
+        NonUniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);
+        // cout<< "Control points:\n"
+        //     << ctrl_pts << endl;
+        NonUniformBspline init(ctrl_pts, 3, ts);
+
+        // int cost_function = BsplineOptimizer::SMOOTHNESS;
+        // // cost_function |= BsplineOptimizer::ENDPOINT;
+        // ctrl_pts = bspline_optimizers_->BsplineOptimizeTraj(ctrl_pts, ts, cost_function, 1, 1);
+
+        // NonUniformBspline pos = NonUniformBspline(ctrl_pts, 3, ts);
+
+        drawBspline(init, 0.1, Eigen::Vector4d(1.0, 0, 0.0, 1), true, 0.2,
+                                Eigen::Vector4d(1, 0, 0, 1));
         if (plan_success)
         {
             std::cout << (time_2 - time_1).toSec() << ",";
@@ -751,6 +768,95 @@ namespace cane_planner
             dynObsSize_.push_back(size);
             // cout<<"Dynamic Obstacle " << i << ": Pos(" << pos.transpose() << "), Vel(" << vel.transpose() << "), Size(" << size.transpose() << ")" << endl; 
         }
+    }
+
+
+    void PlannerManager::drawBspline(NonUniformBspline& bspline, double size,
+                                        const Eigen::Vector4d& color, bool show_ctrl_pts, double size2,
+                                        const Eigen::Vector4d& color2, int id1, int id2) {
+        if (bspline.getControlPoint().size() == 0) return;
+
+        vector<Eigen::Vector3d> traj_pts;
+        double                  tm, tmp;
+        bspline.getTimeSpan(tm, tmp);
+
+        for (double t = tm; t <= tmp; t += 0.01) {
+            Eigen::Vector3d pt = bspline.evaluateDeBoor(t);
+            traj_pts.push_back(pt);
+        }
+        displaySphereList(traj_pts);
+        // displaySphereList(traj_pts, size, color, BSPLINE + id1 % 100);
+
+        // draw the control point
+        // if (!show_ctrl_pts) return;
+
+        // Eigen::MatrixXd         ctrl_pts = bspline.getControlPoint();
+        // vector<Eigen::Vector3d> ctp;
+
+        // for (int i = 0; i < int(ctrl_pts.rows()); ++i) {
+        //     Eigen::Vector3d pt = ctrl_pts.row(i).transpose();
+        //     ctp.push_back(pt);
+        // }
+
+        // displaySphereList(ctp, size2, color2, BSPLINE_CTRL_PT + id2 % 100);
+    }
+    
+    
+    void PlannerManager::displaySphereList(const vector<Eigen::Vector3d>& list) {
+ 
+        nav_msgs::Path path;
+        path.header.frame_id = "world";
+        path.header.stamp = ros::Time::now();
+        for (size_t i = 0; i < list.size(); i++)
+        {
+            geometry_msgs::PoseStamped this_pose_stamped;
+            this_pose_stamped.pose.position.x = list[i](0);
+            this_pose_stamped.pose.position.y = list[i](1);
+            this_pose_stamped.pose.position.z = collision_->getSliceHeight();
+            this_pose_stamped.pose.orientation.x = 0.0;
+            this_pose_stamped.pose.orientation.y = 0.0;
+            this_pose_stamped.pose.orientation.z = 0.0;
+            this_pose_stamped.pose.orientation.w = 1.0;
+            this_pose_stamped.header.frame_id = "world";
+            this_pose_stamped.header.stamp = ros::Time::now();
+            path.poses.push_back(this_pose_stamped);
+        }
+        traj_pub_.publish(path);
+        ros::Duration(0.001).sleep();
+
+
+        // visualization_msgs::Marker mk;
+        // mk.header.frame_id = "world";
+        // mk.header.stamp    = ros::Time::now();
+        // mk.type            = visualization_msgs::Marker::SPHERE_LIST;
+        // mk.action          = visualization_msgs::Marker::DELETE;
+        // mk.id              = id;
+        // traj_pub_.publish(mk);
+
+        // mk.action             = visualization_msgs::Marker::ADD;
+        // mk.pose.orientation.x = 0.0;
+        // mk.pose.orientation.y = 0.0;
+        // mk.pose.orientation.z = 0.0;
+        // mk.pose.orientation.w = 1.0;
+
+        // mk.color.r = color(0);
+        // mk.color.g = color(1);
+        // mk.color.b = color(2);
+        // mk.color.a = color(3);
+
+        // mk.scale.x = resolution;
+        // mk.scale.y = resolution;
+        // mk.scale.z = resolution;
+
+        // geometry_msgs::Point pt;
+        // for (int i = 0; i < int(list.size()); i++) {
+        //     pt.x = list[i](0);
+        //     pt.y = list[i](1);
+        //     pt.z = list[i](2);
+        //     mk.points.push_back(pt);
+        // }
+        // traj_pub_.publish(mk);
+        // ros::Duration(0.001).sleep();
     }
 
 } // namespace cane_planner

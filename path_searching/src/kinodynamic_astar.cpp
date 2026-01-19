@@ -428,13 +428,13 @@ namespace cane_planner
         
         t = path_nodes_.back()->time_update_once;
         // cout << "initial t: " << t << endl;
-        end_vel = node->state.head(3);
-        end_vel(3) = 0;
+        end_vel = node->iter_state;
+        end_vel(2) = 0;
         // end_acc = path_nodes_.back()->input;
 
         // Get point samples
         int seg_num = floor(T_sum / ts);
-        seg_num = max(12, seg_num);
+        seg_num = max(10, seg_num);
         ts = T_sum / double(seg_num);
         // cout << "revised ts: " << ts << ", seg num: " << seg_num << endl;
 
@@ -443,6 +443,13 @@ namespace cane_planner
         for (double ti = T_sum; ti > -1e-5; ti -= ts)
         {
             // samples on searched traj
+            // 注意：node->parent不能为NULL，因为这是从搜索树的末端往起点反向遍历
+            if (node->parent == NULL)
+            {
+                ROS_WARN("getSamples: node->parent is NULL, cannot access input!");
+                break;
+            }
+            
             Eigen::Vector3d um = node->input;
             Eigen::Vector3d iter_state = node->parent->iter_state;
             Eigen::Vector3d com_pos = node->parent->com_pos;
@@ -461,26 +468,31 @@ namespace cane_planner
             // cout << "t: " << t << endl;
             if (t < -1e-5)  // ← 改为无条件检查
             {
-                if (node->parent->parent != NULL)
+                while (node->parent->parent != NULL && t < -1e-5)
                 {
                     node = node->parent;
                     t += node->time_update_once;
                     // cout<< "parent node, new t: " << node->time_update_once << endl;
                 }
+                if(node->parent->parent == NULL)
+                {
+                    point_set.push_back(node->parent->com_pos);
+                    ROS_INFO("Kinodynamic Astar get samples finished.");
+                    break;
+                }
                 else
                 {
-                    ROS_INFO("Kinodynamic Astar get samples finished.");
-                    break;  
+                    continue;
                 }
             }
         }
         reverse(point_set.begin(), point_set.end());
 
-
-        start_end_derivatives.push_back({0,0,0});
-        start_end_derivatives.push_back(end_vel);
-        start_end_derivatives.push_back({0,0,0});
-        start_end_derivatives.push_back({0,0,0});
+        // 只返回约束
+        start_end_derivatives.push_back({0,0,0});        // 起点速度
+        start_end_derivatives.push_back(end_vel);        // 终点速度（Z分量为0）
+        start_end_derivatives.push_back({0,0,0});        // 起点加速度
+        start_end_derivatives.push_back({0,0,0});        // 终点
     }
 
     void KinodynamicAstar::setParam(ros::NodeHandle &nh)

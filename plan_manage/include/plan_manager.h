@@ -16,6 +16,8 @@
 #include <tf/transform_datatypes.h>
 #include <tf/transform_listener.h>
 #include <onboard_detector/DynamicObstacles.h>  // 动态障碍物话题消息
+#include <bspline/non_uniform_bspline.h>
+#include <bspline_opt/bspline_optimizer.h>
 
 
 // #include <nav_msgs/OccupancyGrid.h>
@@ -40,6 +42,14 @@ namespace cane_planner
             EXEC_TRAJ,
             REPLAN_TRAJ
         };
+
+        enum TRAJECTORY_PLANNING_ID {
+            GOAL = 1,
+            PATH = 200,
+            BSPLINE = 300,
+            BSPLINE_CTRL_PT = 400,
+            POLY_TRAJ = 500
+        };
         /*---------- data -----------*/
         fast_planner::SDFMap::Ptr sdf_map_;
         CollisionDetection::Ptr collision_;
@@ -48,7 +58,7 @@ namespace cane_planner
         
         unique_ptr<Astar> astar_finder_;
         unique_ptr<KinodynamicAstar> kin_finder_;
-        
+        BsplineOptimizer::Ptr bspline_optimizers_;
 
         FSM_STATE exec_state_;
         bool have_odom_, have_target_;
@@ -79,7 +89,9 @@ namespace cane_planner
         ros::Subscriber dyn_obs_sub_;  // 动态障碍物订阅者
         ros::Publisher astar_pub_, kin_vis_pub_, kin_foot_pub_;
         ros::Publisher kin_path_pub_, a_path_pub_;
+        ros::Publisher traj_pub_;
         tf::TransformListener tf_listener_;
+        vector<ros::Publisher> pubs_;
 
         /*---------- helper function -----------*/
         bool callAstarPlan();
@@ -122,6 +134,12 @@ namespace cane_planner
         void callPath();
         void Param_init(ros::NodeHandle &nh);
 
+        void drawBspline(NonUniformBspline& bspline, double size, const Eigen::Vector4d& color,
+                   bool show_ctrl_pts = false, double size2 = 0.1,
+                   const Eigen::Vector4d& color2 = Eigen::Vector4d(1, 1, 0, 1), int id1 = 0,
+                   int id2 = 0);
+        
+        void displaySphereList(const vector<Eigen::Vector3d>& list);
 
         PlanParameters pp_;
     };
