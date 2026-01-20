@@ -236,16 +236,16 @@ namespace cane_planner
                 
                 // ==================== 添加动态障碍物代价到启发式函数 ====================
                 // 动态障碍物信息通过 setDynamicObstacles() 从 planner_manager 传入
-                // double dynObsCost = getDynamicObstacleCost(
-                //     pur_state.com_pos,
-                //     dynObstaclesPos_,      // 成员变量：动态障碍物位置向量
-                //     dynObstaclesVel_,      // 成员变量：动态障碍物速度向量
-                //     dynObstaclesSize_,     // 成员变量：动态障碍物大小向量
-                //     predHorizon_,          // 预测地平线
-                //     ts_,                   // 时间采样间隔
-                //     distThreshDynamic_     // 距离阈值
-                // );
-                // tmp_f_score += weight_dyn_obs_ * dynObsCost;  // 加权合并到总代价
+                double dynObsCost = getDynamicObstacleCost(
+                    pur_state.com_pos,
+                    dynObstaclesPos_,      // 成员变量：动态障碍物位置向量
+                    dynObstaclesVel_,      // 成员变量：动态障碍物速度向量
+                    dynObstaclesSize_,     // 成员变量：动态障碍物大小向量
+                    predHorizon_,          // 预测地平线
+                    ts_,                   // 时间采样间隔
+                    distThreshDynamic_     // 距离阈值
+                );
+                tmp_f_score += weight_dyn_obs_ * dynObsCost;  // 加权合并到总代价
                 // ===================================================================
                 if (pro_node == NULL)
                 {
@@ -671,7 +671,7 @@ namespace cane_planner
         }
         
         int predictionNum = static_cast<int>(predHorizon / ts);
-        const int skipFactor = 1;  // 可调整：采样密度（1=每个时间步，2=每两个时间步...）
+        const int skipFactor = 2;  // 可调整：采样密度（1=每个时间步，2=每两个时间步...）
         
         // 遍历所有动态障碍物
         for (size_t j = 0; j < dynObsPos.size(); ++j) {

@@ -549,7 +549,7 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
         if (foundForwardPt)
         // if (ser_.isOpen())
         {
-            std::cout << "cmd_vel.angular.z = " << int(cmd_vel.angular.z) << std::endl;
+            // std::cout << "cmd_vel.angular.z = " << int(cmd_vel.angular.z) << std::endl;
             // cmd_vel.angular.z = getSteeringAngle(eta) * Angle_gain;
             // ROS_WARN("\nEstimate Steering Angle angle = %f", eta);
             // ROS_INFO("\nSteering angle = %d", (int)(cmd_vel.angular.z) * 100);

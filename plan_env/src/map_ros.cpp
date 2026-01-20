@@ -186,7 +186,7 @@ namespace fast_planner
       map_inflate_ = false;
       esdf_need_update_ = true;
     }
-
+    //同时清理动态障碍物占据的空间
     std::vector<onboardDetector::box3D> obstacles;
     {
       std::lock_guard<std::mutex> lock(obstacles_mutex_);
@@ -194,8 +194,8 @@ namespace fast_planner
     }
     std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> freeRegions;
     for (const auto& ob: obstacles){
-      Eigen::Vector3d lowerBound (ob.x - ob.x_width/2 - 0.3, ob.y - ob.y_width/2 - 0.3, ob.z);
-      Eigen::Vector3d upperBound (ob.x + ob.x_width/2 + 0.3, ob.y + ob.y_width/2 + 0.3, ob.z + ob.z_width + 0.3);
+      Eigen::Vector3d lowerBound (ob.x - ob.x_width/2 - 0.1, ob.y - ob.y_width/2 - 0.1, ob.z);
+      Eigen::Vector3d upperBound (ob.x + ob.x_width/2 + 0.1, ob.y + ob.y_width/2 + 0.1, ob.z + ob.z_width + 0.1);
       freeRegions.push_back(std::make_pair(lowerBound, upperBound));
       // cout<<"free region: "<<lowerBound.transpose()<<" to "<<upperBound.transpose()<<endl;
     }

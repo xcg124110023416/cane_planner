@@ -9,8 +9,15 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall")
 find_package(Eigen3 REQUIRED)
 find_package(PCL 1.7 REQUIRED)
 
-set(NLOPT_INCLUDE_DIR "/usr/local/include")  
-set(NLOPT_LIBRARY "/usr/local/lib/libnlopt.so")  
+find_path(NLOPT_INCLUDE_DIR NAMES nlopt.hpp nlopt.h)
+find_library(NLOPT_LIBRARY NAMES nlopt nlopt_cxx)
+
+if (NLOPT_INCLUDE_DIR AND NLOPT_LIBRARY)
+  message(STATUS "Found NLopt header: ${NLOPT_INCLUDE_DIR}")
+  message(STATUS "Found NLopt library: ${NLOPT_LIBRARY}")
+else()
+  message(FATAL_ERROR "NLopt not found. Please install it.")
+endif()  
 
 find_package(catkin REQUIRED COMPONENTS
   roscpp
