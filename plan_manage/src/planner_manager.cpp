@@ -780,7 +780,7 @@ namespace cane_planner
         double                  tm, tmp;
         bspline.getTimeSpan(tm, tmp);
 
-        for (double t = tm; t <= tmp; t += 0.01) {
+        for (double t = tm; t <= tmp; t += 0.175) {
             Eigen::Vector3d pt = bspline.evaluateDeBoor(t);
             traj_pts.push_back(pt);
         }

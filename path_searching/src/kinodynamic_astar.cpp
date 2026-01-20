@@ -433,11 +433,11 @@ namespace cane_planner
         // end_acc = path_nodes_.back()->input;
 
         // Get point samples
-        int seg_num = floor(T_sum / ts);
-        seg_num = max(10, seg_num);
-        ts = T_sum / double(seg_num);
+        // int seg_num = floor(T_sum / ts);
+        // seg_num = max(10, seg_num);
+        // ts = T_sum / double(seg_num);
         // cout << "revised ts: " << ts << ", seg num: " << seg_num << endl;
-
+        // ROS_WARN("Kinodynamic Astar get samples, revised ts: %f, seg num: %d", ts, seg_num);
         node = path_nodes_.back();
 
         for (double ti = T_sum; ti > -1e-5; ti -= ts)

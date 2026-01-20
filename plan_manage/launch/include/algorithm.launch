@@ -31,7 +31,7 @@
         <param name="manager/dynamic_environment" value="0" type="int"/>
         <param name="manager/local_segment_length" value="6.0" type="double"/>
         <param name="manager/clearance_threshold" value="0.2" type="double"/>
-        <param name="manager/control_points_distance" value="0.6" type="double"/>
+        <param name="manager/control_points_distance" value="0.35" type="double"/>
 
         <!-- simulation true or false -->
         <param name="planner_node/simulation" value="$(arg simulation)"/>

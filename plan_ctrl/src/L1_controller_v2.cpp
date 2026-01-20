@@ -85,7 +85,7 @@ L1Controller::L1Controller()
     }
     else if (plan_ == 2)
     {
-        path_sub = n_.subscribe("/kin_astar/path", 1, &L1Controller::pathCB, this);
+        path_sub = n_.subscribe("/planning_vis/trajectory", 1, &L1Controller::pathCB, this);
         ROS_WARN("using kin_astar");
     }
     goal_sub = n_.subscribe("/move_base_simple/goal", 1, &L1Controller::goalCB, this);
@@ -229,24 +229,24 @@ void L1Controller::pathCB(const nav_msgs::Path::ConstPtr &pathMsg)
     // std::cout << "path_receive" <<std::endl;
 }
 
-void L1Controller::waypointCB(const nav_msgs::PathConstPtr &msg)
-{
-    geometry_msgs::PoseStamped odom_goal;
-    // tf_listener.transformPose("world", ros::Time(0), *goalMsg, "world", odom_goal);
-    // odom_goal_pos = odom_goal.pose.position;
-    odom_goal_pos = msg->poses[0].pose.position;
-    goal_received = true;
-    goal_reached = false;
-    stop_sent_flag_ = false;
+// void L1Controller::waypointCB(const nav_msgs::PathConstPtr &msg)
+// {
+//     geometry_msgs::PoseStamped odom_goal;
+//     // tf_listener.transformPose("world", ros::Time(0), *goalMsg, "world", odom_goal);
+//     // odom_goal_pos = odom_goal.pose.position;
+//     odom_goal_pos = msg->poses[0].pose.position;
+//     goal_received = true;
+//     goal_reached = false;
+//     stop_sent_flag_ = false;
     
-    // Clear old path to avoid tracking ghost path
-    map_path.poses.clear();
-    foundForwardPt = false;
+//     // Clear old path to avoid tracking ghost path
+//     map_path.poses.clear();
+//     foundForwardPt = false;
 
-    /*Draw Goal on RVIZ*/
-    // goal_circle.pose = odom_goal.pose;
-    // marker_pub.publish(goal_circle);
-}
+//     /*Draw Goal on RVIZ*/
+//     // goal_circle.pose = odom_goal.pose;
+//     // marker_pub.publish(goal_circle);
+// }
 
 void L1Controller::goalCB(const geometry_msgs::PoseStamped::ConstPtr &goalMsg)
 {
