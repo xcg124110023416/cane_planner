@@ -420,7 +420,7 @@ namespace cane_planner
             T_sum += node->time_update_once;
             node = node->parent;
         }
-        cout << "T_sum:" << T_sum << endl;
+        // cout << "T_sum:" << T_sum << endl;
 
         // Calculate boundary vel and acc
         Eigen::Vector3d end_vel, end_acc;
@@ -477,7 +477,7 @@ namespace cane_planner
                 if(node->parent->parent == NULL)
                 {
                     point_set.push_back(node->parent->com_pos);
-                    ROS_INFO("Kinodynamic Astar get samples finished.");
+                    // cout << "Kinodynamic Astar get samples finished." << endl;
                     break;
                 }
                 else

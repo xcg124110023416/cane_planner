@@ -147,11 +147,11 @@ namespace cane_planner
         collision_->init(nh);
         collision_->setMap(sdf_map_);
         // init kin planner
-        ROS_WARN(" Astar planer start");
-        astar_finder_.reset(new Astar);
-        astar_finder_->setParam(nh);
-        astar_finder_->setCollision(collision_);
-        astar_finder_->init();
+        // ROS_WARN(" Astar planer start");
+        // astar_finder_.reset(new Astar);
+        // astar_finder_->setParam(nh);
+        // astar_finder_->setCollision(collision_);
+        // astar_finder_->init();
         // init lfpc model
         ROS_WARN(" LFPC model start");
         lfpc_model_.reset(new LFPC);
@@ -164,6 +164,9 @@ namespace cane_planner
         kin_finder_->setCollision(collision_);
         kin_finder_->setModel(lfpc_model_);
         kin_finder_->init();
+        //init bspline
+        ROS_WARN(" Bspline start");
+        bspline_init_.reset(new NonUniformBspline);
         // init bspline optimizer
         ROS_WARN(" Bspline optimizer start");
         bspline_optimizers_.reset(new BsplineOptimizer);
@@ -178,7 +181,7 @@ namespace cane_planner
                                      &PlannerManager::dynamicObstaclesCallback, this);
         // Timer
         exec_timer_ =
-            nh.createTimer(ros::Duration(0.2), &PlannerManager::execFSMCallback, this);
+            nh.createTimer(ros::Duration(0.1), &PlannerManager::execFSMCallback, this);
         // replan_timer_ =
             // nh.createTimer(ros::Duration(0.1), &PlannerManager::checkCollisionCallback, this);
         // Visial
@@ -348,10 +351,12 @@ namespace cane_planner
                 displayAstar();
                 publishAstarPath();
             }
-            if (success2) // kin star success
+            else if (success2) // kin star success
             {
-                displayKinastar(); //发布离散点和足迹
-                publishKinodynamicAstarPath();  //发布路径
+                drawBspline(*bspline_init_, 0.1, Eigen::Vector4d(1.0, 0, 0.0, 1), true, 0.2,
+                            Eigen::Vector4d(1, 0, 0, 1));   //发布拟合的b样条
+                // displayKinastar(); //发布离散点和足迹
+                // publishKinodynamicAstarPath();  //发布路径
             }
             // real experience using odom judge stop replan
             Eigen::Vector2d odom_pt(odom_pos_(0), odom_pos_(1));
@@ -452,7 +457,7 @@ namespace cane_planner
         string state_str[5] = {"INIT", "WAIT_TARGET", "GEN_NEW_TRAJ", "EXEC_TRAJ", "REPLAN_TRAJ"};
         int pre_s = int(exec_state_);
         exec_state_ = new_state;
-        cout << "[now]: from " + state_str[pre_s] + " to " + state_str[int(new_state)] << endl;
+        // cout << "[now]: from " + state_str[pre_s] + " to " + state_str[int(new_state)] << endl;
     }
     bool PlannerManager::callAstarPlan()
     {
@@ -480,9 +485,7 @@ namespace cane_planner
         static int num = 0;
 
         kin_finder_->reset();
-        num++;
-        std::cout << "kin," << num << ","<<endl;
-        
+        num++;       
         // ==================== 从缓存获取动态障碍物信息（通过话题订阅更新） ====================
         {
             std::lock_guard<std::mutex> lock(dynObsMutex_);
@@ -501,9 +504,7 @@ namespace cane_planner
         input << 0.0, 0.0, start_state_(2);//vx,vy,theta
         //
         ros::Time time_1 = ros::Time::now();
-
         bool plan_success = kin_finder_->search(start_state_, input, end_state_);
-        ros::Time time_2 = ros::Time::now();
 
         double ts = pp_.ctrl_pt_dist / pp_.max_vel_;
         // cout<< "ts: " << ts << endl;
@@ -515,7 +516,7 @@ namespace cane_planner
         NonUniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);
         // cout<< "Control points:\n"
         //     << ctrl_pts << endl;
-        NonUniformBspline init(ctrl_pts, 3, ts);
+        bspline_init_->setUniformBspline(ctrl_pts, 3, ts);
 
         // int cost_function = BsplineOptimizer::SMOOTHNESS;
         // // cost_function |= BsplineOptimizer::ENDPOINT;
@@ -523,11 +524,10 @@ namespace cane_planner
 
         // NonUniformBspline pos = NonUniformBspline(ctrl_pts, 3, ts);
 
-        drawBspline(init, 0.1, Eigen::Vector4d(1.0, 0, 0.0, 1), true, 0.2,
-                                Eigen::Vector4d(1, 0, 0, 1));
+        ros::Time time_2 = ros::Time::now();
         if (plan_success)
         {
-            std::cout << (time_2 - time_1).toSec() << ",";
+            std::cout << "kin：" << num << "，usedtime：" <<(time_2 - time_1).toSec() << endl;
             // vector<Eigen::Vector3d> list;
             // list = kin_finder_->getPath();  //多个com_pos组成的路径点
             // double len = getPathLen(list);  //路径长度

@@ -150,20 +150,20 @@ namespace fast_planner
   void MapROS::visCallback(const ros::TimerEvent &e)
   {
     publishMapLocal();
-    if (show_all_map_)
-    {
-      // Limit the frequency of all map
-      // static double tpass = 0.0;
-      // tpass += (e.current_real - e.last_real).toSec();
-      if (!esdf_need_update_)
-      {
-        // publishMapAll();
-        // publishUnknown();
-        publishESDF();
-        // publishUpdateRange();
-        // tpass = 0.0;
-      }
-    }
+    // if (show_all_map_)
+    // {
+    //   // Limit the frequency of all map
+    //   // static double tpass = 0.0;
+    //   // tpass += (e.current_real - e.last_real).toSec();
+    //   if (!esdf_need_update_)
+    //   {
+    //     // publishMapAll();
+    //     // publishUnknown();
+    //     publishESDF();
+    //     // publishUpdateRange();
+    //     // tpass = 0.0;
+    //   }
+    // }
 
     // publishDepth();
   }

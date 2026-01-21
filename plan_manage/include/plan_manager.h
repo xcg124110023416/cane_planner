@@ -59,6 +59,8 @@ namespace cane_planner
         unique_ptr<Astar> astar_finder_;
         unique_ptr<KinodynamicAstar> kin_finder_;
         BsplineOptimizer::Ptr bspline_optimizers_;
+        NonUniformBspline::Ptr bspline_init_;
+
 
         FSM_STATE exec_state_;
         bool have_odom_, have_target_;
@@ -91,7 +93,6 @@ namespace cane_planner
         ros::Publisher kin_path_pub_, a_path_pub_;
         ros::Publisher traj_pub_;
         tf::TransformListener tf_listener_;
-        vector<ros::Publisher> pubs_;
 
         /*---------- helper function -----------*/
         bool callAstarPlan();

@@ -29,6 +29,7 @@
 #include <Eigen/Eigen>
 #include <algorithm>
 #include <iostream>
+#include <memory>
 
 using namespace std;
 
@@ -99,6 +100,8 @@ public:
   void   getMeanAndMaxAcc(double& mean_a, double& max_a);
 
   void recomputeInit();
+
+  typedef std::unique_ptr<NonUniformBspline> Ptr;
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
