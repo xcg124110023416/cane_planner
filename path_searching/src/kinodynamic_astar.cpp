@@ -94,13 +94,13 @@ namespace cane_planner
 
             if (near_end)
             {
-                // std::cout << "[Kin-Astar]:---------------------- " << use_node_num_ << std::endl;
+                std::cout << "[Kin-Astar]:---------------------- " << use_node_num_ << std::endl;
                 // std::cout << "use node num: " << use_node_num_ << std::endl;
                 // std::cout << "iter num: " << iter_num_ << std::endl;
                 // std::cout << "feasible num: " << num_feasible << std::endl;
                 // std::cout << "close num: " << num_close << std::endl;
                 // std::cout << "collision num: " << num_collision << std::endl;
-                std::cout << use_node_num_ << "," << iter_num_ << ",";
+                // std::cout << use_node_num_ << "," << iter_num_ << ",";
 
                 terminate_node = cur_node;
                 retrievePath(terminate_node);
@@ -118,7 +118,7 @@ namespace cane_planner
                     // std::cout << "feasible num: " << num_feasible << std::endl;
                     // std::cout << "close num: " << num_close << std::endl;
                     // std::cout << "collision num: " << num_collision << std::endl;
-                    std::cout << use_node_num_ << "," << iter_num_ << ",";
+                    // std::cout << use_node_num_ << "," << iter_num_ << ",";
                     terminate_node = cur_node;
                     retrievePath(terminate_node);
                     return true;

@@ -506,6 +506,11 @@ namespace cane_planner
         ros::Time time_1 = ros::Time::now();
         bool plan_success = kin_finder_->search(start_state_, input, end_state_);
 
+        if (!plan_success) {
+            ROS_WARN("[Planner Manager]: Kinodynamic A* failed to find a path!");
+            return false; // 直接退出函数
+        }
+
         double ts = pp_.ctrl_pt_dist / pp_.max_vel_;
         // cout<< "ts: " << ts << endl;
         vector<Eigen::Vector3d> point_set, start_end_derivatives;

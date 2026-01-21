@@ -541,9 +541,13 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
         +1.57和雷达安装位置有关系。
         eta是以camera_base为参考系，当前相对于目标路径上最近一点的角度（弧度值），话题car_path可以显示。
         eta为正时相对camera_base坐标系朝左，第二象限；为负时相对camera_base坐标系朝右，第一象限。*/
+        static double last_eta = 0.0;
         double eta = getEta(carPose);
-        // std::cout << "eta = " << eta << std::endl;
-        // double eta = 0.3;
+        if(last_eta != eta){
+            last_eta = eta;
+            ROS_WARN("eta changed: %.2f", eta);
+        }
+
         cmd_vel.angular.z = (eta*180)/(PI);
         
         if (foundForwardPt)
@@ -569,8 +573,8 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
                     //     send_data_char[i] = send_data.c_str()[i];
                     // ser_.write(send_data_char, send_data.size());
 
-
                     Set(CMD_VEL,int(cmd_vel.angular.z)*-1);
+                    ros::Duration(0.1).sleep(); // 0.1秒 = 10Hz
                 }
             }
         }
