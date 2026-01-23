@@ -79,6 +79,7 @@ private:
     int controller_freq, baseSpeed;
     bool foundForwardPt, goal_received, goal_reached, stop_sent_flag_;
     bool have_odom;
+    double targetAngle;
 
     void odomCB(const nav_msgs::Odometry::ConstPtr &odomMsg);
     void pathCB(const nav_msgs::Path::ConstPtr &pathMsg);

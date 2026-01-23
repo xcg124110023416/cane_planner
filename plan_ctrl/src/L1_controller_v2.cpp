@@ -316,7 +316,7 @@ bool L1Controller::isForwardWayPt(const geometry_msgs::Point &wayPt, const geome
     float car_car2wayPt_x = cos(car_theta) * car2wayPt_x + sin(car_theta) * car2wayPt_y;
     float car_car2wayPt_y = -sin(car_theta) * car2wayPt_x + cos(car_theta) * car2wayPt_y;
 
-    if (car_car2wayPt_x > 0 || car_car2wayPt_y > 0) /*is Forward WayPt*/
+    if (car_car2wayPt_x > 0 ) /*is Forward WayPt*/
     {
         // ROS_WARN("Forward WayPt");
         return true;
@@ -331,7 +331,7 @@ bool L1Controller::isWayPtAwayFromLfwDist(const geometry_msgs::Point &wayPt, con
     double dy = wayPt.y - car_pos.y;
     double dist = sqrt(dx * dx + dy * dy);
 
-    if (dist >= Lfw && dist <= 1.0)
+    if (dist >= Lfw)
         return true;
     else
         return false;
@@ -497,6 +497,7 @@ void L1Controller::goalReachingCB(const ros::TimerEvent &)
 
 void L1Controller::controlLoopCB(const ros::TimerEvent &)
 {
+    // static double last_eta;
     geometry_msgs::Pose carPose;
     geometry_msgs::PoseStamped pose_cam;
     geometry_msgs::PoseStamped pose_world;
@@ -525,8 +526,8 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
     }
 
     // geometry_msgs::Twist carVel = odom.twist.twist;
-    cmd_vel.linear.x = 1500;
-    cmd_vel.angular.z = baseAngle;
+    // cmd_vel.linear.x = 1500;
+    // cmd_vel.angular.z = baseAngle;
 
     // if (goal_received)
     if (ser_.isOpen())
@@ -541,14 +542,14 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
         +1.57和雷达安装位置有关系。
         eta是以camera_base为参考系，当前相对于目标路径上最近一点的角度（弧度值），话题car_path可以显示。
         eta为正时相对camera_base坐标系朝左，第二象限；为负时相对camera_base坐标系朝右，第一象限。*/
-        static double last_eta = 0.0;
         double eta = getEta(carPose);
-        if(last_eta != eta){
-            last_eta = eta;
-            ROS_WARN("eta changed: %.2f", eta);
-        }
+        // if(last_eta != eta){
+        //     last_eta = eta;
+        //     ROS_WARN("eta changed: %.2f", eta);
+        // }
 
-        cmd_vel.angular.z = (eta*180)/(PI);
+        targetAngle = (eta*180)/(PI);
+        // ROS_WARN("Steering Angle Command: %.2f", targetAngle);
         
         if (foundForwardPt)
         // if (ser_.isOpen())
@@ -564,7 +565,7 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
             {
                 // double u = getGasInput(carVel.linear.x);
                 // cmd_vel.linear.x = baseSpeed - u;
-                cmd_vel.linear.x = baseSpeed;
+                // cmd_vel.linear.x = baseSpeed;
                 if (use_ser_flag_)
                 {
                     // std::string send_data = "z" + std::to_string((int)(cmd_vel.angular.z * 100)) + "\n";
@@ -573,8 +574,8 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
                     //     send_data_char[i] = send_data.c_str()[i];
                     // ser_.write(send_data_char, send_data.size());
 
-                    Set(CMD_VEL,int(cmd_vel.angular.z)*-1);
-                    ros::Duration(0.1).sleep(); // 0.1秒 = 10Hz
+                    Set(CMD_VEL,static_cast<int16_t>(-1 * targetAngle));
+                    ros::Duration(0.2).sleep(); // 0.1秒 = 10Hz
                 }
             }
         }
@@ -599,7 +600,7 @@ void L1Controller::Set(uint8_t cmd, int16_t data)
         frame.push_back(data & 0xFF);        // 数据低字节
     }
     ser_.write(frame);
-
+    ROS_WARN("Send_data: %d", data);
 }
 
 double L1Controller::CalculateEta(const geometry_msgs::Pose &carPose, const geometry_msgs::Point &targetPos)

@@ -512,10 +512,13 @@ namespace cane_planner
         }
 
         double ts = pp_.ctrl_pt_dist / pp_.max_vel_;
-        // cout<< "ts: " << ts << endl;
         vector<Eigen::Vector3d> point_set, start_end_derivatives;
-        kin_finder_->getSamples(ts, point_set, start_end_derivatives);
-        // kin_finder_->publishKinodynamicAstarPath(point_set);
+        int segNum = kin_finder_->getSamples(ts, point_set, start_end_derivatives);
+
+        if(segNum <= 2){
+            std::cout<<"Close terminal condition reached."<<endl;
+            return plan_success;
+        }
 
         Eigen::MatrixXd ctrl_pts;
         NonUniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);

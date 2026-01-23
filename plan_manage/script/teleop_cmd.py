@@ -140,7 +140,7 @@ if __name__ == '__main__':
     try:
         # 初始化
         rospy.init_node('sim_teleop')
-        rate = rospy.Rate(rospy.get_param('~hz', 1))
+        rate = rospy.Rate(rospy.get_param('~hz', 10))
         # keyboardLoop()
         print("Teleop node started, waiting for goal messages...")
         rospy.spin()

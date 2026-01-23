@@ -191,7 +191,7 @@ namespace cane_planner
     std::vector<Eigen::Vector3d> getPath();
     std::vector<Eigen::Vector3d> getComPos();
     std::vector<Eigen::Vector3d> getFeetPos();
-    void getSamples(double& ts, vector<Eigen::Vector3d>& point_set,
+    int getSamples(double& ts, vector<Eigen::Vector3d>& point_set,
                                   vector<Eigen::Vector3d>& start_end_derivatives);
 
 

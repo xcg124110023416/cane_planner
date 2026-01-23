@@ -87,8 +87,8 @@ namespace cane_planner
             //                 abs(cur_node->index(1) - end_index(1)) <= 1;
             // abs(cur_node->state_variable(2) - end_pos(2)) <= 0.1;
             // have tourble in here;
-            bool near_end = abs(cur_node->com_pos(0) - end_pos(0)) <= 0.5 &&
-                            abs(cur_node->com_pos(1) - end_pos(1)) <= 0.5;
+            bool near_end = abs(cur_node->com_pos(0) - end_pos(0)) <= 0.1 &&
+                            abs(cur_node->com_pos(1) - end_pos(1)) <= 0.1;
 
             double reach_horizon = (cur_node->com_pos.head(3) - start_pos).norm();
 
@@ -409,7 +409,7 @@ namespace cane_planner
         return path;
     }
 
-    void KinodynamicAstar::getSamples(double& ts, vector<Eigen::Vector3d>& point_set,
+    int KinodynamicAstar::getSamples(double& ts, vector<Eigen::Vector3d>& point_set,
                                   vector<Eigen::Vector3d>& start_end_derivatives)
     {
         /* ---------- path duration ---------- */
@@ -433,7 +433,7 @@ namespace cane_planner
         // end_acc = path_nodes_.back()->input;
 
         // Get point samples
-        // int seg_num = floor(T_sum / ts);
+        int seg_num = floor(T_sum / ts);
         // seg_num = max(10, seg_num);
         // ts = T_sum / double(seg_num);
         // cout << "revised ts: " << ts << ", seg num: " << seg_num << endl;
@@ -493,6 +493,8 @@ namespace cane_planner
         start_end_derivatives.push_back(end_vel);        // 终点速度（Z分量为0）
         start_end_derivatives.push_back({0,0,0});        // 起点加速度
         start_end_derivatives.push_back({0,0,0});        // 终点
+
+        return seg_num;
     }
 
     void KinodynamicAstar::setParam(ros::NodeHandle &nh)
