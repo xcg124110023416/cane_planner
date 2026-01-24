@@ -174,6 +174,8 @@ namespace cane_planner
         // replan
         goal_sub =
             nh.subscribe("/move_base_simple/goal", 1, &PlannerManager::GoalCallback, this);
+        waypoint_sub_ =
+            nh.subscribe("/waypoint_generator/waypoints", 1, &PlannerManager::waypointCallback, this);
         odom_sub_ =
             nh.subscribe("/odom_world", 1, &PlannerManager::odometryCallback, this);
         // 订阅动态障碍物信息话题
@@ -202,6 +204,19 @@ namespace cane_planner
         end_state_(0) = msg->pose.position.x;
         end_state_(1) = msg->pose.position.y;
         double yaw = QuatenionToYaw(msg->pose.orientation);
+        end_state_(2) = yaw;
+        // ROS_INFO("set end pos is: %lf and %lf", end_pt_(0), end_pt_(1));
+        // ROS_INFO("end yaw is: %lf", yaw);
+        have_target_ = true;
+    }
+    void PlannerManager::waypointCallback(const nav_msgs::PathConstPtr &msg)
+    {
+        if (msg->poses[0].pose.position.z < -0.1)
+            return;
+        end_pt_ << msg->poses[0].pose.position.x, msg->poses[0].pose.position.y;
+        end_state_(0) = msg->poses[0].pose.position.x;
+        end_state_(1) = msg->poses[0].pose.position.y;
+        double yaw = QuatenionToYaw(msg->poses[0].pose.orientation);
         end_state_(2) = yaw;
         // ROS_INFO("set end pos is: %lf and %lf", end_pt_(0), end_pt_(1));
         // ROS_INFO("end yaw is: %lf", yaw);

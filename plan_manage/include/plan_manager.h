@@ -86,7 +86,7 @@ namespace cane_planner
         /*---------- Ros utils -----------*/
         ros::Timer exec_timer_;
         ros::Timer replan_timer_;
-        ros::Subscriber odom_sub_, goal_sub;
+        ros::Subscriber odom_sub_, goal_sub, waypoint_sub_;
         ros::Subscriber goal_sub_, start_sub_;
         ros::Subscriber dyn_obs_sub_;  // 动态障碍物订阅者
         ros::Publisher astar_pub_, kin_vis_pub_, kin_foot_pub_;
@@ -116,6 +116,7 @@ namespace cane_planner
         void checkCollisionCallback(const ros::TimerEvent &e);
         // sub callback
         void GoalCallback(const geometry_msgs::PoseStamped::ConstPtr &msg);
+        void waypointCallback(const nav_msgs::PathConstPtr &msg);
         void odometryCallback(const nav_msgs::OdometryConstPtr &msg);
         // sim sub callback
         void goalCallback(const geometry_msgs::PoseStamped::ConstPtr &goal);

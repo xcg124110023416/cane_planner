@@ -89,7 +89,7 @@ L1Controller::L1Controller()
         ROS_WARN("using kin_astar");
     }
     goal_sub = n_.subscribe("/move_base_simple/goal", 1, &L1Controller::goalCB, this);
-    // way_sub = n_.subscribe("/waypoint_generator/waypoints", 1, &L1Controller::waypointCB, this);
+    way_sub = n_.subscribe("/waypoint_generator/waypoints", 1, &L1Controller::waypointCB, this);
 
     marker_pub = n_.advertise<visualization_msgs::Marker>("car_path", 10);
     goal_marker_pub = n_.advertise<visualization_msgs::Marker>("goal_marker", 10);
@@ -229,24 +229,28 @@ void L1Controller::pathCB(const nav_msgs::Path::ConstPtr &pathMsg)
     // std::cout << "path_receive" <<std::endl;
 }
 
-// void L1Controller::waypointCB(const nav_msgs::PathConstPtr &msg)
-// {
-//     geometry_msgs::PoseStamped odom_goal;
-//     // tf_listener.transformPose("world", ros::Time(0), *goalMsg, "world", odom_goal);
-//     // odom_goal_pos = odom_goal.pose.position;
-//     odom_goal_pos = msg->poses[0].pose.position;
-//     goal_received = true;
-//     goal_reached = false;
-//     stop_sent_flag_ = false;
+void L1Controller::waypointCB(const nav_msgs::PathConstPtr &msg)
+{
+    geometry_msgs::PoseStamped odom_goal;
+    // tf_listener.transformPose("world", ros::Time(0), *goalMsg, "world", odom_goal);
+    // odom_goal_pos = odom_goal.pose.position;
+    odom_goal_pos = msg->poses[0].pose.position;
+    goal_received = true;
+    goal_reached = false;
+    stop_sent_flag_ = false;
     
-//     // Clear old path to avoid tracking ghost path
-//     map_path.poses.clear();
-//     foundForwardPt = false;
+    // Clear old path to avoid tracking ghost path
+    map_path.poses.clear();
+    foundForwardPt = false;
 
-//     /*Draw Goal on RVIZ*/
-//     // goal_circle.pose = odom_goal.pose;
-//     // marker_pub.publish(goal_circle);
-// }
+    // Publish text marker
+    text_marker.pose.position = odom_goal_pos;
+    goal_marker_pub.publish(text_marker);
+
+    /*Draw Goal on RVIZ*/
+    // goal_circle.pose = odom_goal.pose;
+    // marker_pub.publish(goal_circle);
+}
 
 void L1Controller::goalCB(const geometry_msgs::PoseStamped::ConstPtr &goalMsg)
 {
@@ -560,23 +564,10 @@ void L1Controller::controlLoopCB(const ros::TimerEvent &)
             // ROS_INFO("\nSteering angle = %d", (int)(cmd_vel.angular.z) * 100);
 
             /*Estimate Gas Input*/
-            if (!goal_reached)
-            // if (ser_.isOpen())
+            if (!goal_reached && use_ser_flag_)
             {
-                // double u = getGasInput(carVel.linear.x);
-                // cmd_vel.linear.x = baseSpeed - u;
-                // cmd_vel.linear.x = baseSpeed;
-                if (use_ser_flag_)
-                {
-                    // std::string send_data = "z" + std::to_string((int)(cmd_vel.angular.z * 100)) + "\n";
-                    // u_char send_data_char[send_data.size()];
-                    // for (size_t i = 0; i < send_data.size(); i++)
-                    //     send_data_char[i] = send_data.c_str()[i];
-                    // ser_.write(send_data_char, send_data.size());
-
-                    Set(CMD_VEL,static_cast<int16_t>(-1 * targetAngle));
-                    ros::Duration(0.2).sleep(); // 0.1秒 = 10Hz
-                }
+                Set(CMD_VEL,static_cast<int16_t>(-1 * targetAngle));
+                ros::Duration(0.2).sleep(); // 0.1秒 = 10Hz
             }
         }
         if(goal_reached && !stop_sent_flag_)
