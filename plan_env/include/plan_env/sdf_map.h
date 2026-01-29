@@ -329,7 +329,7 @@ struct MapData {
   inline void SDFMap::setFree(const Eigen::Vector3i& idx){
 		if (not this->isInMap(idx)) return;
 		int address = this->toAddress(idx);
-		md_->occupancy_buffer_[address] = mp_->clamp_min_log_;
+		md_->occupancy_buffer_[address] = mp_->clamp_min_log_ - mp_->unknown_flag_;
 
 		// also set inflated map to free
 		int xInflateSize = ceil(mp_->robotSize_(0)/(2*mp_->resolution_));

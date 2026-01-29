@@ -67,6 +67,7 @@ namespace cane_planner
         bool simulation_;
         // planner:Astar == 1 or kinplan == 2
         int planner_;
+        double no_replan_thresh_, replan_thresh_;
 
         Eigen::Vector3d odom_pos_, odom_vel_;
         Eigen::Quaterniond odom_ori_;

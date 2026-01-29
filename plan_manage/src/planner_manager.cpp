@@ -124,6 +124,9 @@ namespace cane_planner
         nh.param("manager/local_segment_length", pp_.local_traj_len_, -1.0);
         nh.param("manager/control_points_distance", pp_.ctrl_pt_dist, -1.0);
 
+        nh.param("fsm/thresh_replan", replan_thresh_, -1.0);
+        nh.param("fsm/thresh_no_replan", no_replan_thresh_, -1.0);
+
         // local_data_.traj_id_ = 0;
     }
 
@@ -147,11 +150,11 @@ namespace cane_planner
         collision_->init(nh);
         collision_->setMap(sdf_map_);
         // init kin planner
-        // ROS_WARN(" Astar planer start");
-        // astar_finder_.reset(new Astar);
-        // astar_finder_->setParam(nh);
-        // astar_finder_->setCollision(collision_);
-        // astar_finder_->init();
+        ROS_WARN(" Astar planer start");
+        astar_finder_.reset(new Astar);
+        astar_finder_->setParam(nh);
+        astar_finder_->setCollision(collision_);
+        astar_finder_->init();
         // init lfpc model
         ROS_WARN(" LFPC model start");
         lfpc_model_.reset(new LFPC);
@@ -268,10 +271,10 @@ namespace cane_planner
         }
 
         // odom and start set
-        start_pt_(0) = odom_pos_(0);
-        start_pt_(1) = odom_pos_(1);
-        start_state_(0) = odom_pos_(0);
-        start_state_(1) = odom_pos_(1);
+        // start_pt_(0) = odom_pos_(0);
+        // start_pt_(1) = odom_pos_(1);
+        // start_state_(0) = odom_pos_(0);
+        // start_state_(1) = odom_pos_(1);
 
         // yaw = QuatenionToYaw(odom_ori_);
         // yaw = QuatenionToYaw(msg->pose.pose.orientation);
@@ -304,92 +307,103 @@ namespace cane_planner
         // FSM loop
         switch (exec_state_)
         {
-        case INIT:
-        {
-            if (!have_odom_)
-                return;
-            changeFSMExecState(WAIT_TARGET);
-            break;
-        }
-        case WAIT_TARGET:
-        {
-            if (!have_target_)
-                return;
-            changeFSMExecState(GEN_NEW_TRAJ);
-            break;
-        }
-        case GEN_NEW_TRAJ:
-        {
-            if (planner_ == 1)
+            case INIT:
             {
-                success1 = callAstarPlan();
-                if (success1)
-                    changeFSMExecState(EXEC_TRAJ);
-                else
-                    changeFSMExecState(REPLAN_TRAJ);
-            }
-            else if (planner_ == 2)
-            {
-                success2 = callKinodynamicAstarPlan();
-                if (success2)
-                    changeFSMExecState(EXEC_TRAJ);
-                else
-                    changeFSMExecState(REPLAN_TRAJ);
-            }
-
-            break;
-        }
-        case REPLAN_TRAJ:
-        {
-            if (planner_ == 1)
-            {
-                success1 = callAstarPlan();
-                if (success1)
-                    changeFSMExecState(EXEC_TRAJ);
-                else
-                    changeFSMExecState(REPLAN_TRAJ);
-            }
-            else if (planner_ == 2)
-            {
-                success2 = callKinodynamicAstarPlan();
-                if (success2)
-                    changeFSMExecState(EXEC_TRAJ);
-                else
-                    changeFSMExecState(REPLAN_TRAJ);
-            }
-            break;
-        }
-        case EXEC_TRAJ:
-        {
-            if (success1) // a star success
-            {
-                displayAstar();
-                publishAstarPath();
-            }
-            else if (success2) // kin star success
-            {
-                drawBspline(*bspline_init_, 0.1, Eigen::Vector4d(1.0, 0, 0.0, 1), true, 0.2,
-                            Eigen::Vector4d(1, 0, 0, 1));   //发布拟合的b样条
-                // displayKinastar(); //发布离散点和足迹
-                // publishKinodynamicAstarPath();  //发布路径
-            }
-            // real experience using odom judge stop replan
-            Eigen::Vector2d odom_pt(odom_pos_(0), odom_pos_(1));
-
-            double dis = (odom_pt - end_pt_).norm();
-            // ROS_WARN("distance is %lf",dis);
-            if (dis <= 1)
-            {
-                have_target_ = false;
-                ROS_WARN("Reach the destination");
+                if (!have_odom_)
+                    return;
                 changeFSMExecState(WAIT_TARGET);
+                break;
             }
-            else if (fsm_num % 5 == 0) // replan
+            case WAIT_TARGET:
             {
-                changeFSMExecState(REPLAN_TRAJ);
+                if (!have_target_)
+                    return;
+                changeFSMExecState(GEN_NEW_TRAJ);
+                break;
             }
-            break;
-        }
+            case GEN_NEW_TRAJ:
+            {
+                if (planner_ == 1)
+                {
+                    success1 = callAstarPlan();
+                    if (success1)
+                        changeFSMExecState(EXEC_TRAJ);
+                    else
+                        changeFSMExecState(REPLAN_TRAJ);
+                }
+                else if (planner_ == 2)
+                {
+                    success2 = callKinodynamicAstarPlan();
+                    if (success2)
+                        changeFSMExecState(EXEC_TRAJ);
+                    else
+                        changeFSMExecState(REPLAN_TRAJ);
+                }
+
+                break;
+            }
+            case REPLAN_TRAJ:
+            {
+                if (planner_ == 1)
+                {
+                    success1 = callAstarPlan();
+                    if (success1)
+                        changeFSMExecState(EXEC_TRAJ);
+                    else
+                        changeFSMExecState(REPLAN_TRAJ);
+                }
+                else if (planner_ == 2)
+                {
+                    success2 = callKinodynamicAstarPlan();
+                    if (success2)
+                        changeFSMExecState(EXEC_TRAJ);
+                    else
+                        changeFSMExecState(REPLAN_TRAJ);
+                }
+                break;
+            }
+            case EXEC_TRAJ:
+            {
+                // if (success1) // a star success
+                // {
+                //     displayAstar();
+                //     publishAstarPath();
+                // }
+                // else if (success2) // kin star success
+                // {
+                //     drawBspline(*bspline_init_, 0.1, Eigen::Vector4d(1.0, 0, 0.0, 1), true, 0.2,
+                //                 Eigen::Vector4d(1, 0, 0, 1));   //发布拟合的b样条
+                //     // displayKinastar(); //发布离散点和足迹
+                //     // publishKinodynamicAstarPath();  //发布路径
+                // }
+                // real experience using odom judge stop replan
+                Eigen::Vector2d odom_pt(odom_pos_(0), odom_pos_(1));
+
+                double dis2end = (odom_pt - end_pt_).norm();
+                double dis2start = (odom_pt - start_pt_).norm();
+                // ROS_WARN("distance is %lf",dis);
+                if (dis2end <= 0.5)
+                {
+                    have_target_ = false;
+                    ROS_WARN("Reach the destination");
+                    changeFSMExecState(WAIT_TARGET);
+                }
+                else if (dis2end < no_replan_thresh_) 
+                {
+                    // cout << "near end" << endl;
+                    return;
+                } 
+                else if (dis2start < replan_thresh_) 
+                {
+                    // cout << "near start" << endl;
+                    return;
+                } 
+                else 
+                {
+                    changeFSMExecState(REPLAN_TRAJ);
+                }
+                break;
+            }
         }
         return;
     }
@@ -470,7 +484,7 @@ namespace cane_planner
     void PlannerManager::changeFSMExecState(FSM_STATE new_state)
     {
         string state_str[5] = {"INIT", "WAIT_TARGET", "GEN_NEW_TRAJ", "EXEC_TRAJ", "REPLAN_TRAJ"};
-        int pre_s = int(exec_state_);
+        // int pre_s = int(exec_state_);
         exec_state_ = new_state;
         // cout << "[now]: from " + state_str[pre_s] + " to " + state_str[int(new_state)] << endl;
     }
@@ -478,6 +492,10 @@ namespace cane_planner
     {
         static int num = 0;
         astar_finder_->reset();
+        start_pt_(0) = odom_pos_(0);
+        start_pt_(1) = odom_pos_(1);
+        start_state_(0) = odom_pos_(0);
+        start_state_(1) = odom_pos_(1);
         num++;
         std::cout << "astar"
                   << "," << num << ",";
@@ -491,6 +509,7 @@ namespace cane_planner
             // list = astar_finder_->getPath();
             // double len = getPathLen(list);
             // std::cout << len << ",1" << std::endl;
+            publishAstarPath();
         }
 
         return plan_success;
@@ -510,7 +529,10 @@ namespace cane_planner
         }
         // =========================================================================
         
-        // todo
+        start_pt_(0) = odom_pos_(0);
+        start_pt_(1) = odom_pos_(1);
+        start_state_(0) = odom_pos_(0);
+        start_state_(1) = odom_pos_(1);
         Eigen::Vector3d input;
         // double vx, vy;
         // vx = 0.5 * sin(start_state_(2));
@@ -519,6 +541,7 @@ namespace cane_planner
         input << 0.0, 0.0, start_state_(2);//vx,vy,theta
         //
         ros::Time time_1 = ros::Time::now();
+        cout<<"end_state_: "<<end_state_.transpose()<<endl;
         bool plan_success = kin_finder_->search(start_state_, input, end_state_);
 
         if (!plan_success) {
@@ -546,6 +569,9 @@ namespace cane_planner
         // ctrl_pts = bspline_optimizers_->BsplineOptimizeTraj(ctrl_pts, ts, cost_function, 1, 1);
 
         // NonUniformBspline pos = NonUniformBspline(ctrl_pts, 3, ts);
+
+        drawBspline(*bspline_init_, 0.1, Eigen::Vector4d(1.0, 0, 0.0, 1), true, 0.2,
+                                Eigen::Vector4d(1, 0, 0, 1));   //发布拟合的b样条
 
         ros::Time time_2 = ros::Time::now();
         if (plan_success)
@@ -775,7 +801,7 @@ namespace cane_planner
         dynObsSize_.clear();
         
         // 机器人尺寸用于膨胀障碍物
-        Eigen::Vector3d robotSize(0.3, 0.3, 0.6);
+        Eigen::Vector3d robotSize(0.5, 0.5, 0);
         
         // 从消息中提取动态障碍物信息
         for (size_t i = 0; i < msg->num; ++i) {
@@ -803,7 +829,7 @@ namespace cane_planner
         double                  tm, tmp;
         bspline.getTimeSpan(tm, tmp);
 
-        for (double t = tm; t <= tmp; t += 0.175) {
+        for (double t = tm; t <= tmp; t += 0.35) {
             Eigen::Vector3d pt = bspline.evaluateDeBoor(t);
             traj_pts.push_back(pt);
         }

@@ -106,8 +106,8 @@ def keyboardLoop():
             end_x = 0.0
             end_y = 0.0
         elif ch == 'y':
-            end_x = 5.0
-            end_y = 13.0
+            end_x = 8.0
+            end_y = 0.0
 
         # 发送消息
         path_.poses.clear()

@@ -365,7 +365,6 @@ namespace fast_planner
   {
     // tf from cam to odom
     // cout<< "cloudOdomCallback" << endl;
-    pcl::fromROSMsg(*msg, point_cloud_);//转换为pcl类型cloud，点云意味着障碍物
     geometry_msgs::PoseStamped pose_cam;
     pose_cam.header = odom->header;//camera_init
     pose_cam.pose = odom->pose.pose;
@@ -374,6 +373,23 @@ namespace fast_planner
     camera_pos_(0) = pose_world.pose.position.x;
     camera_pos_(1) = pose_world.pose.position.y;
     camera_pos_(2) = pose_world.pose.position.z;
+
+    pcl::PointCloud<pcl::PointXYZ> cloud_temp;
+    pcl::fromROSMsg(*msg, cloud_temp);//转换为pcl类型cloud，点云意味着障碍物
+
+    point_cloud_.clear();
+    for (const auto& pt : cloud_temp.points)
+    {
+      Eigen::Vector3d pt_w(pt.x, pt.y, pt.z);
+      if ((pt_w - camera_pos_).norm() >= 0.5)
+      {
+        point_cloud_.push_back(pt);
+      }
+    }
+    point_cloud_.width = point_cloud_.points.size();
+    point_cloud_.height = 1;
+    point_cloud_.is_dense = cloud_temp.is_dense;
+    point_cloud_.header = cloud_temp.header;
     camera_q_ = Eigen::Quaterniond( pose_cam.pose.orientation.w,
                                     pose_cam.pose.orientation.x,
                                     pose_cam.pose.orientation.y,

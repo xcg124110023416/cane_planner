@@ -17,6 +17,13 @@ namespace cane_planner
     bool KinodynamicAstar::search(Eigen::Vector3d start_pos, Eigen::Vector3d start_state,
                                   Eigen::Vector3d end_pos)
     {
+        // // [诊断] 检查起点是否在障碍物中
+        // if (!collision_->isTraversable(start_pos(0), start_pos(1)))
+        // {
+        //     std::cout << "\033[1;31m[Kin-Astar] ERROR: 规划起点 " << start_pos.transpose() 
+        //               << " 处于障碍物中或不可通行区域！(isTraversable return false)\033[0m" << std::endl;
+        // }
+
         /* ---------- initialize --------*/
         // Bidirectional Attempt: Add both Left and Right support legs to OpenSet
         
@@ -87,8 +94,8 @@ namespace cane_planner
             //                 abs(cur_node->index(1) - end_index(1)) <= 1;
             // abs(cur_node->state_variable(2) - end_pos(2)) <= 0.1;
             // have tourble in here;
-            bool near_end = abs(cur_node->com_pos(0) - end_pos(0)) <= 0.1 &&
-                            abs(cur_node->com_pos(1) - end_pos(1)) <= 0.1;
+            bool near_end = abs(cur_node->com_pos(0) - end_pos(0)) <= 0.5 &&
+                            abs(cur_node->com_pos(1) - end_pos(1)) <= 0.5;
 
             double reach_horizon = (cur_node->com_pos.head(3) - start_pos).norm();
 

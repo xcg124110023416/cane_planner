@@ -32,6 +32,9 @@
         <param name="manager/local_segment_length" value="6.0" type="double"/>
         <param name="manager/clearance_threshold" value="0.2" type="double"/>
         <param name="manager/control_points_distance" value="0.35" type="double"/>
+        <!-- planning fsm -->
+        <param name="fsm/thresh_replan" value="0.20" type="double"/>
+        <param name="fsm/thresh_no_replan" value="1.0" type="double"/>
 
         <!-- simulation true or false -->
         <param name="planner_node/simulation" value="$(arg simulation)"/>
@@ -48,7 +51,7 @@
         <param name="sdf_map/local_update_range_y"  value="5.5" /> 
         <param name="sdf_map/local_update_range_z"  value="4.5" /> 
         <!-- obstacles_inflation（膨胀系数）原本为0.2，感觉太大，设置为0.1 -->
-        <param name="sdf_map/obstacles_inflation" value="0.1" />
+        <param name="sdf_map/obstacles_inflation" value="0.2" />
         <!-- sdf_map/local_bound_inflate原本0.4 -->
         <param name="sdf_map/local_bound_inflate" value="0.0"/>
         <param name="sdf_map/local_map_margin" value="10"/>
@@ -81,7 +84,7 @@
         <!--  -->
         <param name="map_ros/esdf_slice_height" value="$(arg slice_height)"/>
         <param name="map_ros/visualization_truncate_height" value="1.2"/>
-        <param name="map_ros/visualization_truncate_low" value="-0.5"/>
+        <param name="map_ros/visualization_truncate_low" value="-0.8"/>
         <param name="map_ros/show_occ_time" value="false"/>
         <param name="map_ros/show_esdf_time" value="false"/>
         <param name="map_ros/show_all_map" value="true"/>
@@ -90,18 +93,18 @@
         <param name="map_ros/is_simulation" value="$(arg simulation)" type="bool"/>
         <!-- kin astar  -->
         <param name="kinastar/resolution_astar" value="0.1"/>
-        <param name="kinastar/lambda_heu" value="0.5"/>
+        <param name="kinastar/lambda_heu" value="0.2"/>
         <param name="kinastar/allocate_num" value="100000"/>
         <!-- kin astar contorl param -->
         <param name="kinastar/horizon" value="$(arg kin_horizon)"/>
         <param name="kinastar/max_al" value="0.6"/>
         <param name="kinastar/max_aw" value="0.2"/>
-        <param name="kinastar/max_theta" value="0.5"/>
+        <param name="kinastar/max_theta" value="0.7"/>
 
-        <param name="kinastar/weight_dyn_obs" value="0.3"/>
+        <param name="kinastar/weight_dyn_obs" value="0.5"/>
         <param name="kinastar/pred_horizon" value="2.0"/>
         <param name="kinastar/ts" value="0.1"/>
-        <param name="kinastar/distThresh_Dynamic" value="1.0"/>
+        <param name="kinastar/distThresh_Dynamic" value="2.2"/>
 
         <param name="kinastar/ts_sample" value="0.5"/>
         <!-- astar set -->
