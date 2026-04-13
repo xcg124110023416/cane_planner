@@ -36,7 +36,9 @@ namespace cane_planner
         node_left->support_pos << start_pos(0), start_pos(1);
         start_pos(2) = 0.0;
         node_left->com_pos << start_pos;
-        node_left->index = stateToIndex(start_pos);
+        node_left->index.head<2>() = stateToIndex(start_pos); // 取前两个分量赋值
+        // 将第三维设为支撑腿 ID
+        node_left->index(2) = (int)node_left->support_feet; 
         node_left->g_score = 0.0;
         node_left->step_num = 0;
         node_left->f_score = lambda_heu_ * getDiagHeu(start_pos, end_pos);
@@ -53,13 +55,17 @@ namespace cane_planner
         
         node_right->support_pos << start_pos(0), start_pos(1);
         node_right->com_pos << start_pos;
-        node_right->index = stateToIndex(start_pos); // Same index
+        node_right->index.head<2>() = stateToIndex(start_pos); // 取前两个分量赋值
+        // 将第三维设为支撑腿 ID
+        node_right->index(2) = (int)node_right->support_feet;
         node_right->g_score = 0.0;
         node_right->step_num = 0;
         node_right->f_score = lambda_heu_ * getDiagHeu(start_pos, end_pos);
         node_right->kdnode_state = IN_OPEN_SET;
         
         open_set_.push(node_right);
+        // 两只脚都能作为起点出发
+        expanded_nodes_.insert(node_right->index, node_right); 
         // Note: We don't insert node_right into expanded_nodes_ because it has the same index.
         
         use_node_num_ = 2; // Used 2 nodes
@@ -171,15 +177,17 @@ namespace cane_planner
                 lfpc_model_->updateOneStep();
                 pur_state.com_pos = lfpc_model_->getCOMPos();//得到的是pur_state的com_pos_,即质心位置的轨迹点
                 pur_state.com_path = lfpc_model_->getStepCOMPath();//由多个COM_pos_组成的容器
+                pur_state.support_feet = lfpc_model_->getSupportFeet(); // 获取新的支撑腿
                 pur_state.support_pos = lfpc_model_->getFootPosition();//得到的是pur_state的support_leg_pos_，即支撑腿位置的轨迹点
 
                 // std::cout << "\ninput:sx,sy,yaw" << um.transpose() << std::endl;
                 // std::cout << "pur_state: " << pur_state.com_pos.transpose() << std::endl;
                 // std::cout << "pur_support_pos" << pur_state.support_pos.transpose() << std::endl;
 
-                Eigen::Vector3d pro_state;
-                pro_state << pur_state.com_pos;
-                Eigen::Vector2i pro_id = stateToIndex(pro_state);
+                Eigen::Vector3d pro_state = pur_state.com_pos;
+                Eigen::Vector3i pro_id;
+                Eigen::Vector2i pos_id_2d = stateToIndex(pro_state); 
+                pro_id << pos_id_2d(0), pos_id_2d(1), (int)pur_state.support_feet; // 将支撑腿信息也编码到索引中
 
                 // check if in feasible space
                 if (pur_state.support_pos(0) <= origin_(0) || pur_state.support_pos(0) >= map_size_2d_(0) || pur_state.support_pos(1) <= origin_(1) || pur_state.support_pos(1) >= map_size_2d_(1))
@@ -214,7 +222,8 @@ namespace cane_planner
                 //     num_collision++;
                 //     continue;
                 // }
-                // collision com pos free
+
+                // check if com pos in collision
                 for (size_t i = 0; i < pur_state.com_path.size(); i++)
                 {
                     pro_pos << pur_state.com_path[i];
@@ -238,21 +247,51 @@ namespace cane_planner
                 //     continue;
                 // }
 
-                double tmp_g_score = cur_node->g_score + estimateHeuristic(um, pur_state.com_pos, cur_node->com_pos);
+                //动态障碍物势场代价计算
+                double total_dyn_penalty = 0;
+                bool is_collision_person = false;
+                const double hard_threshold = 0.85 * risk_field.getConfig().A_risk;
+
+                for (size_t i = 0; i < dynObstaclesSize_.size(); i++) {
+                    Eigen::Vector2d obs_pos = dynObstaclesPos_[i].head(2);
+                    Eigen::Vector2d obs_vel = dynObstaclesVel_[i].head(2);
+
+                    double risk = risk_field.getIndividualCost(
+                        pur_state.com_pos.head(2), obs_pos, obs_vel);
+                    // 硬约束判断
+                    if (risk > hard_threshold) {
+                        is_collision_person = true;
+                        break; // 直接跳出循环，无需继续计算其他障碍物的风险
+                    }
+                    // 软代价累加
+                    total_dyn_penalty += risk;
+                }
+                if (is_collision_person) {
+                    num_collision++;
+                    continue;
+                }
+
+                // 单步移动代价
+                double edge_move_cost = estimateHeuristic(um, pur_state.com_pos, cur_node->com_pos);
+                // 单步动态风险代价
+                double edge_risk_cost = weight_dyn_obs_ * total_dyn_penalty;
+
+                double tmp_g_score = cur_node->g_score + edge_move_cost + edge_risk_cost;
                 double tmp_f_score = tmp_g_score + lambda_heu_ * getDiagHeu(pur_state.com_pos, end_pos);
                 
+                
                 // ==================== 添加动态障碍物代价到启发式函数 ====================
-                // 动态障碍物信息通过 setDynamicObstacles() 从 planner_manager 传入
-                double dynObsCost = getDynamicObstacleCost(
-                    pur_state.com_pos,
-                    dynObstaclesPos_,      // 成员变量：动态障碍物位置向量
-                    dynObstaclesVel_,      // 成员变量：动态障碍物速度向量
-                    dynObstaclesSize_,     // 成员变量：动态障碍物大小向量
-                    predHorizon_,          // 预测地平线
-                    ts_,                   // 时间采样间隔
-                    distThreshDynamic_     // 距离阈值
-                );
-                tmp_f_score += weight_dyn_obs_ * dynObsCost;  // 加权合并到总代价
+                // // 动态障碍物信息通过 setDynamicObstacles() 从 planner_manager 传入
+                // double dynObsCost = getDynamicObstacleCost(
+                //     pur_state.com_pos,
+                //     dynObstaclesPos_,      // 成员变量：动态障碍物位置向量
+                //     dynObstaclesVel_,      // 成员变量：动态障碍物速度向量
+                //     dynObstaclesSize_,     // 成员变量：动态障碍物大小向量
+                //     predHorizon_,          // 预测地平线
+                //     ts_,                   // 时间采样间隔
+                //     distThreshDynamic_     // 距离阈值
+                // );
+                // tmp_f_score += weight_dyn_obs_ * dynObsCost;  // 加权合并到总代价
                 // ===================================================================
                 if (pro_node == NULL)
                 {
@@ -521,6 +560,7 @@ namespace cane_planner
         nh.param("kinastar/max_theta", max_api_, -1.0);//最大旋转弧度制
         // 动态障碍物相关参数
         nh.param("kinastar/weight_dyn_obs", weight_dyn_obs_, -1.0);
+        nh.param("kinastar/weight_steering", weight_steering_, -1.0);
         nh.param("kinastar/pred_horizon", predHorizon_, -3.0);
         nh.param("kinastar/ts", ts_, -0.5);
         nh.param("kinastar/distThresh_Dynamic", distThreshDynamic_, -1.0);
@@ -595,13 +635,9 @@ namespace cane_planner
 
     double KinodynamicAstar::getDiagHeu(Eigen::Vector3d x1, Eigen::Vector3d x2)
     {
-        double dx = fabs(x1(0) - x2(0));
-        double dy = fabs(x1(1) - x2(1));
-        double h = (dx + dy) + (sqrt(2.0) - 1) * min(dx, dy);
-
-        // std::cout << "f heu is : " << tie_breaker_ * h << std::endl;
-
-        return tie_breaker_ * h;
+        // 欧几里得距离
+        double dist = (x1.head(2) - x2.head(2)).norm();
+        return tie_breaker_ * dist;
     }
 
     double KinodynamicAstar::getManhHeu(Eigen::Vector3d x1, Eigen::Vector3d x2)
@@ -632,15 +668,8 @@ namespace cane_planner
 
     double KinodynamicAstar::estimateHeuristic(Eigen::Vector3d input, Eigen::Vector3d state1, Eigen::Vector3d state2)
     {
-        // Eigen::Vector2d acc_x_y;
-        // acc_x_y << input(0), input(1);
-        // double dx = fabs(state1(0) - state2(0));
-        // double dy = fabs(state1(1) - state2(1));
-        // double heu = dx + dy + 0.5 * abs(input(2));
-        double heu = (state1 - state2).norm() + 0.5 * abs(input(2));
-        // std::cout << "this heu is " << heu << std::endl;
-
-        return heu;
+        // weight_steering_ 建议初始值 0.3 ~ 0.8 (弧度单位下)
+        return (state1.head(2) - state2.head(2)).norm() + weight_steering_ * std::abs(input(2));
     }
 
     /* ==================== Dynamic Obstacle Cost Function for Front-End ====================

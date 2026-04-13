@@ -289,6 +289,36 @@ namespace cane_planner
 
         have_odom_ = true;
     }
+
+    // 动态障碍物话题回调函数
+    void PlannerManager::dynamicObstaclesCallback(const onboard_detector::DynamicObstacles::ConstPtr &msg)
+    {
+        std::lock_guard<std::mutex> lock(dynObsMutex_);
+        
+        // 清空旧数据
+        dynObsPos_.clear();
+        dynObsVel_.clear();
+        dynObsSize_.clear();
+        
+        // 机器人尺寸用于膨胀障碍物
+        Eigen::Vector3d robotSize(0.5, 0.5, 0);
+        
+        // 从消息中提取动态障碍物信息
+        for (size_t i = 0; i < msg->num; ++i) {
+            Eigen::Vector3d pos(msg->position[i].x, msg->position[i].y, msg->position[i].z);
+            Eigen::Vector3d vel(msg->velocity[i].x, msg->velocity[i].y, msg->velocity[i].z);
+            // 尺寸膨胀机器人大小
+            Eigen::Vector3d size(msg->size[i].x + robotSize(0), 
+                                 msg->size[i].y + robotSize(1), 
+                                 msg->size[i].z + robotSize(2));
+            
+            dynObsPos_.push_back(pos);
+            dynObsVel_.push_back(vel);
+            dynObsSize_.push_back(size);
+            // cout<<"Dynamic Obstacle " << i << ": Pos(" << pos.transpose() << "), Vel(" << vel.transpose() << "), Size(" << size.transpose() << ")" << endl; 
+        }
+    }
+
     // ------------------------ FSM Callback --------------------------------
     void PlannerManager::execFSMCallback(const ros::TimerEvent &e)
     {
@@ -788,35 +818,6 @@ namespace cane_planner
             last = cur;
         }
         return len;
-    }
-
-    // 动态障碍物话题回调函数
-    void PlannerManager::dynamicObstaclesCallback(const onboard_detector::DynamicObstacles::ConstPtr &msg)
-    {
-        std::lock_guard<std::mutex> lock(dynObsMutex_);
-        
-        // 清空旧数据
-        dynObsPos_.clear();
-        dynObsVel_.clear();
-        dynObsSize_.clear();
-        
-        // 机器人尺寸用于膨胀障碍物
-        Eigen::Vector3d robotSize(0.5, 0.5, 0);
-        
-        // 从消息中提取动态障碍物信息
-        for (size_t i = 0; i < msg->num; ++i) {
-            Eigen::Vector3d pos(msg->position[i].x, msg->position[i].y, msg->position[i].z);
-            Eigen::Vector3d vel(msg->velocity[i].x, msg->velocity[i].y, msg->velocity[i].z);
-            // 尺寸膨胀机器人大小
-            Eigen::Vector3d size(msg->size[i].x + robotSize(0), 
-                                 msg->size[i].y + robotSize(1), 
-                                 msg->size[i].z + robotSize(2));
-            
-            dynObsPos_.push_back(pos);
-            dynObsVel_.push_back(vel);
-            dynObsSize_.push_back(size);
-            // cout<<"Dynamic Obstacle " << i << ": Pos(" << pos.transpose() << "), Vel(" << vel.transpose() << "), Size(" << size.transpose() << ")" << endl; 
-        }
     }
 
 

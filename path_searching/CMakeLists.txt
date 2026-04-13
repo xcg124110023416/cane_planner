@@ -16,6 +16,7 @@ find_package(catkin REQUIRED COMPONENTS
   plan_ctrl
   onboard_detector 
   nav_msgs
+  Eigen3
 )
 
 
@@ -39,6 +40,7 @@ add_library( path_searching
     src/astar.cpp
     src/kinodynamic_astar.cpp
     src/lfpc.cpp
+    src/dynamic_risk_field.cpp
     )
 target_link_libraries( path_searching
     ${catkin_LIBRARIES} 

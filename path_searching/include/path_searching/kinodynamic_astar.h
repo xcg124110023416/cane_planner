@@ -16,6 +16,7 @@
 #include <path_searching/matrix_hash.h>
 #include <plan_env/collision_detection.h>
 #include <path_searching/lfpc.h>
+#include <path_searching/dynamic_risk_field.h>
 // #include <plan_env/edt_environment.h>
 
 using namespace std;
@@ -34,7 +35,7 @@ namespace cane_planner
   public:
     /* -------------------- */
     // node's index(from px,py)
-    Eigen::Vector2i index;
+    Eigen::Vector3i index;
     
     // lfpc iter param
     Eigen::Vector3d com_pos;
@@ -72,46 +73,58 @@ namespace cane_planner
     }
   };
 
-  // 用hash表来存Open_set,再塞入std的priority_queue中
   class KdNodeHashTable
   {
   private:
-    /* data */
-    std::unordered_map<Eigen::Vector2i, KdNodePtr, matrix_hash<Eigen::Vector2i>> data_2d_;
-    std::unordered_map<Eigen::Vector3i, KdNodePtr, matrix_hash<Eigen::Vector3i>> data_3d_;
+      /* data */
+      // data_2d_ 可以保留，用于兼容普通的 2D 搜索
+      std::unordered_map<Eigen::Vector2i, KdNodePtr, matrix_hash<Eigen::Vector2i>> data_2d_;
+      
+      // data_3d_ 现在用于存储 [x_idx, y_idx, leg_idx] 的完整状态
+      std::unordered_map<Eigen::Vector3i, KdNodePtr, matrix_hash<Eigen::Vector3i>> data_3d_;
 
   public:
-    KdNodeHashTable(/* args */)
-    {
-    }
-    ~KdNodeHashTable()
-    {
-      clear();
-    }
-    void insert(Eigen::Vector2i idx, KdNodePtr KdNode)
-    {
-      data_2d_.insert(make_pair(idx, KdNode));
-    }
-    void insert(Eigen::Vector2i idx, int time_idx, KdNodePtr KdNode)
-    {
-      data_3d_.insert(make_pair(Eigen::Vector3i(idx(0), idx(1), time_idx), KdNode));
-    }
+      KdNodeHashTable() {}
+      ~KdNodeHashTable() { clear(); }
 
-    KdNodePtr find(Eigen::Vector2i idx)
-    {
-      auto iter = data_2d_.find(idx);
-      return iter == data_2d_.end() ? NULL : iter->second;
-    }
-    KdNodePtr find(Eigen::Vector2i idx, int time_idx)
-    {
-      auto iter = data_3d_.find(Eigen::Vector3i(idx(0), idx(1), time_idx));
-      return iter == data_3d_.end() ? NULL : iter->second;
-    }
-    void clear()
-    {
-      data_2d_.clear();
-      data_3d_.clear();
-    }
+      // --- 2D 接口 (保持兼容) ---
+      void insert(Eigen::Vector2i idx, KdNodePtr KdNode) {
+          data_2d_.insert(std::make_pair(idx, KdNode));
+      }
+
+      KdNodePtr find(Eigen::Vector2i idx) {
+          auto iter = data_2d_.find(idx);
+          return iter == data_2d_.end() ? NULL : iter->second;
+      }
+
+      // --- 3D 接口 (核心修改：增加直接接收 Vector3i 的函数) ---
+      
+      // 增加：直接插入 Vector3i 索引
+      void insert(Eigen::Vector3i idx, KdNodePtr KdNode) {
+          data_3d_.insert(std::make_pair(idx, KdNode));
+      }
+
+      // 增加：直接查找 Vector3i 索引 (解决你 search 函数中编译报错的关键)
+      KdNodePtr find(Eigen::Vector3i idx) {
+          auto iter = data_3d_.find(idx);
+          return iter == data_3d_.end() ? NULL : iter->second;
+      }
+
+      // 保留：原来的三参数插入 (内部会自动组合成 Vector3i)
+      void insert(Eigen::Vector2i idx, int leg_idx, KdNodePtr KdNode) {
+          data_3d_.insert(std::make_pair(Eigen::Vector3i(idx(0), idx(1), leg_idx), KdNode));
+      }
+
+      // 保留：原来的双参数查找
+      KdNodePtr find(Eigen::Vector2i idx, int leg_idx) {
+          auto iter = data_3d_.find(Eigen::Vector3i(idx(0), idx(1), leg_idx));
+          return iter == data_3d_.end() ? NULL : iter->second;
+      }
+
+      void clear() {
+          data_2d_.clear();
+          data_3d_.clear();
+      }
   };
 
   class KinodynamicAstar
@@ -123,6 +136,7 @@ namespace cane_planner
     KdNodeHashTable expanded_nodes_;
     std::priority_queue<KdNodePtr, std::vector<KdNodePtr>, KdNodeComparator> open_set_;
     std::vector<KdNodePtr> path_nodes_;
+    DynamicRiskField risk_field;
 
     /*----------  paramter  ---------- */
     int allocate_num_;
@@ -131,7 +145,7 @@ namespace cane_planner
     double horizon_;
     double resolution_, inv_resolution_;
     double max_al_, max_aw_, max_api_;
-    double weight_dyn_obs_, predHorizon_, ts_, distThreshDynamic_;
+    double weight_dyn_obs_, weight_steering_, predHorizon_, ts_, distThreshDynamic_;
     double tsSample_;
     Eigen::Vector2d origin_, map_size_2d_;
     ros::Publisher kin_SamplePath_pub_;
