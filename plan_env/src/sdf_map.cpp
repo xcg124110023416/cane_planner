@@ -124,8 +124,14 @@ void SDFMap::resetBuffer(const Eigen::Vector3d& min_pos, const Eigen::Vector3d& 
   for (int x = min_id(0); x <= max_id(0); ++x)
     for (int y = min_id(1); y <= max_id(1); ++y)
       for (int z = min_id(2); z <= max_id(2); ++z) {
-        md_->occupancy_buffer_inflate_[toAddress(x, y, z)] = 0;
-        md_->distance_buffer_[toAddress(x, y, z)] = mp_->default_dist_;
+        int idx = toAddress(x, y, z);
+        md_->occupancy_buffer_[idx] = mp_->clamp_min_log_ - mp_->unknown_flag_;
+        md_->occupancy_buffer_inflate_[idx] = 0;
+        md_->distance_buffer_[idx] = mp_->default_dist_;
+        md_->count_hit_[idx] = 0;
+        md_->count_miss_[idx] = 0;
+        md_->flag_rayend_[idx] = -1;
+        md_->flag_visited_[idx] = -1;
       }
 }
 

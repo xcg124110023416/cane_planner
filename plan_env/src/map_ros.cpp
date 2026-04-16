@@ -158,8 +158,8 @@ namespace fast_planner
     //   if (!esdf_need_update_)
     //   {
     //     // publishMapAll();
-    //     // publishUnknown();
-    //     publishESDF();
+        // publishUnknown();
+        // publishESDF();
     //     // publishUpdateRange();
     //     // tpass = 0.0;
     //   }
@@ -261,7 +261,6 @@ namespace fast_planner
     camera_pos_(0) = pose->pose.position.x;
     camera_pos_(1) = pose->pose.position.y;
     camera_pos_(2) = pose->pose.position.z;
-    camera_pos_(2) = 0.0;
 
     if (!map_->isInMap(camera_pos_)) // exceed mapped region
     {
@@ -302,8 +301,7 @@ namespace fast_planner
   {
     camera_pos_(0) = odom->pose.pose.position.x;
     camera_pos_(1) = odom->pose.pose.position.y;
-    // camera_pos_(2) = odom->pose.pose.position.z;
-    camera_pos_(2) = 0.0;
+    camera_pos_(2) = odom->pose.pose.position.z;
     if (!map_->isInMap(camera_pos_)) // exceed mapped region
       return;
     camera_q_ = Eigen::Quaterniond(odom->pose.pose.orientation.w,
@@ -796,8 +794,8 @@ void MapROS::cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img) {
     map_->boundIndex(max_cut);
 
     // 遍历 X 和 Y 轴（水平面）
-    for (int x = min_cut(0); x <= max_cut(0); ++x)
-      for (int y = min_cut(1); y <= max_cut(1); ++y)
+    for (int x = min_cut(0); x <= max_cut(0); x+=2)
+      for (int y = min_cut(1); y <= max_cut(1); y+=2)
       {
         // 【核心修改】：投影逻辑
         // 对于每个 (x, y)，我们要找到垂直方向 (z) 上最小的距离值
@@ -808,18 +806,14 @@ void MapROS::cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img) {
             Eigen::Vector3d pos_check;
             map_->indexToPos(Eigen::Vector3i(x, y, z), pos_check);
 
-            if (pos_check(2) > visualization_truncate_height_)
-              continue;
-            if (pos_check(2) < visualization_truncate_low_)
-              continue;
+            // 过滤地面和过高区域，避免地面把所有距离都拉低到0
+            if (pos_check(2) > visualization_truncate_height_ || 
+                pos_check(2) < visualization_truncate_low_)
+                continue;
             
-            // 获取该 3D 点的距离
             double d = map_->getDistance(pos_check);
-            
-            // 更新最小值
-            if (d < min_dist_in_column) {
-                min_dist_in_column = d;
-            }
+            if (d < min_dist_in_column) min_dist_in_column = d;
+            if (min_dist_in_column < 0.05) break; // 性能优化：已经发现极近障碍物，直接跳过本列
         }
 
         // 将找到的最小距离作为该 (x,y) 点的显示值
@@ -830,7 +824,7 @@ void MapROS::cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img) {
         // 计算显示位置
         Eigen::Vector3d pos;
         // 这里 Z 轴依然固定在切片高度，方便在平面上查看
-        map_->indexToPos(Eigen::Vector3i(x, y, 1), pos); 
+        map_->indexToPos(Eigen::Vector3i(x, y, 0), pos); 
         pt.x = pos(0);
         pt.y = pos(1);
         pt.z = esdf_slice_height_; // 投影到一个固定高度平面上显示
