@@ -8,6 +8,7 @@
     <!-- simulation param -->
     <arg name="simulation"/>
     <arg name="planner"/>
+    <arg name="map_simulation" default="false"/>  <!-- SDF map sync mode: false=cloud+odom, true=cloud+pose -->
     <arg name="slice_height"/>
     <arg name="collision_margin"/>
 
@@ -25,6 +26,11 @@
         <remap from="/odom_world" to="$(arg odometry_world)"/>
 
         <!-- planner manager -->
+        <param name="manager/sim_speed" value="1.0" type="double"/>
+        <param name="manager/global_wp_spacing" value="1.0" type="double"/>
+        <param name="manager/global_wp_arrival_radius" value="0.5" type="double"/>
+        <!-- 前向截断距离：从最近投影点向前看多少米选为当前目标 -->
+        <param name="manager/lookahead_dist" value="1.0" type="double"/>
         <param name="manager/max_vel" value="1.0" type="double"/>
         <param name="manager/max_acc" value="2.0" type="double"/>
         <param name="manager/max_jerk" value="4" type="double"/>
@@ -33,8 +39,8 @@
         <param name="manager/clearance_threshold" value="0.2" type="double"/>
         <param name="manager/control_points_distance" value="0.35" type="double"/>
         <!-- planning fsm -->
-        <param name="fsm/thresh_replan" value="0.20" type="double"/>
-        <param name="fsm/thresh_no_replan" value="1.0" type="double"/>
+        <param name="fsm/thresh_replan" value="1.0" type="double"/>
+        <param name="fsm/thresh_no_replan" value="0.5" type="double"/>
 
         <!-- simulation true or false -->
         <param name="planner_node/simulation" value="$(arg simulation)"/>
@@ -90,7 +96,7 @@
         <param name="map_ros/show_all_map" value="true"/>
         <param name="map_ros/frame_id" value="world"/>
 
-        <param name="map_ros/is_simulation" value="$(arg simulation)" type="bool"/>
+        <param name="map_ros/is_simulation" value="$(arg map_simulation)" type="bool"/>
         <!-- kin astar  -->
         <param name="kinastar/resolution_astar" value="0.1"/>
         <param name="kinastar/lambda_heu" value="0.2"/>
@@ -101,7 +107,9 @@
         <param name="kinastar/max_aw" value="0.2"/>
         <param name="kinastar/max_theta" value="0.7"/>
 
+        <!-- 转向代价权重（越大越走直线），仅planner=2生效 -->
         <param name="kinastar/weight_steering" value="0.3"/>
+        <!-- 动态障碍物代价权重，仅planner=2(KinodynamicAstar)生效，MPC用mpc/w_risk -->
         <param name="kinastar/weight_dyn_obs" value="0.5"/>
         <param name="kinastar/pred_horizon" value="2.0"/>
         <param name="kinastar/ts" value="0.1"/>
@@ -114,13 +122,76 @@
         <param name="astar/time_resolution" value="0"/>
         <param name="astar/lambda_heu" value="0.05"/>
         <param name="astar/allocate_num" value="100000"/>
+        <!-- clearance-aware: 仅当距墙<sigma时惩罚，越近二次增长。0=不启用 -->
+        <param name="astar/w_clearance" value="0.1" type="double"/>
+        <param name="astar/clearance_sigma" value="0.5" type="double"/>
         <!-- collision set -->
         <param name="Collision/margin" value="$(arg collision_margin)"/>
         <param name="Collision/SliceHeight" value="$(arg slice_height)"/>
         <!-- lfpc set -->
         <param name="lfpc/delta_t" value="0.07"/>
         <param name="lfpc/t_sup" value="0.35"/>
-        <!-- trajectory optimization -->
+        <!-- mpc controller set -->
+        <param name="mpc/horizon_steps" value="8" type="int"/>
+        <param name="mpc/num_samples" value="300" type="int"/>
+        <!-- MPPI温度：越小越贪心(选最优)，越大越平滑(加权平均) -->
+        <param name="mpc/temperature" value="0.05" type="double"/>
+        <param name="mpc/mpc_iters" value="1" type="int"/>
+        <param name="mpc/max_al" value="0.4" type="double"/>
+        <param name="mpc/min_al" value="0.05" type="double"/>
+        <param name="mpc/max_aw" value="0.15" type="double"/>
+        <param name="mpc/max_api" value="0.5236" type="double"/>
+        <param name="mpc/sigma_al" value="0.10" type="double"/>
+        <param name="mpc/sigma_aw" value="0.06" type="double"/>
+        <param name="mpc/sigma_api" value="0.25" type="double"/>
+        <!-- 代价权重。risk和goal已归一化，所有权重等效可比，改一个就有效果 -->
+        <!-- 每步位移代价：惩罚绕路，保方向性 -->
+        <param name="mpc/w_move" value="1.0" type="double"/>
+        <!-- 转向幅度代价：惩罚|api|绝对值，越大越走直线 -->
+        <param name="mpc/w_steer" value="0.5" type="double"/>
+        <!-- risk已归一化：每点平均risk×权重，不再是累加值 -->
+        <param name="mpc/w_risk" value="3" type="double"/>
+        <!-- goal已归一化：最终距离/horizon步数×权重 -->
+        <param name="mpc/w_goal" value="10.0" type="double"/>
+        <!-- 侧向偏好权重：对面来人时倾向空间大的一侧绕行 -->
+        <param name="mpc/w_bias" value="0.3" type="double"/>
+        <!-- 转向变化率惩罚权重：越大越平滑，越小越灵活（0=不限制） -->
+        <param name="mpc/w_dapi" value="2.0" type="double"/>
+        <!-- hard threshold = risk_A × ratio. 越小越远离行人, 越大越敢靠近 -->
+        <param name="mpc/risk_hard_threshold_ratio" value="0.25" type="double"/>
+        <!-- 静态障碍物碰撞惩罚（单点），总量级=w_static×n×penalty，巨大→几乎硬约束 -->
+        <param name="mpc/static_penalty" value="500.0" type="double"/>
+        <param name="mpc/w_static" value="1.0" type="double"/>
+        <!-- SDF排斥力权重、排斥生效距离(m)：距墙<margin时二次增长 -->
+        <param name="mpc/w_prox" value="4.0" type="double"/>
+        <param name="mpc/prox_margin" value="0.5" type="double"/>
+        <param name="mpc/use_best" value="false" type="bool"/>
+        <!-- 使用真实模式true，为false则步长和步宽不固定 -->
+        <param name="mpc/fix_step_params" value="true" type="bool"/>
+        <param name="mpc/goal_arrival_threshold" value="0.3" type="double"/>
+        <param name="mpc/fov_range" value="5.0" type="double"/>
+        <param name="mpc/nominal_al" value="0.25" type="double"/>
+        <param name="mpc/nominal_aw" value="0.0" type="double"/>
+        <param name="mpc/nominal_api" value="0.0" type="double"/>
+        <param name="mpc/risk_tau" value="1.0" type="double"/>
+        <param name="mpc/risk_A" value="5.0" type="double"/>
+        <param name="mpc/risk_sigma_x" value="0.4" type="double"/>
+        <param name="mpc/risk_sigma_y" value="0.22" type="double"/>
+        <param name="mpc/risk_cutoff" value="3.0" type="double"/>
+        <!-- mpc stop/recovery: 停等与恢复参数 -->
+        <!-- 窄通道：clearance<此值且risk>safe×ratio时判定为"缝太窄"，倾向等待 -->
+        <param name="mpc/stop/narrow_clearance" value="0.6" type="double"/>
+        <!-- 窄通道risk系数：risk > safe_risk×ratio 才算"行人在挤" -->
+        <param name="mpc/stop/narrow_risk_ratio" value="0.5" type="double"/>
+        <!-- 恢复期保守系数：行人附近时解封门槛=safe_risk×ratio，越小越严 -->
+        <param name="mpc/stop/unblock_risk_ratio" value="0.4" type="double"/>
+        <!-- 行人"附近"范围(米)：此范围内的行人触发保守解封门槛 -->
+        <param name="mpc/stop/ped_nearby_range" value="3.0" type="double"/>
+        <!-- 解封冷却帧数：连续多少帧risk安全才恢复行走，防闪烁 -->
+        <param name="mpc/stop/unblock_cooldown" value="10" type="int"/>
+        
+        <!-- trajectory optimization 代价权重 -->
+        <!-- lambda1: 平滑度, lambda2: 碰撞, lambda3: 可行性, lambda4: 拟合, lambda7: 动力学 -->
         <param name="optimization/lambda1" value="10.0" type="double"/>
         <param name="optimization/lambda2" value="5.0" type="double"/>
         <param name="optimization/lambda3" value="0.00001" type="double"/>

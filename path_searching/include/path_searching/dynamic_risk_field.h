@@ -11,11 +11,11 @@ class DynamicRiskField {
 public:
     struct Config {
         double tau = 1.0;          // 预测步长
-        double A_risk = 10.0;      // 风险峰值系数
-        double sigma_y = 0.5;      // 横向风险范围
+        double A_risk = 5.0;       // 风险峰值系数
+        double sigma_y = 0.22;     // 横向风险范围
         // double sigma_x = sigma_y + k*obs_vx;     //一种动态调整方案
-        double sigma_x = 1.2;      // 纵向风险范围 (沿运动方向)
-        double cutoff_dist = 4.0;  // 约3到4倍的sigma_x
+        double sigma_x = 0.4;      // 纵向风险范围 (沿运动方向)
+        double cutoff_dist = 3.0;  // 约3到4倍的sigma_x
     };
 
     DynamicRiskField() {}
@@ -27,9 +27,14 @@ public:
      * @param obs_p     障碍物当前位置 [x, y]
      * @param obs_v     障碍物当前速度 [vx, vy]
      */
-    double getIndividualCost(const Eigen::Vector2d& q_pos, 
-                             const Eigen::Vector2d& obs_p, 
+    double getIndividualCost(const Eigen::Vector2d& q_pos,
+                             const Eigen::Vector2d& obs_p,
                              const Eigen::Vector2d& obs_v) const;
+
+    // Fast scalar version for MPPI inner loop (no Eigen allocation)
+    double getIndividualCostFast(double qx, double qy,
+                                 double ox, double oy,
+                                 double vx, double vy) const;
 
     void setConfig(const Config& conf) { conf_ = conf; }
     Config getConfig() const {return conf_; }

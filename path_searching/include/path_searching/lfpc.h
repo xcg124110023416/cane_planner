@@ -62,10 +62,13 @@ namespace cane_planner
 
         void updateOneStep();
         void updateOneStepForOnce(double t);
-        
+        void prepareNextStep();
+
         void SetCtrlParams(Vector3d input);
         void reset(Vector3d init_v_state, Vector3d COM_init_pos,
                    char cur_support_leg, int step_num);
+
+        void copyState(const LFPC& other);
 
         void setCollisionDetection(CollisionDetection::Ptr collision)
         {

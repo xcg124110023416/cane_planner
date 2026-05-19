@@ -5,15 +5,13 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /Global Options1
-        - /map1
         - /map1/PointCloud21/Autocompute Value Bounds1
         - /map1/PointCloud23
         - /map1/PointCloud23/Autocompute Value Bounds1
-        - /plan_path1/Path2
         - /TF1/Frames1
         - /TF1/Tree1
       Splitter Ratio: 0.5410385131835938
-    Tree Height: 1362
+    Tree Height: 964
   - Class: rviz/Selection
     Name: Selection
   - Class: rviz/Tool Properties
@@ -173,126 +171,10 @@ Visualization Manager:
           Value: false
       Enabled: true
       Name: map
-    - Class: rviz/Group
-      Displays:
-        - Alpha: 1
-          Buffer Length: 1
-          Class: rviz/Path
-          Color: 25; 255; 0
-          Enabled: true
-          Head Diameter: 0.30000001192092896
-          Head Length: 0.20000000298023224
-          Length: 0.30000001192092896
-          Line Style: Billboards
-          Line Width: 0.10000000149011612
-          Name: Path
-          Offset:
-            X: 0
-            Y: 0
-            Z: 0
-          Pose Color: 255; 85; 255
-          Pose Style: None
-          Queue Size: 10
-          Radius: 0.029999999329447746
-          Shaft Diameter: 0.10000000149011612
-          Shaft Length: 0.10000000149011612
-          Topic: /astar/path
-          Unreliable: false
-          Value: true
-        - Alpha: 1
-          Buffer Length: 1
-          Class: rviz/Path
-          Color: 164; 0; 0
-          Enabled: true
-          Head Diameter: 0.30000001192092896
-          Head Length: 0.20000000298023224
-          Length: 0.30000001192092896
-          Line Style: Billboards
-          Line Width: 0.10000000149011612
-          Name: Path
-          Offset:
-            X: 0
-            Y: 0
-            Z: 0
-          Pose Color: 255; 85; 255
-          Pose Style: None
-          Queue Size: 10
-          Radius: 0.029999999329447746
-          Shaft Diameter: 0.10000000149011612
-          Shaft Length: 0.10000000149011612
-          Topic: /kin_astar/path
-          Unreliable: false
-          Value: true
-        - Class: rviz/Marker
-          Enabled: true
-          Marker Topic: /planning_vis/kin_foot
-          Name: Marker
-          Namespaces:
-            {}
-          Queue Size: 100
-          Value: true
-        - Class: rviz/Marker
-          Enabled: false
-          Marker Topic: /planning_vis/kin_astar
-          Name: Marker
-          Namespaces:
-            {}
-          Queue Size: 100
-          Value: false
-        - Class: rviz/Marker
-          Enabled: false
-          Marker Topic: /planning_vis/astar
-          Name: Marker
-          Namespaces:
-            {}
-          Queue Size: 100
-          Value: false
-      Enabled: false
-      Name: plan_path
-    - Class: rviz/Group
-      Displays:
-        - Alpha: 0.30000001192092896
-          Buffer Length: 1
-          Class: rviz/Path
-          Color: 25; 255; 0
-          Enabled: false
-          Head Diameter: 0.30000001192092896
-          Head Length: 0.20000000298023224
-          Length: 0.30000001192092896
-          Line Style: Billboards
-          Line Width: 0.10000000149011612
-          Name: Path
-          Offset:
-            X: 0
-            Y: 0
-            Z: 0
-          Pose Color: 255; 85; 255
-          Pose Style: None
-          Queue Size: 10
-          Radius: 0.029999999329447746
-          Shaft Diameter: 0.10000000149011612
-          Shaft Length: 0.10000000149011612
-          Topic: /vins_estimator/path
-          Unreliable: false
-          Value: false
-        - Class: rviz/Image
-          Enabled: false
-          Image Topic: /camera/color/image_raw
-          Max Value: 1
-          Median window: 5
-          Min Value: 0
-          Name: Image
-          Normalize Range: true
-          Queue Size: 2
-          Transport Hint: raw
-          Unreliable: false
-          Value: false
-      Enabled: false
-      Name: vins
     - Class: rviz/Marker
       Enabled: false
       Marker Topic: /car_path
-      Name: Marker
+      Name: Follow_symbol
       Namespaces:
         {}
       Queue Size: 100
@@ -328,14 +210,25 @@ Visualization Manager:
             {}
       Update Interval: 0
       Value: true
-    - Class: rviz/Marker
-      Enabled: false
-      Marker Topic: /planning_vis/trajectory
-      Name: Marker
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /kin_replan_node/onboard_detector/dynamic_bboxes
+      Name: Dynamic_bboxes
       Namespaces:
         {}
       Queue Size: 100
-      Value: false
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /pedestrian_sim/visualization
+      Name: Pedestrians
+      Namespaces:
+        ped_0: true
+        ped_0_vel: true
+        ped_1: true
+        ped_1_vel: true
+      Queue Size: 10
+      Value: true
     - Alpha: 1
       Buffer Length: 1
       Class: rviz/Path
@@ -345,8 +238,8 @@ Visualization Manager:
       Head Length: 0.20000000298023224
       Length: 0.30000001192092896
       Line Style: Billboards
-      Line Width: 0.10000000149011612
-      Name: Path
+      Line Width: 0.05000000074505806
+      Name: KA*_path
       Offset:
         X: 0
         Y: 0
@@ -357,17 +250,160 @@ Visualization Manager:
       Radius: 0.029999999329447746
       Shaft Diameter: 0.10000000149011612
       Shaft Length: 0.10000000149011612
-      Topic: /planning_vis/trajectory
+      Topic: /kin_astar/path
       Unreliable: false
       Value: true
-    - Class: rviz/MarkerArray
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz/Path
+      Color: 170; 255; 127
       Enabled: true
-      Marker Topic: /kin_replan_node/onboard_detector/dynamic_bboxes
-      Name: MarkerArray
+      Head Diameter: 0.30000001192092896
+      Head Length: 0.20000000298023224
+      Length: 0.30000001192092896
+      Line Style: Billboards
+      Line Width: 0.05000000074505806
+      Name: Astat_path
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Queue Size: 10
+      Radius: 0.029999999329447746
+      Shaft Diameter: 0.10000000149011612
+      Shaft Length: 0.10000000149011612
+      Topic: /astar/path
+      Unreliable: false
+      Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz/Path
+      Color: 0; 0; 255
+      Enabled: true
+      Head Diameter: 0.30000001192092896
+      Head Length: 0.20000000298023224
+      Length: 0.30000001192092896
+      Line Style: Billboards
+      Line Width: 0.05000000074505806
+      Name: MPC_path
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Queue Size: 10
+      Radius: 0.029999999329447746
+      Shaft Diameter: 0.10000000149011612
+      Shaft Length: 0.10000000149011612
+      Topic: /mpc/path
+      Unreliable: false
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /mpc/fov_range
+      Name: MPC_FOV
+      Namespaces:
+        mpc_fov: true
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /mpc/current_waypoint
+      Name: MPC_current_waypoint
+      Namespaces:
+        mpc_curr_wp: true
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /mpc/waypoints
+      Name: MPC_waypoints
+      Namespaces:
+        mpc_waypoints: true
+      Queue Size: 10
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: Intensity
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Name: MPC_RiskField
+      Position Transformer: XYZ
+      Queue Size: 1
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.10000000149011612
+      Style: Flat Squares
+      Topic: /mpc/risk_field
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Angle Tolerance: 0.10000000149011612
+      Class: rviz/Odometry
+      Covariance:
+        Orientation:
+          Alpha: 0.5
+          Color: 255; 255; 127
+          Color Style: Unique
+          Frame: Local
+          Offset: 1
+          Scale: 1
+          Value: true
+        Position:
+          Alpha: 0.30000001192092896
+          Color: 204; 51; 204
+          Scale: 1
+          Value: true
+        Value: true
+      Enabled: true
+      Keep: 1
+      Name: Odometry
+      Position Tolerance: 0.10000000149011612
+      Queue Size: 10
+      Shape:
+        Alpha: 1
+        Axes Length: 1
+        Axes Radius: 0.10000000149011612
+        Color: 255; 25; 0
+        Head Length: 0.30000001192092896
+        Head Radius: 0.10000000149011612
+        Shaft Length: 1
+        Shaft Radius: 0.05000000074505806
+        Value: Arrow
+      Topic: /sim_odom
+      Unreliable: false
+      Value: true
+    - Class: rviz/Marker
+      Enabled: false
+      Marker Topic: /planning_vis/mpc_foot
+      Name: Mpc_foot
       Namespaces:
         {}
       Queue Size: 100
-      Value: true
+      Value: false
+    - Class: rviz/Marker
+      Enabled: false
+      Marker Topic: /planning_vis/mpc_rollout
+      Name: MPC_rollout
+      Namespaces:
+        {}
+      Queue Size: 100
+      Value: false
   Enabled: true
   Global Options:
     Background Color: 255; 255; 255
@@ -396,7 +432,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/XYOrbit
-      Distance: 20.350868225097656
+      Distance: 19.933507919311523
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -404,27 +440,25 @@ Visualization Manager:
         Value: false
       Field of View: 0.800000011920929
       Focal Point:
-        X: -5.718400001525879
-        Y: 0.7666282653808594
-        Z: 8.399960279348306e-06
+        X: -6.202502250671387
+        Y: 0.21727001667022705
+        Z: 5.538937330129556e-06
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.5697963237762451
+      Pitch: 1.519796371459961
       Target Frame: <Fixed Frame>
-      Yaw: 3.1067142486572266
+      Yaw: 3.141714572906494
     Saved: ~
 Window Geometry:
   Displays:
     collapsed: false
-  Height: 1872
+  Height: 1347
   Hide Left Dock: false
   Hide Right Dock: true
-  Image:
-    collapsed: false
-  QMainWindow State: 000000ff00000000fd0000000400000000000001f70000064afc0200000009fb0000001200530065006c0065006300740069006f006e00000001e10000009b000000b000fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000b0fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000006e0000064a0000018200fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261fb0000000a0049006d0061006700650000000295000001020000002600ffffff000000010000015f0000033afc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073000000003d0000033a0000013200fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e1000001970000000300000bf00000005efc0100000002fb0000000800540069006d0065010000000000000bf0000006dc00fffffffb0000000800540069006d00650100000000000004500000000000000000000009ed0000064a00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd0000000400000000000001f700000489fc0200000009fb0000001200530065006c0065006300740069006f006e00000001e10000009b0000005c00fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000b0fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000003b00000489000000c700fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261fb0000000a0049006d0061006700650000000295000001020000000000000000000000010000015f0000033afc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073000000003d0000033a000000a000fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e10000019700000003000009f40000005efc0100000002fb0000000800540069006d00650100000000000009f40000030700fffffffb0000000800540069006d00650100000000000004500000000000000000000007f70000048900000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Selection:
     collapsed: false
   Time:
@@ -433,6 +467,6 @@ Window Geometry:
     collapsed: false
   Views:
     collapsed: true
-  Width: 3056
-  X: 144
-  Y: 54
+  Width: 2548
+  X: -32
+  Y: -32

@@ -36,11 +36,12 @@ include_directories(
 )
 
 
-add_library( path_searching 
+add_library( path_searching
     src/astar.cpp
     src/kinodynamic_astar.cpp
     src/lfpc.cpp
     src/dynamic_risk_field.cpp
+    src/mpc_controller.cpp
     )
 target_link_libraries( path_searching
     ${catkin_LIBRARIES} 

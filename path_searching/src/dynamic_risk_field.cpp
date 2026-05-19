@@ -36,4 +36,44 @@ double DynamicRiskField::getIndividualCost(const Eigen::Vector2d& q_pos,
     return conf_.A_risk * std::exp(exponent);
 }
 
-} // namespace 
+double DynamicRiskField::getIndividualCostFast(double qx, double qy,
+                                                 double ox, double oy,
+                                                 double vx, double vy) const
+{
+    double tau = conf_.tau;
+    double cutoff = conf_.cutoff_dist;
+    double A = conf_.A_risk;
+    double sx = conf_.sigma_x;
+    double sy = conf_.sigma_y;
+
+    // 1. Predicted obstacle center
+    double px = ox + tau * vx;
+    double py = oy + tau * vy;
+
+    // 2. Delta and distance
+    double dx = qx - px;
+    double dy = qy - py;
+    double dist_sq = dx * dx + dy * dy;
+    if (dist_sq > cutoff * cutoff)
+        return 0.0;
+
+    // 3. Speed check
+    double speed_sq = vx * vx + vy * vy;
+    if (speed_sq < 1e-8)
+        return A * std::exp(-0.5 * dist_sq / (sy * sy));
+
+    // 4. Rotate into obstacle-local frame
+    double theta = std::atan2(vy, vx);
+    double cos_t = std::cos(theta);
+    double sin_t = std::sin(theta);
+
+    double dx_local =  dx * cos_t + dy * sin_t;
+    double dy_local = -dx * sin_t + dy * cos_t;
+
+    // 5. Anisotropic Mahalanobis
+    double exponent = -0.5 * ((dx_local / sx) * (dx_local / sx) +
+                              (dy_local / sy) * (dy_local / sy));
+    return A * std::exp(exponent);
+}
+
+} // namespace

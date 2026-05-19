@@ -1,5 +1,8 @@
 #include <plan_manager.h>
 #include <sstream>
+#include <pcl_conversions/pcl_conversions.h>
+#include <pcl/point_types.h>
+#include <pcl/point_cloud.h>
 
 namespace cane_planner
 {
@@ -7,112 +10,6 @@ namespace cane_planner
     PlannerManager::~PlannerManager()
     {
     }
-    // ------------------ simulation --------------------------
-    void PlannerManager::simInit(ros::NodeHandle &nh)
-    {
-        // init FSM
-        exec_state_ = FSM_STATE::INIT;
-        have_odom_ = false;
-        have_target_ = false;
-        // init esdf_map and collision
-        sdf_map_.reset(new fast_planner::SDFMap);
-        sdf_map_->initMap(nh);
-        collision_.reset(new CollisionDetection);
-        collision_->init(nh);
-        collision_->setMap(sdf_map_);
-        // init kin planner
-        ROS_WARN(" Astar planer start");
-        astar_finder_.reset(new Astar);
-        astar_finder_->setParam(nh);
-        astar_finder_->setCollision(collision_);
-        astar_finder_->init();
-        // init lfpc model
-        lfpc_model_.reset(new LFPC);
-        lfpc_model_->initializeModel(nh);
-        lfpc_model_->setCollisionDetection(collision_);
-        // init astar planner
-        ROS_WARN(" kinodynamic planer start");
-        kin_finder_.reset(new KinodynamicAstar);
-        kin_finder_->setParam(nh);
-        kin_finder_->setCollision(collision_);
-        kin_finder_->setModel(lfpc_model_);
-        kin_finder_->init();
-        goal_sub_ =
-            nh.subscribe("/move_base_simple/goal", 1, &PlannerManager::goalCallback, this); // 接收目标的topic
-        start_sub_ =
-            nh.subscribe("/initialpose", 1, &PlannerManager::startCallback, this); // 接收始点的topic
-        // Visial
-        astar_pub_ = nh.advertise<visualization_msgs::Marker>("/planning_vis/kinpath_sample", 20);
-        kin_vis_pub_ = nh.advertise<visualization_msgs::Marker>("/planning_vis/kin_astar", 20);
-        kin_foot_pub_ = nh.advertise<visualization_msgs::Marker>("/planning_vis/kin_foot", 20);
-        // Path
-        kin_path_pub_ = nh.advertise<nav_msgs::Path>("/kin_astar/path", 20);
-        a_path_pub_ = nh.advertise<nav_msgs::Path>("/astar/path", 20);
-    }
-    // simulation callback goal
-    void PlannerManager::goalCallback(const geometry_msgs::PoseStamped::ConstPtr &goal)
-    {
-        end_pt_(0) = goal->pose.position.x;
-        end_pt_(1) = goal->pose.position.y;
-        // ROS_INFO("set end pos is: %lf and %lf", end_pt_(0), end_pt_(1));
-
-        end_state_(0) = goal->pose.position.x;
-        end_state_(1) = goal->pose.position.y;
-        double yaw = QuatenionToYaw(goal->pose.orientation);
-        end_state_(2) = yaw;
-        // ROS_INFO("goal yaw is: %lf", yaw);
-        have_target_ = true;
-    }
-    // simulation callback start or odom
-    void PlannerManager::startCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr &start)
-    {
-        start_pt_(0) = start->pose.pose.position.x;
-        start_pt_(1) = start->pose.pose.position.y;
-        // ROS_INFO("set start pos is:%lf and %lf", start_pt_(0), start_pt_(1));
-        start_state_(0) = start->pose.pose.position.x;
-        start_state_(1) = start->pose.pose.position.y;
-        double yaw = QuatenionToYaw(start->pose.pose.orientation);
-        start_state_(2) = yaw;
-        // cout << "yaw:" << yaw << endl;
-        have_odom_ = true;
-    }
-    void PlannerManager::callPath()
-    {
-        static int fsm_num = 0;
-        static int test_num = 0;
-
-        static bool success1 = false;
-        static bool success2 = false;
-        if (have_odom_ && have_target_)
-        {
-            test_num++;
-            // std::cout << "-----------[test:" << test_num << "]-----------" << std::endl;
-            success1 = callAstarPlan();
-            success2 = callKinodynamicAstarPlan();
-            if (success1)
-            {
-                // displayAstar();
-                publishAstarPath();
-            }
-            if (success2)
-            {
-                displayKinastar();
-                publishKinodynamicAstarPath();
-            }
-            // std::cout << "-----------[test end]-----------" << std::endl;
-            have_target_ = false;
-        }
-        fsm_num++;
-        if (fsm_num == 1000)
-        {
-            if (!have_odom_)
-                ROS_WARN("no odom.");
-            if (!have_target_)
-                ROS_WARN("wait for goal.");
-            fsm_num = 0;
-        }
-    }
-
     //------------------- real experience ---------------------
     void PlannerManager::Param_init(ros::NodeHandle &nh)
     {
@@ -127,7 +24,19 @@ namespace cane_planner
         nh.param("fsm/thresh_replan", replan_thresh_, -1.0);
         nh.param("fsm/thresh_no_replan", no_replan_thresh_, -1.0);
 
-        // local_data_.traj_id_ = 0;
+        nh.param("planner_node/simulation", simulation_, false);
+        nh.param("manager/sim_speed", sim_speed_, 0.5);  // 仿真行走速度 m/s
+        nh.param("manager/global_wp_spacing", global_wp_spacing_, 1.0);
+        nh.param("manager/global_wp_arrival_radius", global_wp_arrival_radius_, 0.5);
+        nh.param("manager/lookahead_dist", lookahead_dist_, 1.0);
+        nh.param("mpc/fov_range", mpc_fov_range_, 5.0);
+
+        // 停等/恢复参数
+        nh.param("mpc/stop/narrow_clearance", narrow_clearance_, 0.5);
+        nh.param("mpc/stop/narrow_risk_ratio", narrow_risk_ratio_, 0.5);
+        nh.param("mpc/stop/unblock_risk_ratio", unblock_risk_ratio_, 0.4);
+        nh.param("mpc/stop/ped_nearby_range", ped_nearby_range_, 3.0);
+        nh.param("mpc/stop/unblock_cooldown", unblock_cooldown_, 5);
     }
 
 
@@ -167,6 +76,16 @@ namespace cane_planner
         kin_finder_->setCollision(collision_);
         kin_finder_->setModel(lfpc_model_);
         kin_finder_->init();
+        // init MPC controller (planner=3)
+        if (planner_ == 3)
+        {
+            ROS_WARN(" MPC controller start");
+            mpc_controller_.reset(new MpcController);
+            mpc_controller_->setParam(nh);
+            mpc_controller_->setModel(lfpc_model_);
+            mpc_controller_->setCollision(collision_);
+            mpc_controller_->init();
+        }
         //init bspline
         ROS_WARN(" Bspline start");
         bspline_init_.reset(new NonUniformBspline);
@@ -181,6 +100,9 @@ namespace cane_planner
             nh.subscribe("/waypoint_generator/waypoints", 1, &PlannerManager::waypointCallback, this);
         odom_sub_ =
             nh.subscribe("/odom_world", 1, &PlannerManager::odometryCallback, this);
+        // 仿真模式下订阅初始位姿
+        start_sub_ =
+            nh.subscribe("/initialpose", 1, &PlannerManager::startCallback, this);
         // 订阅动态障碍物信息话题
         dyn_obs_sub_ = nh.subscribe("/onboard_detector/dynamic_obstacles_info", 10, 
                                      &PlannerManager::dynamicObstaclesCallback, this);
@@ -196,7 +118,16 @@ namespace cane_planner
         // Path
         kin_path_pub_ = nh.advertise<nav_msgs::Path>("/kin_astar/path", 20);
         a_path_pub_ = nh.advertise<nav_msgs::Path>("/astar/path", 20);
-        traj_pub_ = nh.advertise<nav_msgs::Path>("/planning_vis/trajectory", 20);    
+        traj_pub_ = nh.advertise<nav_msgs::Path>("/planning_vis/trajectory", 20);
+        // MPC vis
+        mpc_vis_pub_ = nh.advertise<visualization_msgs::Marker>("/planning_vis/mpc_rollout", 20);
+        mpc_foot_pub_ = nh.advertise<visualization_msgs::Marker>("/planning_vis/mpc_foot", 20);
+        mpc_path_pub_ = nh.advertise<nav_msgs::Path>("/mpc/path", 20);
+        sim_odom_pub_ = nh.advertise<nav_msgs::Odometry>("/sim_odom", 20);
+        mpc_fov_pub_ = nh.advertise<visualization_msgs::Marker>("/mpc/fov_range", 10);
+        mpc_wp_pub_ = nh.advertise<visualization_msgs::Marker>("/mpc/current_waypoint", 10);
+        mpc_wps_pub_ = nh.advertise<visualization_msgs::Marker>("/mpc/waypoints", 10);
+        risk_field_pub_ = nh.advertise<sensor_msgs::PointCloud2>("/mpc/risk_field", 1);
     }
     // real experience callback waypoint or goal
     void PlannerManager::GoalCallback(const geometry_msgs::PoseStamped::ConstPtr &msg)
@@ -226,8 +157,31 @@ namespace cane_planner
         have_target_ = true;
     }
     // odomtry
+    void PlannerManager::startCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr &start)
+    {
+        double px = start->pose.pose.position.x;
+        double py = start->pose.pose.position.y;
+        double yaw = QuatenionToYaw(start->pose.pose.orientation);
+
+        start_pt_(0) = px;
+        start_pt_(1) = py;
+        start_state_(0) = px;
+        start_state_(1) = py;
+        start_state_(2) = yaw;
+
+        odom_pos_(0) = px;
+        odom_pos_(1) = py;
+        odom_pos_(2) = 0.0;
+
+        have_odom_ = true;
+    }
+
     void PlannerManager::odometryCallback(const nav_msgs::OdometryConstPtr &msg)
     {
+        // 仿真模式下odom由自身控制(MPC步进或沿路径推进)，不依赖外部里程计
+        if (simulation_)
+            return;
+
         // transform cam to world
         geometry_msgs::PoseStamped pose_cam;
         pose_cam.header = msg->header;
@@ -334,6 +288,18 @@ namespace cane_planner
             if (!have_target_)
                 ROS_WARN("wait for goal.");
         }
+        // Risk field visualization (always on for planner=3, regardless of FSM state)
+        if (planner_ == 3 && mpc_controller_)
+        {
+            std::vector<Eigen::Vector3d> obs_pos, obs_vel;
+            {
+                std::lock_guard<std::mutex> lock(dynObsMutex_);
+                obs_pos = dynObsPos_;
+                obs_vel = dynObsVel_;
+            }
+            publishRiskField(obs_pos, obs_vel);
+        }
+
         // FSM loop
         switch (exec_state_)
         {
@@ -357,7 +323,10 @@ namespace cane_planner
                 {
                     success1 = callAstarPlan();
                     if (success1)
+                    {
+                        loadSimPath();
                         changeFSMExecState(EXEC_TRAJ);
+                    }
                     else
                         changeFSMExecState(REPLAN_TRAJ);
                 }
@@ -365,11 +334,43 @@ namespace cane_planner
                 {
                     success2 = callKinodynamicAstarPlan();
                     if (success2)
+                    {
+                        loadSimPath();
                         changeFSMExecState(EXEC_TRAJ);
+                    }
                     else
                         changeFSMExecState(REPLAN_TRAJ);
                 }
+                else if (planner_ == 3)
+                {
+                    // A* 全局规划 → 生成 waypoints，MPC 局部追踪
+                    if (callAstarPlan())
+                        generateGlobalWaypoints();
+                    mpcSimInit();
+                    changeFSMExecState(MPC_STEP);
+                }
 
+                break;
+            }
+            case MPC_STEP:
+            {
+                bool done = mpcSimStep();
+                if (done)
+                {
+                    if (mpc_reached_goal_)
+                    {
+                        displayMpcPlan();
+                        publishMpcPath();
+                        success2 = true;
+                        changeFSMExecState(EXEC_TRAJ);
+                    }
+                    else
+                    {
+                        ROS_WARN("MPC: max steps, replanning...");
+                        success2 = false;
+                        changeFSMExecState(REPLAN_TRAJ);
+                    }
+                }
                 break;
             }
             case REPLAN_TRAJ:
@@ -378,7 +379,10 @@ namespace cane_planner
                 {
                     success1 = callAstarPlan();
                     if (success1)
+                    {
+                        loadSimPath();
                         changeFSMExecState(EXEC_TRAJ);
+                    }
                     else
                         changeFSMExecState(REPLAN_TRAJ);
                 }
@@ -386,9 +390,20 @@ namespace cane_planner
                 {
                     success2 = callKinodynamicAstarPlan();
                     if (success2)
+                    {
+                        loadSimPath();
                         changeFSMExecState(EXEC_TRAJ);
+                    }
                     else
                         changeFSMExecState(REPLAN_TRAJ);
+                }
+                else if (planner_ == 3)
+                {
+                    // 重规划：从当前位置重新跑 A* + 生成 waypoints
+                    if (callAstarPlan())
+                        generateGlobalWaypoints();
+                    mpcSimInit();
+                    changeFSMExecState(MPC_STEP);
                 }
                 break;
             }
@@ -406,29 +421,30 @@ namespace cane_planner
                 //     // displayKinastar(); //发布离散点和足迹
                 //     // publishKinodynamicAstarPath();  //发布路径
                 // }
-                // real experience using odom judge stop replan
+                // 仿真模式下沿路径推进odom (planner=3由MPC_STEP自行处理)
+                if (simulation_ && planner_ != 3)
+                    stepSimMotion();
+
                 Eigen::Vector2d odom_pt(odom_pos_(0), odom_pos_(1));
 
                 double dis2end = (odom_pt - end_pt_).norm();
                 double dis2start = (odom_pt - start_pt_).norm();
-                // ROS_WARN("distance is %lf",dis);
                 if (dis2end <= 0.5)
                 {
                     have_target_ = false;
+                    sim_path_.clear();
                     ROS_WARN("Reach the destination");
                     changeFSMExecState(WAIT_TARGET);
                 }
-                else if (dis2end < no_replan_thresh_) 
+                else if (dis2end < no_replan_thresh_)
                 {
-                    // cout << "near end" << endl;
                     return;
-                } 
-                else if (dis2start < replan_thresh_) 
+                }
+                else if (dis2start < replan_thresh_)
                 {
-                    // cout << "near start" << endl;
                     return;
-                } 
-                else 
+                }
+                else
                 {
                     changeFSMExecState(REPLAN_TRAJ);
                 }
@@ -513,7 +529,7 @@ namespace cane_planner
     // ------------------------- helper function -------------------------------------
     void PlannerManager::changeFSMExecState(FSM_STATE new_state)
     {
-        string state_str[5] = {"INIT", "WAIT_TARGET", "GEN_NEW_TRAJ", "EXEC_TRAJ", "REPLAN_TRAJ"};
+        string state_str[6] = {"INIT", "WAIT_TARGET", "GEN_NEW_TRAJ", "EXEC_TRAJ", "REPLAN_TRAJ", "MPC_STEP"};
         // int pre_s = int(exec_state_);
         exec_state_ = new_state;
         // cout << "[now]: from " + state_str[pre_s] + " to " + state_str[int(new_state)] << endl;
@@ -579,29 +595,9 @@ namespace cane_planner
             return false; // 直接退出函数
         }
 
-        double ts = pp_.ctrl_pt_dist / pp_.max_vel_;
-        vector<Eigen::Vector3d> point_set, start_end_derivatives;
-        int segNum = kin_finder_->getSamples(ts, point_set, start_end_derivatives);
-
-        if(segNum <= 2){
-            std::cout<<"Close terminal condition reached."<<endl;
-            return plan_success;
-        }
-
-        Eigen::MatrixXd ctrl_pts;
-        NonUniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);
-        // cout<< "Control points:\n"
-        //     << ctrl_pts << endl;
-        bspline_init_->setUniformBspline(ctrl_pts, 3, ts);
-
-        // int cost_function = BsplineOptimizer::SMOOTHNESS;
-        // // cost_function |= BsplineOptimizer::ENDPOINT;
-        // ctrl_pts = bspline_optimizers_->BsplineOptimizeTraj(ctrl_pts, ts, cost_function, 1, 1);
-
-        // NonUniformBspline pos = NonUniformBspline(ctrl_pts, 3, ts);
-
-        drawBspline(*bspline_init_, 0.1, Eigen::Vector4d(1.0, 0, 0.0, 1), true, 0.2,
-                                Eigen::Vector4d(1, 0, 0, 1));   //发布拟合的b样条
+        // B-spline fitting disabled (not needed for front-end validation)
+        displayKinastar();
+        publishKinodynamicAstarPath();
 
         ros::Time time_2 = ros::Time::now();
         if (plan_success)
@@ -614,6 +610,725 @@ namespace cane_planner
         }
         return plan_success;
     }
+    // ==================== 通用仿真路径推进 ====================
+
+    void PlannerManager::loadSimPath()
+    {
+        sim_path_.clear();
+        sim_path_idx_ = 0;
+
+        if (planner_ == 1)
+        {
+            auto path = astar_finder_->getPath();
+            for (const auto& p : path)
+                sim_path_.push_back(p);
+        }
+        else if (planner_ == 2)
+        {
+            auto path = kin_finder_->getPath();  // vector<Eigen::Vector3d>
+            for (const auto& p : path)
+                sim_path_.push_back(Eigen::Vector2d(p(0), p(1)));
+        }
+        // planner=3: MPC handles its own odom stepping, no load needed
+    }
+
+    void PlannerManager::stepSimMotion()
+    {
+        if (sim_path_.empty() || sim_path_idx_ >= sim_path_.size())
+            return;
+
+        double step = sim_speed_ * 0.1;  // 0.1s timer interval
+        Eigen::Vector2d cur(odom_pos_(0), odom_pos_(1));
+        Eigen::Vector2d prev = cur;
+
+        // Advance along path
+        while (step > 0 && sim_path_idx_ < sim_path_.size())
+        {
+            Eigen::Vector2d wp = sim_path_[sim_path_idx_];
+            double dist = (wp - cur).norm();
+            if (dist <= step)
+            {
+                cur = wp;
+                step -= dist;
+                sim_path_idx_++;
+            }
+            else
+            {
+                cur += (wp - cur).normalized() * step;
+                step = 0;
+            }
+        }
+
+        odom_pos_(0) = cur(0);
+        odom_pos_(1) = cur(1);
+
+        // Publish generic sim odom for rviz
+        nav_msgs::Odometry odom;
+        odom.header.frame_id = "world";
+        odom.header.stamp = ros::Time::now();
+        odom.pose.pose.position.x = cur(0);
+        odom.pose.pose.position.y = cur(1);
+        odom.pose.pose.position.z = 0.0;
+        odom.pose.pose.orientation.w = 1.0;
+        double vx = (cur(0) - prev(0)) / 0.1;
+        double vy = (cur(1) - prev(1)) / 0.1;
+        odom.twist.twist.linear.x = vx;
+        odom.twist.twist.linear.y = vy;
+        sim_odom_pub_.publish(odom);
+    }
+
+    // ==================== 全局路径层 (A* → waypoints) ====================
+
+    void PlannerManager::generateGlobalWaypoints()
+    {
+        global_waypoints_.clear();
+        global_wp_idx_ = 0;
+
+        auto path = astar_finder_->getPath();  // vector<Eigen::Vector2d>
+        if (path.size() < 2)
+        {
+            global_waypoints_.push_back(end_pt_);
+            ROS_WARN("[MPC global] A* path too short, using direct goal as only waypoint");
+            return;
+        }
+
+        // Downsample: walk the A* path, pick points at ~global_wp_spacing_ intervals
+        Eigen::Vector2d last = path[0];
+        double accum = 0.0;
+        for (size_t i = 1; i < path.size(); ++i)
+        {
+            Eigen::Vector2d seg = path[i] - path[i - 1];
+            double seg_len = seg.norm();
+            accum += seg_len;
+            if (accum >= global_wp_spacing_)
+            {
+                global_waypoints_.push_back(path[i]);
+                accum = 0.0;
+                last = path[i];
+            }
+        }
+
+        // Ensure the final point equals end_pt_
+        if (global_waypoints_.empty())
+        {
+            global_waypoints_.push_back(end_pt_);
+        }
+        else
+        {
+            double dist_last_to_end = (end_pt_ - global_waypoints_.back()).norm();
+            if (dist_last_to_end > global_wp_spacing_ * 0.3)
+                global_waypoints_.push_back(end_pt_);
+            else
+                global_waypoints_.back() = end_pt_;  // snap last wp to exact goal
+        }
+
+        ROS_INFO("[MPC global] Generated %zu waypoints (spacing=%.1fm) for %.1fm path",
+                 global_waypoints_.size(), global_wp_spacing_,
+                 (path.back() - path.front()).norm());
+
+        publishWaypointsList();
+    }
+
+    // ==================== 步进式MPC仿真 ====================
+
+    void PlannerManager::mpcSimInit()
+    {
+        // 重置MPC warm-start
+        mpc_controller_->reset();
+
+        // 从里程计设置起点 (startCallback 已写入 start_state_)
+        start_pt_(0) = odom_pos_(0);
+        start_pt_(1) = odom_pos_(1);
+        start_state_(0) = odom_pos_(0);
+        start_state_(1) = odom_pos_(1);
+
+        // 初始化LFPC状态
+        Eigen::Vector3d init_v_state(0.0, 0.0, start_state_(2)); // vx, vy, theta
+        Eigen::Vector3d com_init_pos(odom_pos_(0), odom_pos_(1), 0.0);
+        lfpc_model_->reset(init_v_state, com_init_pos, LEFT_LEG, 0);
+
+        // 缓存目标：优先使用全局 waypoint，A* 失败则直接面向终点
+        global_wp_idx_ = 0;
+        if (!global_waypoints_.empty())
+            mpc_sim_goal_ << global_waypoints_[0](0), global_waypoints_[0](1), 0.0;
+        else
+            mpc_sim_goal_ << end_state_(0), end_state_(1), 0.0;
+
+        // 清空路径缓存
+        mpc_com_path_.clear();
+        mpc_feet_path_.clear();
+        mpc_step_path_.clear();
+
+        // 初始化计数器
+        mpc_step_count_ = 0;
+        mpc_stuck_steps_ = 0;
+        mpc_blocked_count_ = 0;
+        last_com_pos_ = com_init_pos.head(2);
+        mpc_max_steps_ = 50;
+        mpc_reached_goal_ = false;
+
+        // 更新odom初始位置
+        odom_pos_ = com_init_pos;
+    }
+
+    // 正交投影 + 动态截断：找到路径上最近投影点，重锚定索引，前向截断 L 距离
+    void PlannerManager::reanchorWaypoint(const Eigen::Vector2d& robot_pos)
+    {
+        if (global_waypoints_.size() < 2) return;
+
+        size_t old_idx = global_wp_idx_;
+
+        // Step 1: 遍历所有线段，找到全局最近投影点
+        double best_dist = std::numeric_limits<double>::max();
+        size_t best_seg = 0;
+        Eigen::Vector2d best_proj = global_waypoints_[0];
+
+        for (size_t i = 0; i + 1 < global_waypoints_.size(); ++i)
+        {
+            const Eigen::Vector2d& a = global_waypoints_[i];
+            const Eigen::Vector2d& b = global_waypoints_[i + 1];
+            Eigen::Vector2d ab = b - a;
+            double seg_len_sq = ab.squaredNorm();
+            if (seg_len_sq < 1e-9) continue;
+
+            double t = (robot_pos - a).dot(ab) / seg_len_sq;
+            t = std::max(0.0, std::min(1.0, t));  // clamp to segment
+            Eigen::Vector2d proj = a + t * ab;
+            double dist = (robot_pos - proj).squaredNorm();
+            if (dist < best_dist)
+            {
+                best_dist = dist;
+                best_seg = i;
+                best_proj = proj;
+            }
+        }
+
+        // Step 2: 重锚定索引，只进不退
+        global_wp_idx_ = std::max(global_wp_idx_, best_seg);
+
+        // Step 3: 从投影点出发，沿路径向前截断 L 距离
+        double accum = 0.0;
+        Eigen::Vector2d target = best_proj;
+
+        // 第一条线段从投影点到 W_{idx+1}，而非从 W_{idx} 开始
+        {
+            Eigen::Vector2d first_seg = global_waypoints_[global_wp_idx_ + 1] - best_proj;
+            double first_len = first_seg.norm();
+            if (first_len >= lookahead_dist_)
+            {
+                target = best_proj + (lookahead_dist_ / first_len) * first_seg;
+                accum = lookahead_dist_;
+            }
+            else
+            {
+                accum = first_len;
+                target = global_waypoints_[global_wp_idx_ + 1];
+            }
+        }
+
+        // 后续完整线段
+        for (size_t i = global_wp_idx_ + 1; i + 1 < global_waypoints_.size() && accum < lookahead_dist_; ++i)
+        {
+            Eigen::Vector2d seg = global_waypoints_[i + 1] - global_waypoints_[i];
+            double seg_len = seg.norm();
+            if (seg_len < 1e-6) continue;
+
+            if (accum + seg_len >= lookahead_dist_)
+            {
+                double remain = lookahead_dist_ - accum;
+                target = global_waypoints_[i] + (remain / seg_len) * seg;
+                accum = lookahead_dist_;
+                break;
+            }
+            accum += seg_len;
+            target = global_waypoints_[i + 1];
+        }
+
+        // 剩余路径不足 lookahead，直接瞄准终点
+        if (accum < lookahead_dist_)
+            target = end_pt_;
+
+        mpc_sim_goal_ << target(0), target(1), 0.0;
+
+        if (global_wp_idx_ != old_idx)
+        {
+            mpc_stuck_steps_ = 0;
+            mpc_step_count_ = 0;  // progressing → reset safeties
+            ROS_INFO("[MPC] Reanchored wp_idx %zu -> %zu, target (%.2f, %.2f)",
+                     old_idx, global_wp_idx_, target(0), target(1));
+        }
+    }
+
+    bool PlannerManager::mpcSimStep()
+    {
+        // 从缓存获取动态障碍物
+        std::vector<Eigen::Vector3d> obs_pos, obs_vel;
+        {
+            std::lock_guard<std::mutex> lock(dynObsMutex_);
+            obs_pos = dynObsPos_;
+            obs_vel = dynObsVel_;
+        }
+
+        Eigen::Vector3d current_com = lfpc_model_->getCOMPos();
+        Eigen::Vector2d foot_pos = lfpc_model_->getFootPosition();
+
+        // 记录当前位置
+        mpc_com_path_.push_back(current_com);
+        mpc_feet_path_.push_back(Eigen::Vector3d(foot_pos(0), foot_pos(1), 0.0));
+
+        // 正交投影重锚定 + 前向截断
+        reanchorWaypoint(current_com.head(2));
+
+        // 检查是否到达最终目标
+        double dist_to_final = (current_com.head(2) - end_pt_).norm();
+        // 只在物理上靠近最终目标时才宣布到达
+        if (dist_to_final < global_wp_arrival_radius_)
+        {
+            mpc_reached_goal_ = true;
+            ROS_INFO("[MPC] Reached final goal at (%.2f, %.2f), %d steps",
+                     current_com(0), current_com(1), mpc_step_count_);
+            return true;
+        }
+
+        // 卡住检测：基于实际位移而非 waypoint 索引切换
+        // (waypoint 间距可能较大，索引不变但机器人仍在前进)
+        double moved = (current_com.head(2) - last_com_pos_).norm();
+        if (moved > 0.03)  // 本帧移动超过 3cm → 在前进
+            mpc_stuck_steps_ = 0;
+        else
+            mpc_stuck_steps_++;
+        last_com_pos_ = current_com.head(2);
+
+        if (mpc_stuck_steps_ > STUCK_THRESHOLD && mpc_blocked_count_ == 0)
+        {
+            ROS_WARN("[MPC] Stuck for %d steps (static), triggering replan", STUCK_THRESHOLD);
+            mpc_reached_goal_ = false;
+            return true;
+        }
+
+        // 检查最大步数（保底，仅非行人阻塞时生效）
+        if (mpc_step_count_ >= mpc_max_steps_ && mpc_blocked_count_ == 0)
+        {
+            mpc_reached_goal_ = false;
+            return true;
+        }
+
+        // 安全阈值 (与MPC rollout硬阈值相同)：risk > 此值视为危险
+        static double safe_risk = 0.0;
+        if (safe_risk == 0.0)
+        {
+            double A, ratio;
+            ros::param::param("mpc/risk_A", A, 10.0);
+            ros::param::param("mpc/risk_hard_threshold_ratio", ratio, 0.5);
+            safe_risk = A * ratio;
+        }
+
+        // 安全门：脚下 risk 超阈值 → 停
+        {
+            double cur_risk = 0.0;
+            for (size_t oi = 0; oi < obs_pos.size(); ++oi)
+            {
+                cur_risk += mpc_controller_->getRiskField().getIndividualCostFast(
+                    current_com(0), current_com(1),
+                    obs_pos[oi](0), obs_pos[oi](1),
+                    obs_vel[oi](0), obs_vel[oi](1));
+            }
+            if (cur_risk > safe_risk)
+            {
+                mpc_blocked_count_ = unblock_cooldown_;
+                mpc_controller_->resetWarmStart();
+                mpc_stuck_steps_ = 0;
+                ROS_WARN_THROTTLE(1.0,
+                    "[MPC] Risk zone — stopping (risk=%.1f > %.1f)", cur_risk, safe_risk);
+                publishFovRange();
+                publishCurrentWaypoint();
+                mpc_step_count_++;
+                return false;
+            }
+        }
+
+        // MPC规划一步
+        Eigen::Vector3d control = mpc_controller_->plan(
+            lfpc_model_, mpc_sim_goal_, obs_pos, obs_vel);
+
+        // 无路可走 → 进入阻塞
+        if (!mpc_controller_->lastPlanValid())
+        {
+            mpc_blocked_count_ = unblock_cooldown_;
+            mpc_controller_->resetWarmStart();
+            // Static vs dynamic: if no pedestrians nearby, blockage is from walls
+            // → count toward stuck to trigger fast replan (3s), not wait for max_steps (5s)
+            if (obs_pos.empty())
+                ROS_WARN_THROTTLE(1.0, "[MPC] Blocked — all trajectories hit static obstacles");
+            else
+                mpc_stuck_steps_ = 0;  // pedestrian-related: waiting is correct, reset stuck counter
+            publishFovRange();
+            publishCurrentWaypoint();
+            mpc_step_count_++;
+            return false;
+        }
+
+        // 机器人在迎面行人的狭窄侧：开阔侧被行人挡住，不应挤墙缝
+        if (mpc_controller_->onTightSide())
+        {
+            mpc_blocked_count_ = unblock_cooldown_;
+            mpc_controller_->resetWarmStart();
+            mpc_stuck_steps_ = 0;
+            ROS_WARN_THROTTLE(1.0,
+                "[MPC] Blocked — on tight side of oncoming pedestrian, waiting...");
+            publishFovRange();
+            publishCurrentWaypoint();
+            mpc_step_count_++;
+            return false;
+        }
+
+        // 在阻塞恢复期：检查当前位置风险是否已降到安全值以下
+        if (mpc_blocked_count_ > 0)
+        {
+            mpc_stuck_steps_ = 0;  // 行人相关等待，不计入静态 stuck
+            double cur_risk = 0.0;
+            for (size_t oi = 0; oi < obs_pos.size(); ++oi)
+            {
+                cur_risk += mpc_controller_->getRiskField().getIndividualCostFast(
+                    current_com(0), current_com(1),
+                    obs_pos[oi](0), obs_pos[oi](1),
+                    obs_vel[oi](0), obs_vel[oi](1));
+            }
+
+            // 行人附近解封门槛更严，避免刚解封又挤入
+            double gate = safe_risk;
+            for (const auto& op : obs_pos)
+            {
+                if ((op.head(2) - current_com.head(2)).norm() < ped_nearby_range_)
+                {
+                    gate = safe_risk * unblock_risk_ratio_;
+                    break;
+                }
+            }
+
+            if (cur_risk > gate)
+            {
+                mpc_blocked_count_ = unblock_cooldown_;
+                mpc_controller_->resetWarmStart();
+                ROS_WARN_THROTTLE(2.0, "[MPC] Still blocked — risk at position %.1f > %.1f",
+                                  cur_risk, gate);
+            }
+            else
+            {
+                mpc_blocked_count_--;
+                if (mpc_blocked_count_ == 0)
+                {
+                    mpc_step_count_ = 0;  // reset on unblock so max_steps counts from resume
+                    ROS_INFO("[MPC] Unblocked — pedestrian cleared, resuming walking");
+                }
+            }
+            publishFovRange();
+            publishCurrentWaypoint();
+            mpc_step_count_++;
+            return false;
+        }
+
+        // 窄通道+行人探测：MPC最优路径上 clearance 窄且 risk 高 → 等行人先过
+        if (mpc_controller_->lastPlanValid() && !obs_pos.empty() && collision_)
+        {
+            const auto& best_path = mpc_controller_->getBestPath();
+            if (!best_path.empty())
+            {
+                double min_clearance = 1e9, max_risk = 0.0;
+                double slice_h = collision_->getSliceHeight();
+                int stride = std::max(1, (int)best_path.size() / 8);
+                for (size_t i = 0; i < best_path.size(); i += stride)
+                {
+                    double px = best_path[i](0), py = best_path[i](1);
+                    Eigen::Vector3d pt(px, py, slice_h);
+                    double d = collision_->sdf_map_->getDistance(pt);
+                    if (d < min_clearance) min_clearance = d;
+
+                    double r = 0.0;
+                    for (size_t oi = 0; oi < obs_pos.size(); ++oi)
+                        r += mpc_controller_->getRiskField().getIndividualCostFast(
+                            px, py, obs_pos[oi](0), obs_pos[oi](1),
+                            obs_vel[oi](0), obs_vel[oi](1));
+                    if (r > max_risk) max_risk = r;
+                }
+
+                // 物理窄(贴墙) + 行人risk高 → 通道被行人挤窄了
+                if (min_clearance < narrow_clearance_ && max_risk > safe_risk * narrow_risk_ratio_)
+                {
+                    mpc_blocked_count_ = unblock_cooldown_;
+                    mpc_controller_->resetWarmStart();
+                    mpc_stuck_steps_ = 0;
+                    ROS_WARN_THROTTLE(1.0,
+                        "[MPC] Narrow passage near pedestrian (clr=%.2fm, risk=%.1f), waiting...",
+                        min_clearance, max_risk);
+                    publishFovRange();
+                    publishCurrentWaypoint();
+                    mpc_step_count_++;
+                    return false;
+                }
+            }
+        }
+
+        // 正常步进
+        lfpc_model_->SetCtrlParams(control);
+        lfpc_model_->updateOneStep();
+
+        // 收集子步路径
+        std::vector<Eigen::Vector3d> step_path = lfpc_model_->getStepCOMPath();
+        for (const auto& pt : step_path)
+            mpc_step_path_.push_back(pt);
+
+        lfpc_model_->prepareNextStep();
+
+        // 更新里程计位置
+        Eigen::Vector3d new_com = lfpc_model_->getCOMPos();
+        odom_pos_(0) = new_com(0);
+        odom_pos_(1) = new_com(1);
+        odom_pos_(2) = new_com(2);
+
+        // 发布模拟里程计
+        publishSimOdom();
+
+        // 发布 FOV 范围和当前 waypoint 可视化
+        publishFovRange();
+        publishCurrentWaypoint();
+
+        // 增量发布可视化（每步更新）
+        displayMpcPlan();
+        publishMpcPath();
+
+        mpc_step_count_++;
+        return false;  // 继续
+    }
+
+    void PlannerManager::publishSimOdom()
+    {
+        Eigen::Vector3d com = lfpc_model_->getCOMPos();
+        Eigen::Vector3d vel = lfpc_model_->getNextIterState(); // vx_t, vy_t, theta_
+        double theta = vel(2);
+
+        nav_msgs::Odometry odom;
+        odom.header.frame_id = "world";
+        odom.header.stamp = ros::Time::now();
+        odom.pose.pose.position.x = com(0);
+        odom.pose.pose.position.y = com(1);
+        odom.pose.pose.position.z = 0.0;
+        odom.pose.pose.orientation = tf::createQuaternionMsgFromYaw(theta);
+        odom.twist.twist.linear.x = vel(0);
+        odom.twist.twist.linear.y = vel(1);
+        odom.twist.twist.angular.z = 0.0;
+
+        sim_odom_pub_.publish(odom);
+    }
+
+    void PlannerManager::publishFovRange()
+    {
+        // 绿色半透明 FOV 圆圈
+        visualization_msgs::Marker mk;
+        mk.header.frame_id = "world";
+        mk.header.stamp = ros::Time::now();
+        mk.ns = "mpc_fov";
+        mk.id = 0;
+        mk.type = visualization_msgs::Marker::LINE_STRIP;
+        mk.action = visualization_msgs::Marker::ADD;
+        mk.pose.orientation.w = 1.0;
+        mk.scale.x = 0.05;  // 线宽
+        mk.color.a = 0.4;
+        mk.color.r = 0.2;
+        mk.color.g = 0.8;
+        mk.color.b = 0.2;
+
+        double cx = odom_pos_(0);
+        double cy = odom_pos_(1);
+        int n_segments = 48;
+        for (int i = 0; i <= n_segments; ++i)
+        {
+            double angle = 2.0 * M_PI * i / n_segments;
+            geometry_msgs::Point pt;
+            pt.x = cx + mpc_fov_range_ * std::cos(angle);
+            pt.y = cy + mpc_fov_range_ * std::sin(angle);
+            pt.z = 0.05;
+            mk.points.push_back(pt);
+        }
+        mpc_fov_pub_.publish(mk);
+    }
+
+    void PlannerManager::publishCurrentWaypoint()
+    {
+        // 亮黄色当前追踪 waypoint 球
+        visualization_msgs::Marker mk;
+        mk.header.frame_id = "world";
+        mk.header.stamp = ros::Time::now();
+        mk.ns = "mpc_curr_wp";
+        mk.id = 0;
+        mk.type = visualization_msgs::Marker::SPHERE;
+        mk.action = visualization_msgs::Marker::ADD;
+        mk.pose.position.x = mpc_sim_goal_(0);
+        mk.pose.position.y = mpc_sim_goal_(1);
+        mk.pose.position.z = 0.3;
+        mk.pose.orientation.w = 1.0;
+        mk.scale.x = 0.25;
+        mk.scale.y = 0.25;
+        mk.scale.z = 0.25;
+        mk.color.a = 0.9;
+        mk.color.r = 1.0;
+        mk.color.g = 0.9;
+        mk.color.b = 0.0;
+        mpc_wp_pub_.publish(mk);
+    }
+
+    void PlannerManager::publishWaypointsList()
+    {
+        // 全部 waypoints 小球列表
+        visualization_msgs::Marker mk;
+        mk.header.frame_id = "world";
+        mk.header.stamp = ros::Time::now();
+        mk.ns = "mpc_waypoints";
+        mk.id = 0;
+        mk.type = visualization_msgs::Marker::SPHERE_LIST;
+        mk.action = visualization_msgs::Marker::ADD;
+        mk.pose.orientation.w = 1.0;
+        mk.scale.x = 0.12;
+        mk.scale.y = 0.12;
+        mk.scale.z = 0.12;
+        mk.color.a = 0.7;
+        mk.color.r = 1.0;
+        mk.color.g = 0.6;
+        mk.color.b = 0.0;
+
+        for (size_t i = 0; i < global_waypoints_.size(); ++i)
+        {
+            geometry_msgs::Point pt;
+            pt.x = global_waypoints_[i](0);
+            pt.y = global_waypoints_[i](1);
+            pt.z = 0.15;
+            mk.points.push_back(pt);
+        }
+        mpc_wps_pub_.publish(mk);
+    }
+
+    void PlannerManager::publishRiskField(const std::vector<Eigen::Vector3d>& obs_pos,
+                                          const std::vector<Eigen::Vector3d>& obs_vel)
+    {
+        if (obs_pos.empty() || !mpc_controller_) return;
+
+        pcl::PointCloud<pcl::PointXYZI> cloud;
+        cloud.header.frame_id = "world";
+        cloud.header.stamp = pcl_conversions::toPCL(ros::Time::now());
+
+        const auto& rf = mpc_controller_->getRiskField();
+        double cx = odom_pos_(0);
+        double cy = odom_pos_(1);
+        double range = mpc_fov_range_ + 2.0;  // tiny margin beyond FOV circle
+        double res = 0.2;
+
+        for (double x = cx - range; x <= cx + range; x += res)
+        {
+            for (double y = cy - range; y <= cy + range; y += res)
+            {
+                // Skip points outside FOV circle for performance
+                double dx = x - cx;
+                double dy = y - cy;
+                if (dx*dx + dy*dy > range*range) continue;
+
+                double risk_sum = 0.0;
+                for (size_t oi = 0; oi < obs_pos.size(); ++oi)
+                {
+                    risk_sum += rf.getIndividualCostFast(
+                        x, y,
+                        obs_pos[oi](0), obs_pos[oi](1),
+                        obs_vel[oi](0), obs_vel[oi](1));
+                }
+                if (risk_sum < 0.05) continue;  // skip near-zero for cleaner view
+
+                pcl::PointXYZI pt;
+                pt.x = x;
+                pt.y = y;
+                pt.z = 0.1;
+                pt.intensity = std::min(risk_sum, 15.0);
+                cloud.points.push_back(pt);
+            }
+        }
+        sensor_msgs::PointCloud2 output;
+        pcl::toROSMsg(cloud, output);
+        risk_field_pub_.publish(output);
+    }
+
+    void PlannerManager::displayMpcPlan()
+    {
+        // 发布MPC CoM路径点 (蓝色)
+        visualization_msgs::Marker mk;
+        mk.header.frame_id = "world";
+        mk.header.stamp = ros::Time::now();
+        mk.type = visualization_msgs::Marker::SPHERE_LIST;
+        mk.action = visualization_msgs::Marker::DELETE;
+        mk.id = 0;
+        mk.action = visualization_msgs::Marker::ADD;
+        mk.pose.orientation.x = 0.0;
+        mk.pose.orientation.y = 0.0;
+        mk.pose.orientation.z = 0.0;
+        mk.pose.orientation.w = 1.0;
+        mk.color.r = 0.0;
+        mk.color.g = 0.0;
+        mk.color.b = 1.0;
+        mk.color.a = 0.5;
+        mk.scale.x = 0.1;
+        mk.scale.y = 0.1;
+        mk.scale.z = 0.1;
+
+        geometry_msgs::Point pt;
+        for (size_t i = 0; i < mpc_com_path_.size(); i++)
+        {
+            pt.x = mpc_com_path_[i](0);
+            pt.y = mpc_com_path_[i](1);
+            pt.z = collision_->getSliceHeight();
+            mk.points.push_back(pt);
+        }
+        mpc_vis_pub_.publish(mk);
+
+        // 发布MPC足迹 (绿色)
+        mk.points.clear();
+        mk.color.r = 0.0;
+        mk.color.g = 1.0;
+        mk.color.b = 0.0;
+        mk.color.a = 0.8;
+        mk.scale.x = 0.2;
+        mk.scale.y = 0.2;
+        mk.scale.z = 0.2;
+        for (size_t i = 0; i < mpc_feet_path_.size(); i++)
+        {
+            pt.x = mpc_feet_path_[i](0);
+            pt.y = mpc_feet_path_[i](1);
+            pt.z = collision_->getSliceHeight();
+            mk.points.push_back(pt);
+        }
+        mpc_foot_pub_.publish(mk);
+
+        ros::Duration(0.001).sleep();
+    }
+
+    void PlannerManager::publishMpcPath()
+    {
+        nav_msgs::Path path;
+        path.header.frame_id = "world";
+        path.header.stamp = ros::Time::now();
+        for (size_t i = 0; i < mpc_step_path_.size(); i++)
+        {
+            geometry_msgs::PoseStamped this_pose_stamped;
+            this_pose_stamped.pose.position.x = mpc_step_path_[i](0);
+            this_pose_stamped.pose.position.y = mpc_step_path_[i](1);
+            this_pose_stamped.pose.position.z = collision_->getSliceHeight();
+            this_pose_stamped.pose.orientation.x = 0.0;
+            this_pose_stamped.pose.orientation.y = 0.0;
+            this_pose_stamped.pose.orientation.z = 0.0;
+            this_pose_stamped.pose.orientation.w = 1.0;
+            this_pose_stamped.header.frame_id = "world";
+            this_pose_stamped.header.stamp = ros::Time::now();
+            path.poses.push_back(this_pose_stamped);
+        }
+        mpc_path_pub_.publish(path);
+    }
+
     // publish traj to L1-control
     void PlannerManager::publishKinodynamicAstarPath()
     {

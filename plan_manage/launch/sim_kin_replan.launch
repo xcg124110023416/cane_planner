@@ -1,30 +1,26 @@
 <launch>
     <arg name="odometry_topic" value = "/simulation_generator/odom"/>
+    <arg name="planner" default="2"/>  <!-- A*:1, kinodynamic:2, MPC:3 -->
     <!-- simulation -->
     <include file="$(find plan_manage)/launch/include/simulation.launch"/>
-    <!-- kindynameic alogoritm -->
+    <!-- unified planner (A*/kinodynamic/MPC all via kin_replan_node FSM) -->
     <include file="$(find plan_manage)/launch/include/algorithm.launch">
-        <!-- choose planner A*:1 kin:2 -->
-        <arg name="planner" value="2"/>
-        <!-- not using cloud and odom -->
+        <arg name="planner" value="$(arg planner)"/>
         <arg name="odometry_topic" value = "$(arg odometry_topic)"/>
         <arg name="odometry_world" value = "$(arg odometry_topic)"/>
         <arg name="cloud_topic" value = "/simulation_generator/global_cloud"/>
         <arg name="depth_topic" value="depth"/>
         <arg name="sensor_pose_topic" value="pose"/>
-        <!-- simulation opion -->
-        <arg name="simulation" value="false"/>
+        <arg name="simulation" value="true"/>
         <arg name="slice_height" value="0.0"/>
         <arg name="collision_margin" value="0.3"/>
         <arg name="kin_horizon" value="200.0"/>
-        <!-- map size -->
         <arg name="map_size_x" value="40.0"/>
         <arg name="map_size_y" value="40.0"/>
         <arg name="map_size_z" value="5.0"/>
     </include>
     <!-- L1 controller -->
     <node pkg="plan_ctrl" type="L1_controller_v2" respawn="false" name="L1_controller_v2" output="screen">
-        <!-- <node pkg="plan_ctrl" type="L1_controller_v2" respawn="false" name="L1_controller_v2">        -->
         <param name="Vcmd" value="1.0" />
         <param name="baseSpeed" value="1425"/>
         <param name="baseAngle" value="90.0"/>
@@ -42,8 +38,20 @@
 
     <node pkg="tf2_ros" type="static_transform_publisher" name="body2cane_base" args="0 0 0 0 0 0 /base_link /cane_base" />
 
-    <!-- visualisation -->
-    <include file="$(find plan_manage)/launch/rviz.launch">
+    <!-- pedestrian simulation (dynamic obstacles for MPC testing) -->
+    <arg name="use_pedestrians" default="true"/>
+    <group if="$(arg use_pedestrians)">
+        <node pkg="plan_manage" type="pedestrian_sim.py" name="pedestrian_sim" output="screen">
+            <!-- Customize pedestrians via rosparam or leave defaults -->
+            <rosparam param="pedestrians">
+            - {start: [0, -4.0, 0], vel: [0.3, 0, 0], size: [0.5, 0.5, 1.7], period: 12.0, mode: patrol}
+            <!-- - {start: [-2.5, 0, 0], vel: [0, 0.5, 0], size: [0.5, 0.5, 1.7], period: 7.0, mode: patrol} -->
+            # loop: walks toward robot, resets after period
+            - {start: [-2.5, -3, 0], vel: [0, 0.5, 0], size: [0.5, 0.5, 1.7], period: 6.0, mode: loop}
+            </rosparam>
+        </node>
+    </group>
 
-    </include>
+    <!-- visualisation -->
+    <include file="$(find plan_manage)/launch/rviz.launch"/>
 </launch>

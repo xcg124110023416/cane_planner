@@ -179,7 +179,7 @@ namespace cane_planner
 
         COM_pos_(0) = x_t_ + support_leg_pos_(0);
         COM_pos_(1) = y_t_ + support_leg_pos_(1);
-        COM_pos_(2) = collision_->getSliceHeight();//设置路径高度
+        COM_pos_(2) = collision_ ? collision_->getSliceHeight() : 0.0;
     }
 
     void LFPC::updateOneDtForOnce(double t)
@@ -193,7 +193,7 @@ namespace cane_planner
 
         COM_pos_(0) = x_t_ + support_leg_pos_(0);
         COM_pos_(1) = y_t_ + support_leg_pos_(1);
-        COM_pos_(2) = collision_->getSliceHeight();//设置路径高度
+        COM_pos_(2) = collision_ ? collision_->getSliceHeight() : 0.0;
     }
 
     Vector4d LFPC::calculateXtVt(double t)
@@ -256,12 +256,52 @@ namespace cane_planner
         return state_f;
     }
 
+    void LFPC::prepareNextStep()
+    {
+        // Flip support leg
+        support_leg_ = (support_leg_ == LEFT_LEG) ? RIGHT_LEG : LEFT_LEG;
+        // Reset step-internal LIPM state
+        t_ = 0.0;
+        x_t_ = 0.0;
+        vx_t_ = 0.0;
+        y_t_ = 0.0;
+        vy_t_ = 0.0;
+        step_path_.clear();
+    }
+
+    void LFPC::copyState(const LFPC& other)
+    {
+        support_leg_ = other.support_leg_;
+        t_sup_ = other.t_sup_;
+        delta_t_ = other.delta_t_;
+        h_ = other.h_;
+        t_c_ = other.t_c_;
+        step_num_ = other.step_num_;
+        collision_ = other.collision_;
+        x_0_ = other.x_0_;
+        vx_0_ = other.vx_0_;
+        y_0_ = other.y_0_;
+        vy_0_ = other.vy_0_;
+        t_ = other.t_;
+        x_t_ = other.x_t_;
+        vx_t_ = other.vx_t_;
+        y_t_ = other.y_t_;
+        vy_t_ = other.vy_t_;
+        al_ = other.al_;
+        aw_ = other.aw_;
+        theta_ = other.theta_;
+        b_ = other.b_;
+        support_leg_pos_ = other.support_leg_pos_;
+        COM_pos_ = other.COM_pos_;
+        step_path_ = other.step_path_;
+    }
+
     double LFPC::getTimeUpdate(){
         return this->t_sup_;
     }
 
     Eigen::Matrix<double, 6, 1> LFPC::getState(){
-        Eigen::Matrix<double, 6, 1> state;
+        Eigen::Matrix<double, 6, 1> state = Eigen::Matrix<double, 6, 1>::Zero();
         state(0) = vx_0_;
         state(1) = vy_0_;
         state(2) = al_;

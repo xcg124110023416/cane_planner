@@ -51,16 +51,15 @@ add_executable(kin_replan_node
     src/planner_manager.cpp
 )
 add_dependencies(kin_replan_node ${catkin_EXPORTED_TARGETS} onboard_detector_generate_messages_cpp)
-target_link_libraries(kin_replan_node 
+target_link_libraries(kin_replan_node
   ${catkin_LIBRARIES}
+  ${PCL_LIBRARIES}
   )
 
-# sim
-add_executable(sim_plan_node
-    src/sim_plan_node.cpp
-    src/planner_manager.cpp
-)
-add_dependencies(sim_plan_node ${catkin_EXPORTED_TARGETS} onboard_detector_generate_messages_cpp)
-target_link_libraries(sim_plan_node 
-  ${catkin_LIBRARIES}
+# sim: removed — use kin_replan_node for both simulation and real
+
+# Python scripts
+catkin_install_python(PROGRAMS
+  scripts/pedestrian_sim.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
