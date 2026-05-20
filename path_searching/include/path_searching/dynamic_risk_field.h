@@ -16,6 +16,14 @@ public:
         // double sigma_x = sigma_y + k*obs_vx;     //一种动态调整方案
         double sigma_x = 0.4;      // 纵向风险范围 (沿运动方向)
         double cutoff_dist = 3.0;  // 约3到4倍的sigma_x
+
+        // Halo: wider low-amplitude envelope beyond the hard core.
+        // halo_scale=0 disables it (pure Gaussian, backward compatible).
+        // When enabled, risk = max(core_gaussian, halo_gaussian), where
+        //   halo_gaussian = A * halo_ratio * exp(-0.5 * r² / halo_scale²)
+        // This gives MPC a soft gradient to follow without forcing wide detours.
+        double halo_scale = 0.0;   // width multiplier relative to core sigma
+        double halo_ratio = 0.25;  // peak amplitude ratio relative to A
     };
 
     DynamicRiskField() {}
@@ -36,8 +44,13 @@ public:
                                  double ox, double oy,
                                  double vx, double vy) const;
 
+    // Halo component only (for visualization). Returns 0 if halo disabled.
+    double getHaloCostFast(double qx, double qy,
+                           double ox, double oy,
+                           double vx, double vy) const;
+
     void setConfig(const Config& conf) { conf_ = conf; }
-    Config getConfig() const {return conf_; }
+    const Config& getConfig() const { return conf_; }
 
 private:
     Config conf_;

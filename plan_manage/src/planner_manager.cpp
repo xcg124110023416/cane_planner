@@ -30,18 +30,12 @@ namespace cane_planner
         nh.param("manager/global_wp_arrival_radius", global_wp_arrival_radius_, 0.5);
         nh.param("manager/lookahead_dist", lookahead_dist_, 1.0);
         nh.param("mpc/fov_range", mpc_fov_range_, 5.0);
-
-        // 停等/恢复参数
-        nh.param("mpc/stop/narrow_clearance", narrow_clearance_, 0.5);
-        nh.param("mpc/stop/narrow_risk_ratio", narrow_risk_ratio_, 0.5);
-        nh.param("mpc/stop/unblock_risk_ratio", unblock_risk_ratio_, 0.4);
-        nh.param("mpc/stop/ped_nearby_range", ped_nearby_range_, 3.0);
-        nh.param("mpc/stop/unblock_cooldown", unblock_cooldown_, 5);
     }
 
 
     void PlannerManager::init(ros::NodeHandle &nh)
     {
+        nh_ = nh;
         // init FSM
         exec_state_ = FSM_STATE::INIT;
         have_odom_ = false;
@@ -128,6 +122,8 @@ namespace cane_planner
         mpc_wp_pub_ = nh.advertise<visualization_msgs::Marker>("/mpc/current_waypoint", 10);
         mpc_wps_pub_ = nh.advertise<visualization_msgs::Marker>("/mpc/waypoints", 10);
         risk_field_pub_ = nh.advertise<sensor_msgs::PointCloud2>("/mpc/risk_field", 1);
+        risk_halo_pub_ = nh.advertise<sensor_msgs::PointCloud2>("/mpc/risk_halo", 1);
+        mpc_best_traj_pub_ = nh.advertise<visualization_msgs::Marker>("/mpc/best_traj", 10);
     }
     // real experience callback waypoint or goal
     void PlannerManager::GoalCallback(const geometry_msgs::PoseStamped::ConstPtr &msg)
@@ -762,9 +758,6 @@ namespace cane_planner
         // 初始化计数器
         mpc_step_count_ = 0;
         mpc_stuck_steps_ = 0;
-        mpc_blocked_count_ = 0;
-        last_com_pos_ = com_init_pos.head(2);
-        mpc_max_steps_ = 50;
         mpc_reached_goal_ = false;
 
         // 更新odom初始位置
@@ -853,7 +846,6 @@ namespace cane_planner
         if (global_wp_idx_ != old_idx)
         {
             mpc_stuck_steps_ = 0;
-            mpc_step_count_ = 0;  // progressing → reset safeties
             ROS_INFO("[MPC] Reanchored wp_idx %zu -> %zu, target (%.2f, %.2f)",
                      old_idx, global_wp_idx_, target(0), target(1));
         }
@@ -899,128 +891,26 @@ namespace cane_planner
             mpc_stuck_steps_++;
         last_com_pos_ = current_com.head(2);
 
-        if (mpc_stuck_steps_ > STUCK_THRESHOLD && mpc_blocked_count_ == 0)
+        if (mpc_stuck_steps_ > STUCK_THRESHOLD)
         {
-            ROS_WARN("[MPC] Stuck for %d steps (static), triggering replan", STUCK_THRESHOLD);
+            ROS_WARN("[MPC] Stuck for %d steps, triggering replan", STUCK_THRESHOLD);
             mpc_reached_goal_ = false;
             return true;
-        }
-
-        // 检查最大步数（保底，仅非行人阻塞时生效）
-        if (mpc_step_count_ >= mpc_max_steps_ && mpc_blocked_count_ == 0)
-        {
-            mpc_reached_goal_ = false;
-            return true;
-        }
-
-        // 安全阈值 (与MPC rollout硬阈值相同)：risk > 此值视为危险
-        static double safe_risk = 0.0;
-        if (safe_risk == 0.0)
-        {
-            double A, ratio;
-            ros::param::param("mpc/risk_A", A, 10.0);
-            ros::param::param("mpc/risk_hard_threshold_ratio", ratio, 0.5);
-            safe_risk = A * ratio;
-        }
-
-        // 安全门：脚下 risk 超阈值 → 停
-        {
-            double cur_risk = 0.0;
-            for (size_t oi = 0; oi < obs_pos.size(); ++oi)
-            {
-                cur_risk += mpc_controller_->getRiskField().getIndividualCostFast(
-                    current_com(0), current_com(1),
-                    obs_pos[oi](0), obs_pos[oi](1),
-                    obs_vel[oi](0), obs_vel[oi](1));
-            }
-            if (cur_risk > safe_risk)
-            {
-                mpc_blocked_count_ = unblock_cooldown_;
-                mpc_controller_->resetWarmStart();
-                mpc_stuck_steps_ = 0;
-                ROS_WARN_THROTTLE(1.0,
-                    "[MPC] Risk zone — stopping (risk=%.1f > %.1f)", cur_risk, safe_risk);
-                publishFovRange();
-                publishCurrentWaypoint();
-                mpc_step_count_++;
-                return false;
-            }
         }
 
         // MPC规划一步
         Eigen::Vector3d control = mpc_controller_->plan(
             lfpc_model_, mpc_sim_goal_, obs_pos, obs_vel);
 
-        // 无路可走 → 进入阻塞
+        // 无路可走 → 停止本帧
         if (!mpc_controller_->lastPlanValid())
         {
-            mpc_blocked_count_ = unblock_cooldown_;
-            mpc_controller_->resetWarmStart();
-            // Static vs dynamic: if no pedestrians nearby, blockage is from walls
-            // → count toward stuck to trigger fast replan (3s), not wait for max_steps (5s)
             if (obs_pos.empty())
-                ROS_WARN_THROTTLE(1.0, "[MPC] Blocked — all trajectories hit static obstacles");
-            else
-                mpc_stuck_steps_ = 0;  // pedestrian-related: waiting is correct, reset stuck counter
-            publishFovRange();
-            publishCurrentWaypoint();
-            mpc_step_count_++;
-            return false;
-        }
-
-        // 机器人在迎面行人的狭窄侧：开阔侧被行人挡住，不应挤墙缝
-        if (mpc_controller_->onTightSide())
-        {
-            mpc_blocked_count_ = unblock_cooldown_;
-            mpc_controller_->resetWarmStart();
-            mpc_stuck_steps_ = 0;
-            ROS_WARN_THROTTLE(1.0,
-                "[MPC] Blocked — on tight side of oncoming pedestrian, waiting...");
-            publishFovRange();
-            publishCurrentWaypoint();
-            mpc_step_count_++;
-            return false;
-        }
-
-        // 在阻塞恢复期：检查当前位置风险是否已降到安全值以下
-        if (mpc_blocked_count_ > 0)
-        {
-            mpc_stuck_steps_ = 0;  // 行人相关等待，不计入静态 stuck
-            double cur_risk = 0.0;
-            for (size_t oi = 0; oi < obs_pos.size(); ++oi)
-            {
-                cur_risk += mpc_controller_->getRiskField().getIndividualCostFast(
-                    current_com(0), current_com(1),
-                    obs_pos[oi](0), obs_pos[oi](1),
-                    obs_vel[oi](0), obs_vel[oi](1));
-            }
-
-            // 行人附近解封门槛更严，避免刚解封又挤入
-            double gate = safe_risk;
-            for (const auto& op : obs_pos)
-            {
-                if ((op.head(2) - current_com.head(2)).norm() < ped_nearby_range_)
-                {
-                    gate = safe_risk * unblock_risk_ratio_;
-                    break;
-                }
-            }
-
-            if (cur_risk > gate)
-            {
-                mpc_blocked_count_ = unblock_cooldown_;
-                mpc_controller_->resetWarmStart();
-                ROS_WARN_THROTTLE(2.0, "[MPC] Still blocked — risk at position %.1f > %.1f",
-                                  cur_risk, gate);
-            }
+                ROS_WARN("[MPC] STOP reason=NO_VALID_PLAN type=static");
             else
             {
-                mpc_blocked_count_--;
-                if (mpc_blocked_count_ == 0)
-                {
-                    mpc_step_count_ = 0;  // reset on unblock so max_steps counts from resume
-                    ROS_INFO("[MPC] Unblocked — pedestrian cleared, resuming walking");
-                }
+                mpc_stuck_steps_ = 0;  // pedestrian-related: waiting is correct
+                ROS_WARN("[MPC] STOP reason=NO_VALID_PLAN type=dynamic obs=%zu", obs_pos.size());
             }
             publishFovRange();
             publishCurrentWaypoint();
@@ -1028,44 +918,31 @@ namespace cane_planner
             return false;
         }
 
-        // 窄通道+行人探测：MPC最优路径上 clearance 窄且 risk 高 → 等行人先过
-        if (mpc_controller_->lastPlanValid() && !obs_pos.empty() && collision_)
+        // 发布MPC最优预测轨迹
         {
             const auto& best_path = mpc_controller_->getBestPath();
             if (!best_path.empty())
             {
-                double min_clearance = 1e9, max_risk = 0.0;
-                double slice_h = collision_->getSliceHeight();
-                int stride = std::max(1, (int)best_path.size() / 8);
-                for (size_t i = 0; i < best_path.size(); i += stride)
+                visualization_msgs::Marker traj_mk;
+                traj_mk.header.frame_id = "world";
+                traj_mk.header.stamp = ros::Time::now();
+                traj_mk.ns = "mpc_best";
+                traj_mk.id = 0;
+                traj_mk.type = visualization_msgs::Marker::LINE_STRIP;
+                traj_mk.action = visualization_msgs::Marker::ADD;
+                traj_mk.pose.orientation.w = 1.0;
+                traj_mk.scale.x = 0.04;
+                traj_mk.color.a = 0.9;
+                traj_mk.color.r = 0.0;
+                traj_mk.color.g = 1.0;
+                traj_mk.color.b = 1.0;
+                for (const auto& pt : best_path)
                 {
-                    double px = best_path[i](0), py = best_path[i](1);
-                    Eigen::Vector3d pt(px, py, slice_h);
-                    double d = collision_->sdf_map_->getDistance(pt);
-                    if (d < min_clearance) min_clearance = d;
-
-                    double r = 0.0;
-                    for (size_t oi = 0; oi < obs_pos.size(); ++oi)
-                        r += mpc_controller_->getRiskField().getIndividualCostFast(
-                            px, py, obs_pos[oi](0), obs_pos[oi](1),
-                            obs_vel[oi](0), obs_vel[oi](1));
-                    if (r > max_risk) max_risk = r;
+                    geometry_msgs::Point p;
+                    p.x = pt(0); p.y = pt(1); p.z = 0.2;
+                    traj_mk.points.push_back(p);
                 }
-
-                // 物理窄(贴墙) + 行人risk高 → 通道被行人挤窄了
-                if (min_clearance < narrow_clearance_ && max_risk > safe_risk * narrow_risk_ratio_)
-                {
-                    mpc_blocked_count_ = unblock_cooldown_;
-                    mpc_controller_->resetWarmStart();
-                    mpc_stuck_steps_ = 0;
-                    ROS_WARN_THROTTLE(1.0,
-                        "[MPC] Narrow passage near pedestrian (clr=%.2fm, risk=%.1f), waiting...",
-                        min_clearance, max_risk);
-                    publishFovRange();
-                    publishCurrentWaypoint();
-                    mpc_step_count_++;
-                    return false;
-                }
+                mpc_best_traj_pub_.publish(traj_mk);
             }
         }
 
@@ -1210,48 +1087,69 @@ namespace cane_planner
     void PlannerManager::publishRiskField(const std::vector<Eigen::Vector3d>& obs_pos,
                                           const std::vector<Eigen::Vector3d>& obs_vel)
     {
-        if (obs_pos.empty() || !mpc_controller_) return;
+        if (!mpc_controller_ || obs_pos.empty()) return;
 
-        pcl::PointCloud<pcl::PointXYZI> cloud;
-        cloud.header.frame_id = "world";
-        cloud.header.stamp = pcl_conversions::toPCL(ros::Time::now());
+        // Hard threshold = A * ratio (points at or above this risk = INF in MPC)
+        double A, ratio;
+        nh_.param("mpc/risk_A", A, 5.0);
+        nh_.param("mpc/risk_hard_threshold_ratio", ratio, 0.25);
+        double hard_thresh = A * ratio;
+
+        pcl::PointCloud<pcl::PointXYZI> cloud_hard, cloud_halo;
+        cloud_hard.header.frame_id = "world";
+        cloud_hard.header.stamp = pcl_conversions::toPCL(ros::Time::now());
+        cloud_halo.header = cloud_hard.header;
 
         const auto& rf = mpc_controller_->getRiskField();
         double cx = odom_pos_(0);
         double cy = odom_pos_(1);
-        double range = mpc_fov_range_ + 2.0;  // tiny margin beyond FOV circle
+        double range = mpc_fov_range_ + 2.0;
         double res = 0.2;
 
         for (double x = cx - range; x <= cx + range; x += res)
         {
             for (double y = cy - range; y <= cy + range; y += res)
             {
-                // Skip points outside FOV circle for performance
                 double dx = x - cx;
                 double dy = y - cy;
                 if (dx*dx + dy*dy > range*range) continue;
 
-                double risk_sum = 0.0;
+                double risk_sum = 0.0, halo_sum = 0.0;
                 for (size_t oi = 0; oi < obs_pos.size(); ++oi)
                 {
                     risk_sum += rf.getIndividualCostFast(
                         x, y,
                         obs_pos[oi](0), obs_pos[oi](1),
                         obs_vel[oi](0), obs_vel[oi](1));
+                    halo_sum += rf.getHaloCostFast(
+                        x, y,
+                        obs_pos[oi](0), obs_pos[oi](1),
+                        obs_vel[oi](0), obs_vel[oi](1));
                 }
-                if (risk_sum < 0.05) continue;  // skip near-zero for cleaner view
 
-                pcl::PointXYZI pt;
-                pt.x = x;
-                pt.y = y;
-                pt.z = 0.1;
-                pt.intensity = std::min(risk_sum, 15.0);
-                cloud.points.push_back(pt);
+                // Hard zone: risk above hard threshold (red in Rviz)
+                if (risk_sum >= hard_thresh)
+                {
+                    pcl::PointXYZI pt;
+                    pt.x = x; pt.y = y; pt.z = 0.12;
+                    pt.intensity = std::min(risk_sum, 15.0);
+                    cloud_hard.points.push_back(pt);
+                }
+                // Halo zone: halo component only, for soft gradient visualization (green in Rviz)
+                if (halo_sum > 0.1)
+                {
+                    pcl::PointXYZI pt;
+                    pt.x = x; pt.y = y; pt.z = 0.08;
+                    pt.intensity = std::min(halo_sum, 10.0);
+                    cloud_halo.points.push_back(pt);
+                }
             }
         }
         sensor_msgs::PointCloud2 output;
-        pcl::toROSMsg(cloud, output);
+        pcl::toROSMsg(cloud_hard, output);
         risk_field_pub_.publish(output);
+        pcl::toROSMsg(cloud_halo, output);
+        risk_halo_pub_.publish(output);
     }
 
     void PlannerManager::displayMpcPlan()

@@ -30,7 +30,7 @@
         <param name="manager/global_wp_spacing" value="1.0" type="double"/>
         <param name="manager/global_wp_arrival_radius" value="0.5" type="double"/>
         <!-- 前向截断距离：从最近投影点向前看多少米选为当前目标 -->
-        <param name="manager/lookahead_dist" value="1.0" type="double"/>
+        <param name="manager/lookahead_dist" value="1.3" type="double"/>
         <param name="manager/max_vel" value="1.0" type="double"/>
         <param name="manager/max_acc" value="2.0" type="double"/>
         <param name="manager/max_jerk" value="4" type="double"/>
@@ -132,10 +132,10 @@
         <param name="lfpc/delta_t" value="0.07"/>
         <param name="lfpc/t_sup" value="0.35"/>
         <!-- mpc controller set -->
-        <param name="mpc/horizon_steps" value="8" type="int"/>
+        <param name="mpc/horizon_steps" value="10" type="int"/>
         <param name="mpc/num_samples" value="300" type="int"/>
         <!-- MPPI温度：越小越贪心(选最优)，越大越平滑(加权平均) -->
-        <param name="mpc/temperature" value="0.05" type="double"/>
+        <param name="mpc/temperature" value="0.4" type="double"/>
         <param name="mpc/mpc_iters" value="1" type="int"/>
         <param name="mpc/max_al" value="0.4" type="double"/>
         <param name="mpc/min_al" value="0.05" type="double"/>
@@ -143,53 +143,43 @@
         <param name="mpc/max_api" value="0.5236" type="double"/>
         <param name="mpc/sigma_al" value="0.10" type="double"/>
         <param name="mpc/sigma_aw" value="0.06" type="double"/>
-        <param name="mpc/sigma_api" value="0.25" type="double"/>
+        <param name="mpc/sigma_api" value="0.15" type="double"/>
         <!-- 代价权重。risk和goal已归一化，所有权重等效可比，改一个就有效果 -->
         <!-- 每步位移代价：惩罚绕路，保方向性 -->
         <param name="mpc/w_move" value="1.0" type="double"/>
         <!-- 转向幅度代价：惩罚|api|绝对值，越大越走直线 -->
         <param name="mpc/w_steer" value="0.5" type="double"/>
         <!-- risk已归一化：每点平均risk×权重，不再是累加值 -->
-        <param name="mpc/w_risk" value="3" type="double"/>
+        <param name="mpc/w_risk" value="1.5" type="double"/>
         <!-- goal已归一化：最终距离/horizon步数×权重 -->
-        <param name="mpc/w_goal" value="10.0" type="double"/>
-        <!-- 侧向偏好权重：对面来人时倾向空间大的一侧绕行 -->
-        <param name="mpc/w_bias" value="0.3" type="double"/>
+        <param name="mpc/w_goal" value="25.0" type="double"/>
         <!-- 转向变化率惩罚权重：越大越平滑，越小越灵活（0=不限制） -->
-        <param name="mpc/w_dapi" value="2.0" type="double"/>
+        <param name="mpc/w_dapi" value="1.0" type="double"/>
         <!-- hard threshold = risk_A × ratio. 越小越远离行人, 越大越敢靠近 -->
-        <param name="mpc/risk_hard_threshold_ratio" value="0.25" type="double"/>
+        <param name="mpc/risk_hard_threshold_ratio" value="0.4" type="double"/>
         <!-- 静态障碍物碰撞惩罚（单点），总量级=w_static×n×penalty，巨大→几乎硬约束 -->
         <param name="mpc/static_penalty" value="500.0" type="double"/>
         <param name="mpc/w_static" value="1.0" type="double"/>
         <!-- SDF排斥力权重、排斥生效距离(m)：距墙<margin时二次增长 -->
         <param name="mpc/w_prox" value="4.0" type="double"/>
-        <param name="mpc/prox_margin" value="0.5" type="double"/>
+        <param name="mpc/prox_margin" value="0.3" type="double"/>
         <param name="mpc/use_best" value="false" type="bool"/>
         <!-- 使用真实模式true，为false则步长和步宽不固定 -->
         <param name="mpc/fix_step_params" value="true" type="bool"/>
-        <param name="mpc/goal_arrival_threshold" value="0.3" type="double"/>
+        <param name="mpc/goal_arrival_threshold" value="0.2" type="double"/>
         <param name="mpc/fov_range" value="5.0" type="double"/>
         <param name="mpc/nominal_al" value="0.25" type="double"/>
         <param name="mpc/nominal_aw" value="0.0" type="double"/>
         <param name="mpc/nominal_api" value="0.0" type="double"/>
-        <param name="mpc/risk_tau" value="1.0" type="double"/>
+        <param name="mpc/risk_tau" value="0.5" type="double"/>
         <param name="mpc/risk_A" value="5.0" type="double"/>
-        <param name="mpc/risk_sigma_x" value="0.4" type="double"/>
-        <param name="mpc/risk_sigma_y" value="0.22" type="double"/>
+        <param name="mpc/risk_sigma_x" value="0.6" type="double"/>
+        <param name="mpc/risk_sigma_y" value="0.4" type="double"/>
         <param name="mpc/risk_cutoff" value="3.0" type="double"/>
-        <!-- mpc stop/recovery: 停等与恢复参数 -->
-        <!-- 窄通道：clearance<此值且risk>safe×ratio时判定为"缝太窄"，倾向等待 -->
-        <param name="mpc/stop/narrow_clearance" value="0.6" type="double"/>
-        <!-- 窄通道risk系数：risk > safe_risk×ratio 才算"行人在挤" -->
-        <param name="mpc/stop/narrow_risk_ratio" value="0.5" type="double"/>
-        <!-- 恢复期保守系数：行人附近时解封门槛=safe_risk×ratio，越小越严 -->
-        <param name="mpc/stop/unblock_risk_ratio" value="0.4" type="double"/>
-        <!-- 行人"附近"范围(米)：此范围内的行人触发保守解封门槛 -->
-        <param name="mpc/stop/ped_nearby_range" value="3.0" type="double"/>
-        <!-- 解封冷却帧数：连续多少帧risk安全才恢复行走，防闪烁 -->
-        <param name="mpc/stop/unblock_cooldown" value="10" type="int"/>
-        
+        <!-- 光晕：硬核心外的低幅包络。halo_scale=0关闭(纯高斯)，scale>0时包络宽度=core_sigma*scale，ratio=峰值/A -->
+        <param name="mpc/risk_halo_scale" value="2.0" type="double"/>
+        <param name="mpc/risk_halo_ratio" value="0.2" type="double"/>
+
         <!-- trajectory optimization 代价权重 -->
         <!-- lambda1: 平滑度, lambda2: 碰撞, lambda3: 可行性, lambda4: 拟合, lambda7: 动力学 -->
         <param name="optimization/lambda1" value="10.0" type="double"/>

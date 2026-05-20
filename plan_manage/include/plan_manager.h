@@ -61,6 +61,7 @@ namespace cane_planner
         NonUniformBspline::Ptr bspline_init_;
 
         FSM_STATE exec_state_;
+        ros::NodeHandle nh_;             // 节点私有句柄 (用于读param)
         bool have_odom_, have_target_;
         bool simulation_;                 // 里程计来源：true=仿真odom, false=真实TF
         int planner_;                     // 1=A*, 2=kinodynamic, 3=MPC
@@ -102,20 +103,12 @@ namespace cane_planner
         // MPC 步进状态
         enum MpcSimState { MPC_IDLE, MPC_ACTIVE, MPC_DONE };
         MpcSimState mpc_sim_state_;
-        int mpc_step_count_;
-        int mpc_max_steps_;
+        int mpc_step_count_;             // 总步数计数 (仅用于日志)
         int mpc_stuck_steps_;            // waypoint 未推进的连续步数
-        int mpc_blocked_count_;          // 阻塞迟滞计数 (防闪烁)
         Eigen::Vector2d last_com_pos_;   // 上一帧CoM位置，用于检测是否实际移动
         static constexpr int STUCK_THRESHOLD = 30;
-        int unblock_cooldown_;           // 解封冷却帧数
         bool mpc_reached_goal_;
 
-        // 停等/恢复参数 (从launch读取)
-        double narrow_clearance_;        // 窄通道判定: clearance低于此值算"窄"
-        double narrow_risk_ratio_;       // 窄通道判定: risk > safe×ratio 算"有人在挤"
-        double unblock_risk_ratio_;      // 恢复期门槛: 行人附近时 safe×ratio
-        double ped_nearby_range_;        // 行人"附近"的距离范围
         Eigen::Vector3d mpc_sim_goal_;
 
         /*---------- Ros utils -----------*/
@@ -129,7 +122,9 @@ namespace cane_planner
         ros::Publisher traj_pub_;
         ros::Publisher mpc_vis_pub_, mpc_foot_pub_, mpc_path_pub_;
         ros::Publisher mpc_fov_pub_, mpc_wp_pub_, mpc_wps_pub_;
-        ros::Publisher risk_field_pub_;   // sensor_msgs::PointCloud2
+        ros::Publisher mpc_best_traj_pub_; // MPC predicted optimal CoM path (LINE_STRIP)
+        ros::Publisher risk_field_pub_;   // sensor_msgs::PointCloud2 (risk > hard_threshold)
+        ros::Publisher risk_halo_pub_;    // sensor_msgs::PointCloud2 (halo component only)
         ros::Publisher sim_odom_pub_;
         tf::TransformListener tf_listener_;
 

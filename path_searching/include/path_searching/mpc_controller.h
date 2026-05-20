@@ -43,7 +43,6 @@ public:
         double w_steer = 0.5;
         double w_risk = 2.0;
         double w_goal = 10.0;
-        double w_bias = 0.3;     // lateral bias for oncoming pedestrian (breaks symmetry)
         double w_dapi = 0.0;    // steering rate penalty: |api[n] - api[n-1]|
 
         // Hard constraint: risk > threshold → INF cost (dynamic obstacles only)
@@ -106,10 +105,6 @@ public:
 
     bool lastPlanValid() const { return last_plan_valid_; }
 
-    // True when robot is on the tight (non-preferred) side of an oncoming pedestrian.
-    // The planner manager should stop and wait rather than squeeze through.
-    bool onTightSide() const { return oncoming_tight_side_; }
-
     typedef shared_ptr<MpcController> Ptr;
 
 private:
@@ -135,7 +130,6 @@ private:
     // Timing
     double last_plan_time_ms_;
     bool last_plan_valid_ = true;
-    bool oncoming_tight_side_ = false;
 
     // Internal methods
     Eigen::MatrixXd makeNominalSequence(int N);

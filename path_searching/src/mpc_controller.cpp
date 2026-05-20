@@ -40,7 +40,6 @@ void MpcController::setParam(ros::NodeHandle &nh)
     nh.param("mpc/w_steer", cfg_.w_steer, 0.5);
     nh.param("mpc/w_risk", cfg_.w_risk, 2.0);
     nh.param("mpc/w_goal", cfg_.w_goal, 10.0);
-    nh.param("mpc/w_bias", cfg_.w_bias, 0.3);
     nh.param("mpc/w_dapi", cfg_.w_dapi, 0.0);
 
     nh.param("mpc/static_penalty", cfg_.static_penalty, 500.0);
@@ -63,6 +62,8 @@ void MpcController::setParam(ros::NodeHandle &nh)
     nh.param("mpc/risk_sigma_x", rf_cfg.sigma_x, 0.4);
     nh.param("mpc/risk_sigma_y", rf_cfg.sigma_y, 0.22);
     nh.param("mpc/risk_cutoff", rf_cfg.cutoff_dist, 3.0);
+    nh.param("mpc/risk_halo_scale", rf_cfg.halo_scale, 0.0);
+    nh.param("mpc/risk_halo_ratio", rf_cfg.halo_ratio, 0.25);
     risk_field_.setConfig(rf_cfg);
 
     // Hard threshold = peak × ratio, auto-scales with risk_A
@@ -312,68 +313,6 @@ void MpcController::rolloutBatch(
     bool limit_fov = (cfg_.fov_range > 0.0);
     double fov_sq = cfg_.fov_range * cfg_.fov_range;
 
-    // Oncoming pedestrian: scan from pedestrian's position which side has more space
-    // Rationale: the pedestrian is closer to the interaction point, so obstacles
-    // near them determine which passing side is actually feasible.
-    bool has_oncoming = false;
-    double preferred_sign = 0.0;  // +1=robot-left side open, -1=robot-right side open
-    double base_theta = lfpc_base->getNextIterState()(2);
-    Eigen::Vector2d oncoming_ped_pos(0, 0);
-    oncoming_tight_side_ = false;
-    if (n_obs > 0)
-    {
-        Eigen::Vector2d robot_vel = lfpc_base->getNextIterState().head(2);
-        double closest_oncoming_dist = std::numeric_limits<double>::max();
-        for (int oi = 0; oi < n_obs; ++oi)
-        {
-            double dot = obs_vel[oi](0) * robot_vel(0) + obs_vel[oi](1) * robot_vel(1);
-            if (dot >= 0) continue;
-            Eigen::Vector2d d = obs_pos[oi].head(2) - Eigen::Vector2d(base_x, base_y);
-            double dist = d.norm();
-            if (dist < cfg_.fov_range * 1.6 && dist < closest_oncoming_dist)
-            {
-                has_oncoming = true;
-                closest_oncoming_dist = dist;
-                oncoming_ped_pos = obs_pos[oi].head(2);
-            }
-        }
-
-        if (has_oncoming && collision_)
-        {
-            // Scan from pedestrian's position, using robot's heading for left/right
-            Eigen::Vector2d lateral_dir(-sin(base_theta), cos(base_theta));
-            double left_sum = 0, right_sum = 0;
-            for (int i = 1; i <= 5; ++i)
-            {
-                double off = i * 0.6;
-                Eigen::Vector3d lp(oncoming_ped_pos(0) + off * lateral_dir(0),
-                                   oncoming_ped_pos(1) + off * lateral_dir(1), slice_h);
-                Eigen::Vector3d rp(oncoming_ped_pos(0) - off * lateral_dir(0),
-                                   oncoming_ped_pos(1) - off * lateral_dir(1), slice_h);
-                left_sum  += collision_->sdf_map_->getDistance(lp);
-                right_sum += collision_->sdf_map_->getDistance(rp);
-            }
-            if (left_sum > right_sum + 0.5)       preferred_sign = +1.0;
-            else if (right_sum > left_sum + 0.5)  preferred_sign = -1.0;
-            // else: roughly equal, no preference
-
-            // Tight-side detection: if robot is on the non-preferred side of the
-            // pedestrian, the open path is blocked by the pedestrian themselves.
-            // E.g. ped's right is open but robot is left of ped → can't reach it.
-            // Suppress bias and signal stop so we wait rather than squeeze through.
-            if (preferred_sign != 0.0)
-            {
-                double robot_lateral_from_ped = (base_x - oncoming_ped_pos(0)) * lateral_dir(0)
-                                              + (base_y - oncoming_ped_pos(1)) * lateral_dir(1);
-                if (preferred_sign * robot_lateral_from_ped < 0.0)
-                {
-                    oncoming_tight_side_ = true;
-                    preferred_sign = 0.0;
-                }
-            }
-        }
-    }
-
     for (int k = 0; k < K; ++k)
     {
         LFPC::Ptr lfpc = lfpc_pool_[k];
@@ -502,13 +441,6 @@ void MpcController::rolloutBatch(
             }
 
             total_cost += move_cost + steer_cost + dapi_cost + risk_cost + prox_cost;
-
-            // Lateral bias: prefer side with more space when oncoming pedestrian
-            if (has_oncoming && preferred_sign != 0.0)
-            {
-                double lateral = cos(base_theta) * dy - sin(base_theta) * dx;
-                total_cost += -cfg_.w_bias * preferred_sign * lateral;
-            }
 
             prev_com_x = fx;
             prev_com_y = fy;
