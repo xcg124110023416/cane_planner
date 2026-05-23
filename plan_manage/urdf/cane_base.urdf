@@ -1,0 +1,299 @@
+<?xml version="1.0"?>
+<robot name="smart_cane" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ==================== Links ==================== -->
+
+  <!-- Base footprint: root link driven by planar_move. -->
+  <link name="base_footprint">
+    <inertial>
+      <mass value="0.001"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0"/>
+      <geometry><box size="0.01 0.01 0.01"/></geometry>
+      <material name="transparent"><color rgba="0 0 0 0"/></material>
+    </visual>
+  </link>
+
+  <!-- Base body: compact electronics/motor module near the ground. -->
+  <link name="base_link">
+    <inertial>
+      <mass value="50.0"/>
+      <origin xyz="0 0 0.001"/>
+      <inertia ixx="0.5" ixy="0" ixz="0" iyy="0.5" iyz="0" izz="0.5"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.075"/>
+      <geometry><box size="0.30 0.25 0.15"/></geometry>
+      <material name="dark_grey"><color rgba="0.3 0.3 0.35 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.075"/>
+      <geometry><box size="0.30 0.25 0.15"/></geometry>
+    </collision>
+  </link>
+
+  <!-- Visual steerable omni wheel at the contact end. This joint does not carry
+       the body pose; base_footprint does. -->
+  <link name="steering_wheel">
+    <inertial>
+      <mass value="0.4"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry><cylinder radius="0.06" length="0.035"/></geometry>
+      <material name="wheel_black"><color rgba="0.02 0.02 0.025 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry><cylinder radius="0.06" length="0.035"/></geometry>
+    </collision>
+  </link>
+
+  <!-- IMU sensor -->
+  <link name="imu_link">
+    <inertial>
+      <mass value="0.01"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/>
+    </inertial>
+  </link>
+
+  <!-- Cane pole: vertical shaft, restored to the earlier high-LiDAR mapping setup. -->
+  <link name="cane_pole">
+    <inertial>
+      <mass value="0.01"/>
+      <origin xyz="0 0 0.79"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.0001"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.79"/>
+      <geometry><cylinder radius="0.02" length="1.58"/></geometry>
+      <material name="white"><color rgba="0.9 0.9 0.9 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.79"/>
+      <geometry><cylinder radius="0.02" length="1.58"/></geometry>
+    </collision>
+  </link>
+
+  <!-- Handle: top grip -->
+  <link name="handle">
+    <inertial>
+      <mass value="0.001"/>
+      <origin xyz="0 0 0.02"/>
+      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0"/>
+      <geometry><cylinder radius="0.04" length="0.04"/></geometry>
+      <material name="handle_color"><color rgba="0.2 0.2 0.25 1"/></material>
+    </visual>
+  </link>
+
+  <!-- Velodyne VLP-16 LiDAR -->
+  <link name="velodyne">
+    <inertial>
+      <mass value="0.01"/>
+      <origin xyz="0 0 0.04"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.04"/>
+      <geometry><cylinder radius="0.05" length="0.08"/></geometry>
+      <material name="lidar_color"><color rgba="0.1 0.1 0.15 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.04"/>
+      <geometry><cylinder radius="0.05" length="0.08"/></geometry>
+    </collision>
+  </link>
+
+  <!-- ==================== Joints ==================== -->
+
+  <!-- Steering joint: base_footprint → base_link, z-axis rotation at wheel-ground contact -->
+  <joint name="base_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Visual steering joint for the bottom omni wheel. The global cane pose is
+       driven by planar_move, so sensors rotate with base_footprint/base_link. -->
+  <joint name="steering_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="steering_wheel"/>
+    <origin xyz="0.11 0 0.03" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="20" velocity="6" lower="-1.2" upper="1.2"/>
+    <dynamics damping="0.2" friction="0.02"/>
+  </joint>
+
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="0 0 0.08"/>
+  </joint>
+
+  <joint name="pole_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="cane_pole"/>
+    <origin xyz="0 0 0.15"/>
+  </joint>
+
+  <joint name="handle_joint" type="fixed">
+    <parent link="cane_pole"/>
+    <child link="handle"/>
+    <origin xyz="0 0 1.55"/>
+  </joint>
+
+  <joint name="velodyne_joint" type="fixed">
+    <parent link="handle"/>
+    <child link="velodyne"/>
+    <origin xyz="0 0 0.05"/>
+  </joint>
+
+  <!-- ==================== Transmission (ros_control) ==================== -->
+  <transmission name="steering_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="steering_joint">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="steering_motor">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <!-- ==================== Gazebo plugins ==================== -->
+
+  <!-- The real cane is supported by the user's hand. In Gazebo we model that
+       support by disabling gravity on the articulated cane while planar_move
+       supplies the planar push/yaw motion used by LiDAR and IMU simulation. -->
+  <gazebo reference="base_footprint">
+    <gravity>false</gravity>
+    <selfCollide>false</selfCollide>
+  </gazebo>
+
+  <gazebo reference="base_link">
+    <gravity>false</gravity>
+    <selfCollide>false</selfCollide>
+    <mu1>0.0</mu1>
+    <mu2>0.0</mu2>
+  </gazebo>
+
+  <gazebo reference="steering_wheel">
+    <gravity>false</gravity>
+    <selfCollide>false</selfCollide>
+    <mu1>0.0</mu1>
+    <mu2>0.0</mu2>
+  </gazebo>
+
+  <gazebo reference="cane_pole">
+    <gravity>false</gravity>
+    <selfCollide>false</selfCollide>
+  </gazebo>
+
+  <gazebo reference="handle">
+    <gravity>false</gravity>
+    <selfCollide>false</selfCollide>
+  </gazebo>
+
+  <gazebo reference="velodyne">
+    <gravity>false</gravity>
+    <selfCollide>false</selfCollide>
+  </gazebo>
+
+  <gazebo reference="imu_link">
+    <gravity>false</gravity>
+    <selfCollide>false</selfCollide>
+  </gazebo>
+
+  <!-- Gazebo: 3D LiDAR (16-line rotating laser, VLP-16 style) -->
+  <gazebo reference="velodyne">
+    <sensor type="ray" name="velodyne_sensor">
+      <pose>0 0 0 0 0 0</pose>
+      <update_rate>15</update_rate>
+      <ray>
+        <scan>
+          <horizontal>
+            <samples>720</samples>
+            <resolution>1</resolution>
+            <min_angle>-3.14159</min_angle>
+            <max_angle>3.14159</max_angle>
+          </horizontal>
+          <vertical>
+            <samples>16</samples>
+            <resolution>1</resolution>
+            <min_angle>-0.3491</min_angle>
+            <max_angle>0.2618</max_angle>
+          </vertical>
+        </scan>
+        <range>
+          <min>0.4</min>
+          <max>12.0</max>
+          <resolution>0.05</resolution>
+        </range>
+        <noise>
+          <type>gaussian</type>
+          <mean>0.0</mean>
+          <stddev>0.02</stddev>
+        </noise>
+      </ray>
+      <plugin name="velodyne_laser" filename="libgazebo_ros_velodyne_laser.so">
+        <topicName>/velodyne_points</topicName>
+        <frameName>velodyne</frameName>
+        <min_range>0.9</min_range>
+        <max_range>12.0</max_range>
+        <gaussianNoise>0.008</gaussianNoise>
+      </plugin>
+    </sensor>
+  </gazebo>
+
+  <!-- Gazebo native IMU is kept on a debug topic. FAST-LIO uses the synthetic
+       /imu generated from the model state so rotation matches planar_move. -->
+  <gazebo reference="imu_link">
+    <sensor name="imu_sensor" type="imu">
+      <always_on>true</always_on>
+      <update_rate>100</update_rate>
+      <visualize>true</visualize>
+      <topic>__default_topic__</topic>
+      <plugin filename="libgazebo_ros_imu_sensor.so" name="imu_plugin">
+        <topicName>/gazebo/imu_raw</topicName>
+        <bodyName>imu_link</bodyName>
+        <updateRateHZ>100.0</updateRateHZ>
+        <gaussianNoise>0.005</gaussianNoise>
+        <xyzOffset>0 0 0</xyzOffset>
+        <rpyOffset>0 0 0</rpyOffset>
+        <frameName>imu_link</frameName>
+        <initialOrientationAsReference>false</initialOrientationAsReference>
+      </plugin>
+      <pose>0 0 0 0 0 0</pose>
+    </sensor>
+  </gazebo>
+
+  <!-- Planar move: virtual human push. linear.x is forward speed and angular.z
+       is left/right steering yaw rate; no lateral drive is commanded. -->
+  <gazebo>
+    <plugin name="omni_steering" filename="libgazebo_ros_planar_move.so">
+      <commandTopic>cmd_vel_footprint</commandTopic>
+      <odometryTopic>odom</odometryTopic>
+      <odometryFrame>odom</odometryFrame>
+      <odometryRate>100.0</odometryRate>
+      <robotBaseFrame>base_footprint</robotBaseFrame>
+      <cmdTimeout>0.25</cmdTimeout>
+    </plugin>
+  </gazebo>
+
+  <!-- ros_control plugin: bridges joint position commands to Gazebo -->
+  <gazebo>
+    <plugin name="gazebo_ros_control" filename="libgazebo_ros_control.so">
+      <robotNamespace>/</robotNamespace>
+    </plugin>
+  </gazebo>
+
+</robot>

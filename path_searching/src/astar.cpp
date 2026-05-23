@@ -16,6 +16,21 @@ namespace cane_planner
 
   bool Astar::search(Eigen::Vector2d start_pt, Eigen::Vector2d end_pt, bool dynamic, double time_start)
   {
+    const bool use_static = use_static_global_map_ && collision_->hasStaticGlobalMap();
+    if (use_static)
+    {
+      bool start_free = collision_->isStaticTraversable(start_pt(0), start_pt(1));
+      bool end_free = collision_->isStaticTraversable(end_pt(0), end_pt(1));
+      const int start_near_free = collision_->countStaticTraversableAround(start_pt, 0.5);
+      const int end_near_free = collision_->countStaticTraversableAround(end_pt, 0.5);
+      ROS_WARN_THROTTLE(1.0,
+                        "[Astar static] start=(%.2f, %.2f) free=%d near_free=%d dist=%.2f, goal=(%.2f, %.2f) free=%d near_free=%d dist=%.2f",
+                        start_pt(0), start_pt(1), start_free, start_near_free,
+                        collision_->getStaticCollisionDistance(start_pt),
+                        end_pt(0), end_pt(1), end_free, end_near_free,
+                        collision_->getStaticCollisionDistance(end_pt));
+    }
+
     /* ---------- initialize ---------- */
     NodePtr cur_node = path_node_pool_[0];
     cur_node->parent = NULL;
@@ -146,7 +161,16 @@ namespace cane_planner
           Eigen::Vector3d pro_pos_3d;
           pro_pos_3d << pro_pos(0), pro_pos(1), collision_->getSliceHeight(); // 设置路径高度
           /* collision free */
-          if (!collision_->isTraversable(pro_pos(0), pro_pos(1)))
+          bool traversable = use_static ?
+              collision_->isStaticTraversable(pro_pos(0), pro_pos(1)) :
+              collision_->isTraversable(pro_pos(0), pro_pos(1));
+          if (use_static && !traversable)
+          {
+            const bool near_start = (pro_pos - start_pt).norm() <= static_endpoint_clear_radius_;
+            const bool near_goal = (pro_pos - end_pt).norm() <= static_endpoint_clear_radius_;
+            traversable = near_start || near_goal;
+          }
+          if (!traversable)
           // if (!collision_->isTraversable(pro_pos_3d))
           {
             // cout << "Can't Traversable" << endl;
@@ -160,7 +184,9 @@ namespace cane_planner
           // SDF 接近惩罚：仅当距墙小于缓冲区时生效，距离越近代价二次增长
           if (w_clearance_ > 1e-6)
           {
-            double sdf_dist = collision_->getCollisionDistance(pro_pos);
+            double sdf_dist = use_static ?
+                collision_->getStaticCollisionDistance(pro_pos) :
+                collision_->getCollisionDistance(pro_pos);
             if (sdf_dist < clearance_sigma_)
             {
               double t = 1.0 - sdf_dist / clearance_sigma_;
@@ -243,6 +269,8 @@ namespace cane_planner
     nh.param("astar/w_clearance", w_clearance_, 0.0);
     // 安全距离尺度（m），小于此值代价显著上升
     nh.param("astar/clearance_sigma", clearance_sigma_, 0.5);
+    nh.param("astar/use_static_global_map", use_static_global_map_, false);
+    nh.param("astar/static_endpoint_clear_radius", static_endpoint_clear_radius_, 0.25);
     // tie_breaker 见路径规划课程
     tie_breaker_ = 1.0 + 1.0 / 10000;
   }

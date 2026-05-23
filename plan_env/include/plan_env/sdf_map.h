@@ -117,6 +117,8 @@ struct MapParam {
   double prob_hit_log_, prob_miss_log_, clamp_min_log_, clamp_max_log_, min_occupancy_log_;  // logit
   double max_ray_length_;
   double max_build_length_;
+  double input_min_height_;
+  double input_max_height_;
   double local_bound_inflate_;
   
   int local_map_margin_;

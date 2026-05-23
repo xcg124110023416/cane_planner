@@ -641,21 +641,21 @@ void MapROS::cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img) {
       for (int y = min_cut(1); y <= max_cut(1); ++y)
         for (int z = map_->mp_->box_min_(2); z < map_->mp_->box_max_(2); ++z)
         {
-          // if (map_->md_->occupancy_buffer_[map_->toAddress(x, y, z)] > map_->mp_->min_occupancy_log_)//该点occupancy_buffer_大于可能是障碍物的阈值
-          // {
-          //   // Occupied cells
-          //   Eigen::Vector3d pos;
-          //   map_->indexToPos(Eigen::Vector3i(x, y, z), pos);
-          //   if (pos(2) > visualization_truncate_height_)
-          //     continue;
-          //   if (pos(2) < visualization_truncate_low_)
-          //     continue;
+          if (map_->md_->occupancy_buffer_[map_->toAddress(x, y, z)] > map_->mp_->min_occupancy_log_)//该点occupancy_buffer_大于可能是障碍物的阈值
+          {
+            // Occupied cells
+            Eigen::Vector3d pos;
+            map_->indexToPos(Eigen::Vector3i(x, y, z), pos);
+            if (pos(2) > visualization_truncate_height_)
+              continue;
+            if (pos(2) < visualization_truncate_low_)
+              continue;
 
-          //   pt.x = pos(0);
-          //   pt.y = pos(1);
-          //   pt.z = pos(2);
-          //   cloud.push_back(pt);
-          // }
+            pt.x = pos(0);
+            pt.y = pos(1);
+            pt.z = pos(2);
+            cloud.push_back(pt);
+          }
           if (map_->md_->occupancy_buffer_inflate_[map_->toAddress(x, y, z)] == 1)//或者该体素本身被视为膨胀单位
           {
             // Inflated occupied cells
@@ -683,9 +683,9 @@ void MapROS::cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img) {
     cloud2.header.frame_id = frame_id_;
     sensor_msgs::PointCloud2 cloud_msg;
 
-    pcl::toROSMsg(cloud2, cloud_msg);
+    pcl::toROSMsg(cloud, cloud_msg);
     map_local_pub_.publish(cloud_msg);
-    // pcl::toROSMsg(cloud2, cloud_msg);
+    pcl::toROSMsg(cloud2, cloud_msg);
     map_local_inflate_pub_.publish(cloud_msg);
   }
 

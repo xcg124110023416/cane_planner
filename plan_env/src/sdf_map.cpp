@@ -51,6 +51,8 @@ void SDFMap::initMap(ros::NodeHandle& nh) {
   nh.param("sdf_map/p_occ", mp_->p_occ_, 0.80);
   nh.param("sdf_map/max_ray_length", mp_->max_ray_length_, -0.1);
   nh.param("sdf_map/max_build_length", mp_->max_build_length_, -0.1);
+  nh.param("sdf_map/input_min_height", mp_->input_min_height_, -0.5);
+  nh.param("sdf_map/input_max_height", mp_->input_max_height_, 2.6);
   nh.param("sdf_map/virtual_ceil_height", mp_->virtual_ceil_height_, -0.1);
 
   auto logit = [](const double& x) { return log(x / (1 - x)); };
@@ -63,6 +65,8 @@ void SDFMap::initMap(ros::NodeHandle& nh) {
   cout << "hit: " << mp_->prob_hit_log_ << ", miss: " << mp_->prob_miss_log_
        << ", min: " << mp_->clamp_min_log_ << ", max: " << mp_->clamp_max_log_
        << ", thresh: " << mp_->min_occupancy_log_ << endl;
+  ROS_WARN("[SDFMap] Local cloud height filter: z=[%.2f, %.2f] m",
+           mp_->input_min_height_, mp_->input_max_height_);
   //hit: 0.619039, miss: -0.281851, min: -2.19722, max: 2.19722, thresh: 1.38629
 
   // Initialize data buffer of map
@@ -391,6 +395,7 @@ void SDFMap::inputPointCloud(
     auto& pt = points.points[i];
     pt_w << pt.x, pt.y, pt.z;
     if (std::isnan(pt_w(0)) || std::isnan(pt_w(1)) || std::isnan(pt_w(2))) continue;
+    if (pt_w[2] < mp_->input_min_height_ || pt_w[2] > mp_->input_max_height_) continue;
     point_adjusted = false;
 
     // Set flag for projected point
@@ -405,7 +410,7 @@ void SDFMap::inputPointCloud(
         point_adjusted = true;
     }
     
-    if (pt_w[2] < -0.5) continue;
+    if (pt_w[2] < mp_->input_min_height_ || pt_w[2] > mp_->input_max_height_) continue;
 
     for (int k = 0; k < 3; ++k) {
       update_min[k] = min(update_min[k], pt_w[k]);

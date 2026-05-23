@@ -1,0 +1,10 @@
+# Joint state publisher (required: publishes /joint_states for controller feedback)
+joint_state_controller:
+  type: "joint_state_controller/JointStateController"
+  publish_rate: 50
+
+# Position controller via effort interface (Gazebo DefaultRobotHWSim only supports EffortJointInterface)
+steering_joint_position_controller:
+  type: "effort_controllers/JointPositionController"
+  joint: "steering_joint"
+  pid: {p: 100.0, i: 0.1, d: 10.0, i_clamp: 1.0}

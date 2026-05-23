@@ -7,13 +7,16 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
 
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
+find_package(OpenCV REQUIRED)
 
 find_package(catkin REQUIRED COMPONENTS
 	roscpp
 	std_msgs
+  sensor_msgs
   tf
   onboard_detector
   geometry_msgs
+  gazebo_msgs
   plan_env
   path_searching
   bspline
@@ -29,6 +32,10 @@ catkin_package(
 
 )
 
+catkin_add_env_hooks(99.disable_ros1_eol_warnings
+  SHELLS bash
+  DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/env-hooks)
+
 ###########
 ## Build ##
 ###########
@@ -43,6 +50,7 @@ include_directories(
   ${PROJECT_SOURCE_DIR}/include
   ${EIGEN3_INCLUDE_DIR}
   ${PCL_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
 )
 
 # replan FSM
@@ -59,7 +67,17 @@ target_link_libraries(kin_replan_node
 # sim: removed — use kin_replan_node for both simulation and real
 
 # Python scripts
+install(DIRECTORY launch urdf worlds scripts
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+  PATTERN "*.py" EXCLUDE)
+
 catkin_install_python(PROGRAMS
   scripts/pedestrian_sim.py
+  scripts/cmd_vel_to_state.py
+  scripts/imu_from_state.py
+  scripts/steering_bridge.py
+  scripts/load_steering_controllers.py
+  scripts/registered_map_accumulator.py
+  scripts/model_pose_guard.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

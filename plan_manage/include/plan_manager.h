@@ -65,6 +65,7 @@ namespace cane_planner
         bool have_odom_, have_target_;
         bool simulation_;                 // 里程计来源：true=仿真odom, false=真实TF
         int planner_;                     // 1=A*, 2=kinodynamic, 3=MPC
+        bool gazebo_sim_;                 // true=Gazebo mode (publish cmd_vel)
         double no_replan_thresh_, replan_thresh_;
 
         Eigen::Vector3d odom_pos_, odom_vel_;
@@ -91,7 +92,7 @@ namespace cane_planner
         std::vector<Eigen::Vector2d> global_waypoints_;
         size_t global_wp_idx_;
         double global_wp_spacing_ = 1.0;
-        double global_wp_arrival_radius_ = 0.5;
+        double global_wp_arrival_radius_ = 0.1;
         double lookahead_dist_ = 1.0;
         double mpc_fov_range_ = 5.0;
 
@@ -106,6 +107,7 @@ namespace cane_planner
         int mpc_step_count_;             // 总步数计数 (仅用于日志)
         int mpc_stuck_steps_;            // waypoint 未推进的连续步数
         Eigen::Vector2d last_com_pos_;   // 上一帧CoM位置，用于检测是否实际移动
+        double last_theta_;              // 上一帧航向角，用于计算cmd_vel角速度
         static constexpr int STUCK_THRESHOLD = 30;
         bool mpc_reached_goal_;
 
@@ -125,6 +127,8 @@ namespace cane_planner
         ros::Publisher mpc_best_traj_pub_; // MPC predicted optimal CoM path (LINE_STRIP)
         ros::Publisher risk_field_pub_;   // sensor_msgs::PointCloud2 (risk > hard_threshold)
         ros::Publisher risk_halo_pub_;    // sensor_msgs::PointCloud2 (halo component only)
+        ros::Publisher cmd_vel_pub_;      // geometry_msgs::Twist for Gazebo
+        ros::Publisher steer_pub_;        // std_msgs::Float64 steering joint angle
         ros::Publisher sim_odom_pub_;
         tf::TransformListener tf_listener_;
 

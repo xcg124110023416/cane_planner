@@ -4,7 +4,7 @@
       <arg name="map_size_y" value="20.0"/>
       <arg name="map_size_z" value=" 5.0"/>
 
-      <node pkg="tf" type="static_transform_publisher" name="tf_pub" args="0 0 0 0 0 0 1 world body 20" />
+      <node pkg="tf" type="static_transform_publisher" name="tf_pub" args="0 0 0 0 0 0 1 map body 20" />
 
       <node name="simulation_generator" pkg="map_generator" type="simulation_generator" output="screen" args=" $(find map_generator)/resource/office2_modify.pcd">
             <remap from="/cmd_vel" to="teleop/cmd_vel"/>

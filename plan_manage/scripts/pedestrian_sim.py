@@ -113,7 +113,7 @@ class PedestrianSim:
     def publish_obstacles(self):
         msg = DynamicObstacles()
         msg.header.stamp = rospy.Time.now()
-        msg.header.frame_id = "world"
+        msg.header.frame_id = "map"
         # Only publish active pedestrians (in trigger mode: not yet walked full period)
         active = [p for p in self.pedestrians
                   if p.mode != "trigger" or p.active]
@@ -127,7 +127,7 @@ class PedestrianSim:
     def publish_viz(self):
         arr = MarkerArray()
         del_mk = Marker()
-        del_mk.header.frame_id = "world"
+        del_mk.header.frame_id = "map"
         del_mk.header.stamp = rospy.Time.now()
         del_mk.action = Marker.DELETEALL
         arr.markers.append(del_mk)
@@ -139,7 +139,7 @@ class PedestrianSim:
 
             # Bounding box
             mk = Marker()
-            mk.header.frame_id = "world"
+            mk.header.frame_id = "map"
             mk.header.stamp = rospy.Time.now()
             mk.ns = "ped_{}".format(p.pid)
             mk.id = 0
@@ -165,7 +165,7 @@ class PedestrianSim:
 
             # Velocity arrow
             mk2 = Marker()
-            mk2.header.frame_id = "world"
+            mk2.header.frame_id = "map"
             mk2.header.stamp = rospy.Time.now()
             mk2.ns = "ped_{}_vel".format(p.pid)
             mk2.id = 0

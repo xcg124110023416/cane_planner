@@ -1,0 +1,187 @@
+<launch>
+    <env name="DISABLE_ROS1_EOL_WARNINGS" value="1"/>
+    <env name="GAZEBO_PLUGIN_PATH" value="$(find plan_manage)/../../../../devel/lib:$(find plan_manage)/plugins:$(optenv GAZEBO_PLUGIN_PATH)"/>
+    <env name="GAZEBO_MODEL_PATH" value="$(find plan_manage)/models"/>
+    <arg name="planner" default="3"/>
+    <arg name="world_file" default="$(find plan_manage)/worlds/corridor_static_9.world"/>
+    <arg name="dynamic_world_file" default="$(find plan_manage)/worlds/corridor_dynamic_9.world"/>
+    <arg name="use_world_pedestrians" default="false"/>
+    <arg name="urdf_file" default="$(find plan_manage)/urdf/cane_base.urdf"/>
+    <arg name="use_pedestrians" default="false"/>
+    <arg name="use_planner" default="true"/>
+    <arg name="start_teleop" default="true"/>
+    <arg name="gyro_z_sign" default="1.0"/>
+    <arg name="rviz" default="true"/>
+    <arg name="gui" default="true"/>
+    <arg name="start_laser_map_accumulator" default="true"/>
+    <arg name="keep_upright" default="true"/>
+    <arg name="slice_height" default="0.2"/>
+    <arg name="planner_odom_topic" default="/Odometry"/>
+    <arg name="planner_cloud_topic" default="/cloud_registered"/>
+    <arg name="input_min_height" default="0.45"/>
+    <arg name="input_max_height" default="2.0"/>
+    <arg name="use_static_global_map" default="false"/>
+    <arg name="use_static_global_esdf" default="false"/>
+    <arg name="static_map_pcd" default="$(find fast_lio_sam_qn)/corridor_dynamic_175.pcd"/>
+    <arg name="static_map_min_height" default="0.60"/>
+    <arg name="static_map_max_height" default="2.0"/>
+    <arg name="static_map_inflation" default="0.08"/>
+    <arg name="static_map_min_points_per_cell" default="3"/>
+    <arg name="static_map_min_component_cells" default="6"/>
+    <arg name="static_require_known_region" default="true"/>
+    <arg name="static_known_use_enclosed_region" default="true"/>
+    <arg name="static_known_min_height" default="-0.25"/>
+    <arg name="static_known_max_height" default="0.35"/>
+    <arg name="static_known_inflation" default="0.55"/>
+    <arg name="static_known_boundary_inflation" default="0.35"/>
+    <arg name="global_esdf_min_height" default="1.00"/>
+    <arg name="global_esdf_max_height" default="2.0"/>
+    <arg name="global_esdf_query_min_height" default="1.00"/>
+    <arg name="global_esdf_query_max_height" default="1.8"/>
+    <arg name="global_esdf_query_step" default="0.3"/>
+    <arg name="global_esdf_inflation" default="0.20"/>
+    <arg name="global_esdf_safe_distance" default="0.15"/>
+    <arg name="global_esdf_min_points_per_cell" default="1"/>
+    <arg name="static_endpoint_clear_radius" default="0.25"/>
+    <arg name="publish_static_map_debug" default="true"/>
+
+    <!-- Load the verified high-mounted Velodyne model to the param server. -->
+    <param name="robot_description" textfile="$(arg urdf_file)"/>
+
+    <!-- Start Gazebo. Static world is the default for mapping; dynamic world enables ray-visible pedestrians. -->
+    <include unless="$(arg use_world_pedestrians)" file="$(find gazebo_ros)/launch/empty_world.launch">
+        <arg name="world_name" value="$(arg world_file)"/>
+        <arg name="paused" value="false"/>
+        <arg name="use_sim_time" value="true"/>
+        <arg name="gui" value="$(arg gui)"/>
+        <arg name="debug" value="false"/>
+    </include>
+    <include if="$(arg use_world_pedestrians)" file="$(find gazebo_ros)/launch/empty_world.launch">
+        <arg name="world_name" value="$(arg dynamic_world_file)"/>
+        <arg name="paused" value="false"/>
+        <arg name="use_sim_time" value="true"/>
+        <arg name="gui" value="$(arg gui)"/>
+        <arg name="debug" value="false"/>
+    </include>
+
+    <!-- Spawn the cane model at origin -->
+    <node name="spawn_cane" pkg="gazebo_ros" type="spawn_model"
+          args="-urdf -model smart_cane -param robot_description -x 0 -y 0 -z 0.03"
+          output="screen"/>
+
+    <!-- Simulated hand support: keep the underactuated cane upright in Gazebo. -->
+    <node if="$(arg keep_upright)" pkg="plan_manage" type="model_pose_guard.py" name="model_pose_guard" output="screen">
+        <param name="model_name" value="smart_cane"/>
+        <param name="z" value="0.03"/>
+    </node>
+
+    <!-- Gazebo odom and FAST-LIO camera_init are both treated as identity to the planning world in this sim flow. -->
+    <node pkg="tf2_ros" type="static_transform_publisher" name="world_to_odom" args="0 0 0 0 0 0 world odom" />
+    <node pkg="tf2_ros" type="static_transform_publisher" name="world_to_camera_init" args="0 0 0 0 0 0 world camera_init" />
+
+    <!-- Keyboard teleop: publishes /cmd_vel; bridge maps it to forward push + yaw steering. -->
+    <node if="$(arg start_teleop)" pkg="teleop_twist_keyboard" type="teleop_twist_keyboard.py" name="teleop_keyboard"
+          launch-prefix="xterm -e" output="screen"/>
+
+    <!-- Steering bridge: /cmd_vel → steering joint angle + /cmd_vel_footprint -->
+    <node pkg="plan_manage" type="steering_bridge.py" name="steering_bridge" output="screen">
+        <param name="max_steer_angle" value="0.9"/>
+        <param name="timeout" value="0.5"/>
+    </node>
+
+    <!-- Synthetic IMU aligned with Gazebo planar motion for FAST-LIO. -->
+    <node pkg="plan_manage" type="imu_from_state.py" name="imu_from_state" output="screen">
+        <param name="input_topic" value="/odom"/>
+        <param name="frame_id" value="imu_link"/>
+        <param name="output_topic" value="/imu"/>
+        <param name="gravity" value="9.81"/>
+        <param name="gyro_z_sign" value="$(arg gyro_z_sign)"/>
+        <param name="use_odom_accel" value="false"/>
+    </node>
+
+    <!-- Accumulate registered scans for a persistent sim map display. -->
+    <node if="$(arg start_laser_map_accumulator)" pkg="plan_manage" type="registered_map_accumulator.py" name="registered_map_accumulator" output="screen">
+        <param name="input_topic" value="/cloud_registered"/>
+        <param name="output_topic" value="/Laser_map"/>
+        <param name="frame_id" value="camera_init"/>
+        <param name="voxel_size" value="0.08"/>
+        <param name="publish_every_n" value="3"/>
+        <param name="max_points" value="180000"/>
+    </node>
+
+    <!-- ros_control: load joint controller config and start controllers -->
+    <rosparam file="$(find plan_manage)/config/steering_control.yaml" command="load"/>
+    <node pkg="plan_manage" type="load_steering_controllers.py" name="load_steering_controllers"
+          output="screen"/>
+
+    <!-- Robot state publisher: publishes URDF TF tree (base_footprint -> base_link -> sensors). -->
+    <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher">
+        <param name="publish_frequency" value="50.0"/>
+    </node>
+
+    <!-- Planner stack (A* + MPC) -->
+    <include if="$(arg use_planner)" file="$(find plan_manage)/launch/include/algorithm.launch">
+        <arg name="planner" value="$(arg planner)"/>
+        <arg name="odometry_topic" value="$(arg planner_odom_topic)"/>
+        <arg name="odometry_world" value="$(arg planner_odom_topic)"/>
+        <arg name="cloud_topic" value="$(arg planner_cloud_topic)"/>
+        <arg name="depth_topic" value="depth"/>
+        <arg name="sensor_pose_topic" value="pose"/>
+        <arg name="simulation" value="true"/>
+        <arg name="slice_height" value="$(arg slice_height)"/>
+        <arg name="collision_margin" value="0.3"/>
+        <arg name="kin_horizon" value="200.0"/>
+        <arg name="input_min_height" value="$(arg input_min_height)"/>
+        <arg name="input_max_height" value="$(arg input_max_height)"/>
+        <arg name="map_size_x" value="90.0"/>
+        <arg name="map_size_y" value="25.0"/>
+        <arg name="map_size_z" value="5.0"/>
+        <arg name="map_simulation" value="false"/>
+        <arg name="gazebo_sim" value="true"/>
+        <arg name="use_static_global_map" value="$(arg use_static_global_map)"/>
+        <arg name="use_static_global_esdf" value="$(arg use_static_global_esdf)"/>
+        <arg name="static_map_pcd" value="$(arg static_map_pcd)"/>
+        <arg name="static_map_min_height" value="$(arg static_map_min_height)"/>
+        <arg name="static_map_max_height" value="$(arg static_map_max_height)"/>
+        <arg name="static_map_inflation" value="$(arg static_map_inflation)"/>
+        <arg name="static_map_min_points_per_cell" value="$(arg static_map_min_points_per_cell)"/>
+        <arg name="static_map_min_component_cells" value="$(arg static_map_min_component_cells)"/>
+        <arg name="static_require_known_region" value="$(arg static_require_known_region)"/>
+        <arg name="static_known_use_enclosed_region" value="$(arg static_known_use_enclosed_region)"/>
+        <arg name="static_known_min_height" value="$(arg static_known_min_height)"/>
+        <arg name="static_known_max_height" value="$(arg static_known_max_height)"/>
+        <arg name="static_known_inflation" value="$(arg static_known_inflation)"/>
+        <arg name="static_known_boundary_inflation" value="$(arg static_known_boundary_inflation)"/>
+        <arg name="global_esdf_min_height" value="$(arg global_esdf_min_height)"/>
+        <arg name="global_esdf_max_height" value="$(arg global_esdf_max_height)"/>
+        <arg name="global_esdf_query_min_height" value="$(arg global_esdf_query_min_height)"/>
+        <arg name="global_esdf_query_max_height" value="$(arg global_esdf_query_max_height)"/>
+        <arg name="global_esdf_query_step" value="$(arg global_esdf_query_step)"/>
+        <arg name="global_esdf_inflation" value="$(arg global_esdf_inflation)"/>
+        <arg name="global_esdf_safe_distance" value="$(arg global_esdf_safe_distance)"/>
+        <arg name="global_esdf_min_points_per_cell" value="$(arg global_esdf_min_points_per_cell)"/>
+        <arg name="static_endpoint_clear_radius" value="$(arg static_endpoint_clear_radius)"/>
+        <arg name="publish_static_map_debug" value="$(arg publish_static_map_debug)"/>
+    </include>
+
+    <!-- Pedestrian simulation -->
+    <group if="$(arg use_pedestrians)">
+        <node pkg="plan_manage" type="pedestrian_sim.py" name="pedestrian_sim" output="screen">
+            <!-- trigger mode: pedestrian stays at start, walks once on goal, then disappears.
+                 Re-triggered automatically when a new goal is set.
+                 vel = [vx, vy, 0]  gives walking direction and speed (m/s).
+                 period = total walk duration (s).  -->
+            <rosparam param="pedestrians">
+            # 场景1: 横向穿越 (从侧面穿过)
+            - {start: [1, 2.5, 0], vel: [0, 0.5, 0], size: [0.5, 0.5, 1.7], period: 4.0, mode: trigger}
+            # 场景2: 迎面行人 (从前方走来)
+            - {start: [-2.5, -3, 0], vel: [0, 0.5, 0], size: [0.5, 0.5, 1.7], period: 6.0, mode: loop}
+            # 场景3: 背后超越 (同向，机器人更快)
+            - {start: [0, -4.5, 0], vel: [0.3, 0, 0], size: [0.5, 0.5, 1.7], period: 4.0, mode: loop}
+            </rosparam>
+        </node>
+    </group>
+
+    <!-- RViz -->
+    <include if="$(arg rviz)" file="$(find plan_manage)/launch/rviz.launch"/>
+</launch>

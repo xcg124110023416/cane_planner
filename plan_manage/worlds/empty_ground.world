@@ -1,0 +1,174 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <world name="corridor_world">
+    <include>
+      <uri>model://sun</uri>
+    </include>
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+
+    <light name="global_light" type="directional">
+      <cast_shadows>false</cast_shadows>
+      <pose>0 0 10 0 -0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation>
+        <range>100</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>0 0 -1</direction>
+    </light>
+
+    <physics type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+    </physics>
+
+    <gui fullscreen="0">
+      <camera name="user_camera">
+        <pose>0 -8 8 0 0.7 0</pose>
+        <view_controller>orbit</view_controller>
+      </camera>
+    </gui>
+
+    <!-- ======== Corridor Walls ======== -->
+    <!-- Wall template: 0.2m thick, 2.0m tall, varying lengths. All at z=1.0 center. -->
+
+    <!-- North wall: long corridor boundary, y=2.5 -->
+    <model name="wall_north_1">
+      <static>true</static>
+      <pose>-2 2.5 1 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>6 0.2 2.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>6 0.2 2.0</size></box></geometry>
+          <material><script>Gazebo/Grey</script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_north_2">
+      <static>true</static>
+      <pose>3 2.5 1 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>6 0.2 2.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>6 0.2 2.0</size></box></geometry>
+          <material><script>Gazebo/Grey</script></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- South wall: long corridor boundary, y=-1.5 -->
+    <model name="wall_south_1">
+      <static>true</static>
+      <pose>-2 -1.5 1 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>6 0.2 2.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>6 0.2 2.0</size></box></geometry>
+          <material><script>Gazebo/Grey</script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_south_2">
+      <static>true</static>
+      <pose>3 -1.5 1 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>6 0.2 2.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>6 0.2 2.0</size></box></geometry>
+          <material><script>Gazebo/Grey</script></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Cross wall: splits corridor into segments, y from -1.5 to 2.5 -->
+    <model name="wall_cross_1">
+      <static>true</static>
+      <pose>-5 0.5 1 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.2 4.2 2.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.2 4.2 2.0</size></box></geometry>
+          <material><script>Gazebo/Grey</script></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Doorway in cross wall (gap at y=0 to 1.5, 1.5m opening) -->
+    <!-- Cross wall segment south of doorway -->
+    <model name="wall_cross_1s">
+      <static>true</static>
+      <pose>-5 -1.0 1 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.2 1.2 2.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.2 1.2 2.0</size></box></geometry>
+          <material><script>Gazebo/Grey</script></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Cross wall at x=5 -->
+    <model name="wall_cross_2">
+      <static>true</static>
+      <pose>5 0.5 1 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.2 4.2 2.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.2 4.2 2.0</size></box></geometry>
+          <material><script>Gazebo/Grey</script></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Narrow passage: two walls creating a 1.2m gap at x=0 -->
+    <model name="wall_narrow_n">
+      <static>true</static>
+      <pose>0 1.0 1 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>1.0 0.2 2.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>1.0 0.2 2.0</size></box></geometry>
+          <material><script>Gazebo/RedBrick</script></material>
+        </visual>
+      </link>
+    </model>
+    <model name="wall_narrow_s">
+      <static>true</static>
+      <pose>0 -0.2 1 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>1.0 0.2 2.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>1.0 0.2 2.0</size></box></geometry>
+          <material><script>Gazebo/RedBrick</script></material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

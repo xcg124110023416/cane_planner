@@ -124,6 +124,8 @@ namespace cane_planner
     /* clearance-aware cost */
     double w_clearance_;
     double clearance_sigma_;
+    bool use_static_global_map_ = false;
+    double static_endpoint_clear_radius_ = 0.25;
     /* map */
     double resolution_, inv_resolution_, time_resolution_, inv_time_resolution_;
     Eigen::Vector2d origin_, map_size_2d_;

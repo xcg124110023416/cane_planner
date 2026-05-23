@@ -1,0 +1,85 @@
+<launch>
+    <arg name="planner" default="3"/>
+    <arg name="start_teleop" default="true"/>
+    <arg name="rviz" default="true"/>
+    <arg name="gui" default="true"/>
+    <arg name="use_world_pedestrians" default="false"/>
+    <arg name="use_pedestrians" default="false"/>
+    <arg name="static_map_pcd" default="$(find fast_lio_sam_qn)/corridor_dynamic_175.pcd"/>
+    <arg name="publish_saved_map" default="true"/>
+    <!-- Local ESDF input crop for MPC. Keeps ground/ring-pattern points out of the inflated local map. -->
+    <arg name="input_min_height" default="0.45"/>
+    <arg name="input_max_height" default="2.0"/>
+    <!-- Global A* uses a 2D projected static ESDF from the saved PCD:
+         keep only human-body-height points and project them to XY. -->
+    <arg name="use_static_global_esdf" default="false"/>
+    <arg name="static_map_min_height" default="1.00"/>
+    <arg name="static_map_max_height" default="2.0"/>
+    <arg name="static_map_inflation" default="0.08"/>
+    <arg name="static_map_min_points_per_cell" default="1"/>
+    <arg name="static_map_min_component_cells" default="3"/>
+    <arg name="static_require_known_region" default="false"/>
+    <arg name="static_known_use_enclosed_region" default="true"/>
+    <arg name="static_known_min_height" default="-0.25"/>
+    <arg name="static_known_max_height" default="0.35"/>
+    <arg name="static_known_inflation" default="0.55"/>
+    <arg name="static_known_boundary_inflation" default="0.5"/>
+    <arg name="global_esdf_min_height" default="1.00"/>
+    <arg name="global_esdf_max_height" default="2.0"/>
+    <arg name="global_esdf_query_min_height" default="1.00"/>
+    <arg name="global_esdf_query_max_height" default="1.8"/>
+    <arg name="global_esdf_query_step" default="0.3"/>
+    <arg name="global_esdf_inflation" default="0.20"/>
+    <arg name="global_esdf_safe_distance" default="0.15"/>
+    <arg name="global_esdf_min_points_per_cell" default="1"/>
+    <arg name="static_endpoint_clear_radius" default="0.25"/>
+    <arg name="publish_static_map_debug" default="true"/>
+
+    <!-- Navigation mode driven by map-based relocalization:
+         /localization_odom gives the global pose, and /corrected_current_pcd
+         feeds the local ESDF in the same world frame. -->
+    <node if="$(arg publish_saved_map)" pkg="pcl_ros" type="pcd_to_pointcloud"
+          name="saved_map_publisher" args="$(arg static_map_pcd) 0" output="screen">
+        <param name="frame_id" value="world"/>
+        <param name="topic_name" value="/saved_map"/>
+        <param name="latch" value="true"/>
+    </node>
+
+    <include file="$(find plan_manage)/launch/gazebo_mpc.launch">
+        <arg name="planner" value="$(arg planner)"/>
+        <arg name="use_planner" value="true"/>
+        <arg name="start_teleop" value="$(arg start_teleop)"/>
+        <arg name="rviz" value="$(arg rviz)"/>
+        <arg name="gui" value="$(arg gui)"/>
+        <arg name="use_world_pedestrians" value="$(arg use_world_pedestrians)"/>
+        <arg name="use_pedestrians" value="$(arg use_pedestrians)"/>
+        <arg name="planner_odom_topic" value="/localization_odom"/>
+        <arg name="planner_cloud_topic" value="/corrected_current_pcd"/>
+        <arg name="input_min_height" value="$(arg input_min_height)"/>
+        <arg name="input_max_height" value="$(arg input_max_height)"/>
+        <arg name="use_static_global_map" value="true"/>
+        <arg name="use_static_global_esdf" value="$(arg use_static_global_esdf)"/>
+        <arg name="static_map_pcd" value="$(arg static_map_pcd)"/>
+        <arg name="static_map_min_height" value="$(arg static_map_min_height)"/>
+        <arg name="static_map_max_height" value="$(arg static_map_max_height)"/>
+        <arg name="static_map_inflation" value="$(arg static_map_inflation)"/>
+        <arg name="static_map_min_points_per_cell" value="$(arg static_map_min_points_per_cell)"/>
+        <arg name="static_map_min_component_cells" value="$(arg static_map_min_component_cells)"/>
+        <arg name="static_require_known_region" value="$(arg static_require_known_region)"/>
+        <arg name="static_known_use_enclosed_region" value="$(arg static_known_use_enclosed_region)"/>
+        <arg name="static_known_min_height" value="$(arg static_known_min_height)"/>
+        <arg name="static_known_max_height" value="$(arg static_known_max_height)"/>
+        <arg name="static_known_inflation" value="$(arg static_known_inflation)"/>
+        <arg name="static_known_boundary_inflation" value="$(arg static_known_boundary_inflation)"/>
+        <arg name="global_esdf_min_height" value="$(arg global_esdf_min_height)"/>
+        <arg name="global_esdf_max_height" value="$(arg global_esdf_max_height)"/>
+        <arg name="global_esdf_query_min_height" value="$(arg global_esdf_query_min_height)"/>
+        <arg name="global_esdf_query_max_height" value="$(arg global_esdf_query_max_height)"/>
+        <arg name="global_esdf_query_step" value="$(arg global_esdf_query_step)"/>
+        <arg name="global_esdf_inflation" value="$(arg global_esdf_inflation)"/>
+        <arg name="global_esdf_safe_distance" value="$(arg global_esdf_safe_distance)"/>
+        <arg name="global_esdf_min_points_per_cell" value="$(arg global_esdf_min_points_per_cell)"/>
+        <arg name="static_endpoint_clear_radius" value="$(arg static_endpoint_clear_radius)"/>
+        <arg name="publish_static_map_debug" value="$(arg publish_static_map_debug)"/>
+    </include>
+</launch>

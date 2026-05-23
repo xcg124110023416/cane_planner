@@ -18,8 +18,10 @@
 
   <build_depend>roscpp</build_depend>
   <build_depend>std_msgs</build_depend>
+  <build_depend>sensor_msgs</build_depend>
   <build_depend>tf</build_depend>
   <build_depend>geometry_msgs</build_depend>
+  <build_depend>gazebo_msgs</build_depend>
   <build_depend>message_runtime</build_depend>
   <build_depend>onboard_detector</build_depend>
 
@@ -28,15 +30,20 @@
 
   <build_export_depend>roscpp</build_export_depend>
   <build_export_depend>std_msgs</build_export_depend>
+  <build_export_depend>sensor_msgs</build_export_depend>
   <build_export_depend>tf</build_export_depend>
   <build_export_depend>geometry_msgs</build_export_depend>
+  <build_export_depend>gazebo_msgs</build_export_depend>
 
   <exec_depend>roscpp</exec_depend>
   <exec_depend>std_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>tf</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>gazebo_msgs</exec_depend>
   <exec_depend>message_runtime</exec_depend>
   <exec_depend>onboard_detector</exec_depend>
+  <exec_depend>xacro</exec_depend>
 
   <exec_depend>plan_env</exec_depend>
   <exec_depend>path_searching</exec_depend>

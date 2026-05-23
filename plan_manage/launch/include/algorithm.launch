@@ -8,6 +8,7 @@
     <!-- simulation param -->
     <arg name="simulation"/>
     <arg name="planner"/>
+    <arg name="gazebo_sim" default="false"/>
     <arg name="map_simulation" default="false"/>  <!-- SDF map sync mode: false=cloud+odom, true=cloud+pose -->
     <arg name="slice_height"/>
     <arg name="collision_margin"/>
@@ -16,6 +17,33 @@
     <arg name="map_size_y"/>
     <arg name="map_size_z"/>
     <arg name="kin_horizon"/>
+    <arg name="input_min_height" default="0.15"/>
+    <arg name="input_max_height" default="2.6"/>
+    <arg name="enable_map_visualization" default="true"/>
+    <arg name="use_static_global_map" default="false"/>
+    <arg name="use_static_global_esdf" default="false"/>
+    <arg name="static_map_pcd" default=""/>
+    <arg name="static_map_min_height" default="0.60"/>
+    <arg name="static_map_max_height" default="2.0"/>
+    <arg name="static_map_inflation" default="0.08"/>
+    <arg name="static_map_min_points_per_cell" default="3"/>
+    <arg name="static_map_min_component_cells" default="6"/>
+    <arg name="static_require_known_region" default="true"/>
+    <arg name="static_known_use_enclosed_region" default="true"/>
+    <arg name="static_known_min_height" default="-0.25"/>
+    <arg name="static_known_max_height" default="0.35"/>
+    <arg name="static_known_inflation" default="0.55"/>
+    <arg name="static_known_boundary_inflation" default="0.35"/>
+    <arg name="global_esdf_min_height" default="1.00"/>
+    <arg name="global_esdf_max_height" default="2.0"/>
+    <arg name="global_esdf_query_min_height" default="1.00"/>
+    <arg name="global_esdf_query_max_height" default="1.8"/>
+    <arg name="global_esdf_query_step" default="0.3"/>
+    <arg name="global_esdf_inflation" default="0.20"/>
+    <arg name="global_esdf_safe_distance" default="0.15"/>
+    <arg name="global_esdf_min_points_per_cell" default="1"/>
+    <arg name="static_endpoint_clear_radius" default="0.25"/>
+    <arg name="publish_static_map_debug" default="true"/>
 
     
     <node pkg="plan_manage" name="kin_replan_node" type="kin_replan_node" output="screen" >
@@ -28,7 +56,7 @@
         <!-- planner manager -->
         <param name="manager/sim_speed" value="1.0" type="double"/>
         <param name="manager/global_wp_spacing" value="1.0" type="double"/>
-        <param name="manager/global_wp_arrival_radius" value="0.5" type="double"/>
+        <param name="manager/global_wp_arrival_radius" value="0.1" type="double"/>
         <!-- 前向截断距离：从最近投影点向前看多少米选为当前目标 -->
         <param name="manager/lookahead_dist" value="1.3" type="double"/>
         <param name="manager/max_vel" value="1.0" type="double"/>
@@ -44,6 +72,7 @@
 
         <!-- simulation true or false -->
         <param name="planner_node/simulation" value="$(arg simulation)"/>
+        <param name="planner_node/gazebo_sim" value="$(arg gazebo_sim)" type="bool"/>
         <param name="planner_node/planner" value="$(arg planner)"/>
         <!-- sdf set -->
         <param name="sdf_map/robot_size_x" value="0.2" />
@@ -57,7 +86,7 @@
         <param name="sdf_map/local_update_range_y"  value="5.5" /> 
         <param name="sdf_map/local_update_range_z"  value="4.5" /> 
         <!-- obstacles_inflation（膨胀系数）原本为0.2，感觉太大，设置为0.1 -->
-        <param name="sdf_map/obstacles_inflation" value="0.0" />
+        <param name="sdf_map/obstacles_inflation" value="0.1" />
         <!-- sdf_map/local_bound_inflate原本0.4 -->
         <param name="sdf_map/local_bound_inflate" value="0.0"/>
         <param name="sdf_map/local_map_margin" value="10"/>
@@ -72,6 +101,9 @@
         <param name="sdf_map/p_occ" value="0.80"/>
         <param name="sdf_map/min_ray_length" value="0.5"/>
         <param name="sdf_map/max_ray_length" value="5.0"/>
+        <!-- Keep the full PCD for SLAM/relocalization; only crop height when fusing into planning grid/SDF. -->
+        <param name="sdf_map/input_min_height" value="$(arg input_min_height)"/>
+        <param name="sdf_map/input_max_height" value="$(arg input_max_height)"/>
         <param name="sdf_map/virtual_ceil_height" value="3.2"/>
         <param name="sdf_map/optimistic" value="true" type="bool"/>
         <param name="sdf_map/signed_dist" value="false" type="bool"/>
@@ -89,11 +121,21 @@
 
         <!--  -->
         <param name="map_ros/esdf_slice_height" value="$(arg slice_height)"/>
-        <param name="map_ros/visualization_truncate_height" value="1.0"/>
+        <param name="map_ros/visualization_truncate_height" value="2.6"/>
         <param name="map_ros/visualization_truncate_low" value="-0.5"/>
         <param name="map_ros/show_occ_time" value="false"/>
         <param name="map_ros/show_esdf_time" value="false"/>
-        <param name="map_ros/show_all_map" value="true"/>
+        <param name="map_ros/show_all_map" value="false"/>
+        <param name="map_ros/enable_visualization" value="$(arg enable_map_visualization)" type="bool"/>
+        <param name="map_ros/publish_esdf" value="$(arg enable_map_visualization)" type="bool"/>
+        <param name="map_ros/publish_update_range" value="$(arg enable_map_visualization)" type="bool"/>
+        <param name="map_ros/publish_unknown" value="false"/>
+        <param name="map_ros/publish_depth_cloud" value="false"/>
+        <param name="map_ros/use_global_saved_map" value="false"/>
+        <param name="map_ros/global_map_topic" value="/saved_map"/>
+        <param name="map_ros/global_map_inflation" value="0.15"/>
+        <param name="map_ros/global_map_min_height" value="0.45"/>
+        <param name="map_ros/global_map_max_height" value="2.6"/>
         <param name="map_ros/frame_id" value="world"/>
 
         <param name="map_ros/is_simulation" value="$(arg map_simulation)" type="bool"/>
@@ -120,20 +162,46 @@
         <param name="astar/horizon" value="$(arg kin_horizon)"/>
         <param name="astar/resolution_astar" value="0.1"/>
         <param name="astar/time_resolution" value="0"/>
-        <param name="astar/lambda_heu" value="0.05"/>
-        <param name="astar/allocate_num" value="100000"/>
-        <!-- clearance-aware: 仅当距墙<sigma时惩罚，越近二次增长。0=不启用 -->
-        <param name="astar/w_clearance" value="0.1" type="double"/>
-        <param name="astar/clearance_sigma" value="0.5" type="double"/>
+        <param name="astar/lambda_heu" value="0.2"/>
+        <param name="astar/allocate_num" value="300000"/>
+        <!-- A* clearance uses only the static global map; local ESDF avoidance is handled by MPC. -->
+        <param name="astar/w_clearance" value="0.8" type="double"/>
+        <param name="astar/clearance_sigma" value="0.9" type="double"/>
+        <param name="astar/use_static_global_map" value="$(arg use_static_global_map)" type="bool"/>
+        <param name="astar/static_endpoint_clear_radius" value="$(arg static_endpoint_clear_radius)" type="double"/>
         <!-- collision set -->
         <param name="Collision/margin" value="$(arg collision_margin)"/>
         <param name="Collision/SliceHeight" value="$(arg slice_height)"/>
+        <param name="Collision/use_static_global_map" value="$(arg use_static_global_map)" type="bool"/>
+        <param name="Collision/use_static_global_esdf" value="$(arg use_static_global_esdf)" type="bool"/>
+        <param name="Collision/static_map_pcd" value="$(arg static_map_pcd)"/>
+        <param name="Collision/static_map_min_height" value="$(arg static_map_min_height)" type="double"/>
+        <param name="Collision/static_map_max_height" value="$(arg static_map_max_height)" type="double"/>
+        <param name="Collision/static_map_inflation" value="$(arg static_map_inflation)" type="double"/>
+        <param name="Collision/static_map_min_points_per_cell" value="$(arg static_map_min_points_per_cell)" type="int"/>
+        <param name="Collision/static_map_min_component_cells" value="$(arg static_map_min_component_cells)" type="int"/>
+        <param name="Collision/static_require_known_region" value="$(arg static_require_known_region)" type="bool"/>
+        <param name="Collision/static_known_use_enclosed_region" value="$(arg static_known_use_enclosed_region)" type="bool"/>
+        <param name="Collision/static_known_min_height" value="$(arg static_known_min_height)" type="double"/>
+        <param name="Collision/static_known_max_height" value="$(arg static_known_max_height)" type="double"/>
+        <param name="Collision/static_known_inflation" value="$(arg static_known_inflation)" type="double"/>
+        <param name="Collision/static_known_boundary_inflation" value="$(arg static_known_boundary_inflation)" type="double"/>
+        <param name="Collision/global_esdf_min_height" value="$(arg global_esdf_min_height)" type="double"/>
+        <param name="Collision/global_esdf_max_height" value="$(arg global_esdf_max_height)" type="double"/>
+        <param name="Collision/global_esdf_query_min_height" value="$(arg global_esdf_query_min_height)" type="double"/>
+        <param name="Collision/global_esdf_query_max_height" value="$(arg global_esdf_query_max_height)" type="double"/>
+        <param name="Collision/global_esdf_query_step" value="$(arg global_esdf_query_step)" type="double"/>
+        <param name="Collision/global_esdf_inflation" value="$(arg global_esdf_inflation)" type="double"/>
+        <param name="Collision/global_esdf_safe_distance" value="$(arg global_esdf_safe_distance)" type="double"/>
+        <param name="Collision/global_esdf_min_points_per_cell" value="$(arg global_esdf_min_points_per_cell)" type="int"/>
+        <param name="Collision/publish_static_map_debug" value="$(arg publish_static_map_debug)" type="bool"/>
+        <param name="Collision/static_map_frame" value="world"/>
         <!-- lfpc set -->
         <param name="lfpc/delta_t" value="0.07"/>
         <param name="lfpc/t_sup" value="0.35"/>
         <!-- mpc controller set -->
         <param name="mpc/horizon_steps" value="10" type="int"/>
-        <param name="mpc/num_samples" value="300" type="int"/>
+        <param name="mpc/num_samples" value="200" type="int"/>
         <!-- MPPI温度：越小越贪心(选最优)，越大越平滑(加权平均) -->
         <param name="mpc/temperature" value="0.4" type="double"/>
         <param name="mpc/mpc_iters" value="1" type="int"/>

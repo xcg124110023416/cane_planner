@@ -1,4 +1,7 @@
 #include <plan_manager.h>
+#include <geometry_msgs/Twist.h>
+#include <std_msgs/Float64.h>
+
 #include <sstream>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_types.h>
@@ -25,9 +28,10 @@ namespace cane_planner
         nh.param("fsm/thresh_no_replan", no_replan_thresh_, -1.0);
 
         nh.param("planner_node/simulation", simulation_, false);
+        nh.param("planner_node/gazebo_sim", gazebo_sim_, false);
         nh.param("manager/sim_speed", sim_speed_, 0.5);  // 仿真行走速度 m/s
         nh.param("manager/global_wp_spacing", global_wp_spacing_, 1.0);
-        nh.param("manager/global_wp_arrival_radius", global_wp_arrival_radius_, 0.5);
+        nh.param("manager/global_wp_arrival_radius", global_wp_arrival_radius_, 0.1);
         nh.param("manager/lookahead_dist", lookahead_dist_, 1.0);
         nh.param("mpc/fov_range", mpc_fov_range_, 5.0);
     }
@@ -111,7 +115,7 @@ namespace cane_planner
         kin_foot_pub_ = nh.advertise<visualization_msgs::Marker>("/planning_vis/kin_foot", 20);
         // Path
         kin_path_pub_ = nh.advertise<nav_msgs::Path>("/kin_astar/path", 20);
-        a_path_pub_ = nh.advertise<nav_msgs::Path>("/astar/path", 20);
+        a_path_pub_ = nh.advertise<nav_msgs::Path>("/astar/path", 20, true);
         traj_pub_ = nh.advertise<nav_msgs::Path>("/planning_vis/trajectory", 20);
         // MPC vis
         mpc_vis_pub_ = nh.advertise<visualization_msgs::Marker>("/planning_vis/mpc_rollout", 20);
@@ -120,10 +124,16 @@ namespace cane_planner
         sim_odom_pub_ = nh.advertise<nav_msgs::Odometry>("/sim_odom", 20);
         mpc_fov_pub_ = nh.advertise<visualization_msgs::Marker>("/mpc/fov_range", 10);
         mpc_wp_pub_ = nh.advertise<visualization_msgs::Marker>("/mpc/current_waypoint", 10);
-        mpc_wps_pub_ = nh.advertise<visualization_msgs::Marker>("/mpc/waypoints", 10);
+        mpc_wps_pub_ = nh.advertise<visualization_msgs::Marker>("/mpc/waypoints", 10, true);
         risk_field_pub_ = nh.advertise<sensor_msgs::PointCloud2>("/mpc/risk_field", 1);
         risk_halo_pub_ = nh.advertise<sensor_msgs::PointCloud2>("/mpc/risk_halo", 1);
         mpc_best_traj_pub_ = nh.advertise<visualization_msgs::Marker>("/mpc/best_traj", 10);
+        if (gazebo_sim_)
+        {
+            cmd_vel_pub_ = nh.advertise<geometry_msgs::Twist>("/cmd_vel_footprint", 10);
+            steer_pub_ = nh.advertise<std_msgs::Float64>(
+                "/steering_joint_position_controller/command", 10);
+        }
     }
     // real experience callback waypoint or goal
     void PlannerManager::GoalCallback(const geometry_msgs::PoseStamped::ConstPtr &msg)
@@ -138,6 +148,18 @@ namespace cane_planner
         // ROS_INFO("set end pos is: %lf and %lf", end_pt_(0), end_pt_(1));
         // ROS_INFO("end yaw is: %lf", yaw);
         have_target_ = true;
+        mpc_reached_goal_ = false;
+        if (have_odom_ && exec_state_ != INIT && exec_state_ != WAIT_TARGET)
+        {
+            if (gazebo_sim_)
+            {
+                geometry_msgs::Twist cmd;
+                cmd_vel_pub_.publish(cmd);
+            }
+            sim_path_.clear();
+            changeFSMExecState(GEN_NEW_TRAJ);
+            ROS_INFO("[FSM] New 2D Nav Goal received, replanning from current pose.");
+        }
     }
     void PlannerManager::waypointCallback(const nav_msgs::PathConstPtr &msg)
     {
@@ -151,6 +173,18 @@ namespace cane_planner
         // ROS_INFO("set end pos is: %lf and %lf", end_pt_(0), end_pt_(1));
         // ROS_INFO("end yaw is: %lf", yaw);
         have_target_ = true;
+        mpc_reached_goal_ = false;
+        if (have_odom_ && exec_state_ != INIT && exec_state_ != WAIT_TARGET)
+        {
+            if (gazebo_sim_)
+            {
+                geometry_msgs::Twist cmd;
+                cmd_vel_pub_.publish(cmd);
+            }
+            sim_path_.clear();
+            changeFSMExecState(GEN_NEW_TRAJ);
+            ROS_INFO("[FSM] New waypoint goal received, replanning from current pose.");
+        }
     }
     // odomtry
     void PlannerManager::startCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr &start)
@@ -174,6 +208,28 @@ namespace cane_planner
 
     void PlannerManager::odometryCallback(const nav_msgs::OdometryConstPtr &msg)
     {
+        // Gazebo mode: read odom directly (planar_move publishes in "odom" frame, identity to "world")
+        if (gazebo_sim_)
+        {
+            odom_pos_(0) = msg->pose.pose.position.x;
+            odom_pos_(1) = msg->pose.pose.position.y;
+            odom_pos_(2) = msg->pose.pose.position.z;
+            odom_vel_(0) = msg->twist.twist.linear.x;
+            odom_vel_(1) = msg->twist.twist.linear.y;
+            odom_vel_(2) = msg->twist.twist.linear.z;
+            double yaw = QuatenionToYaw(msg->pose.pose.orientation);
+            start_state_(0) = odom_pos_(0);
+            start_state_(1) = odom_pos_(1);
+            start_state_(2) = yaw;
+            if (!have_odom_)
+            {
+                have_odom_ = true;
+                ROS_INFO("[Gazebo] First odom received: pos=(%.2f,%.2f) yaw=%.2f",
+                         odom_pos_(0), odom_pos_(1), yaw);
+            }
+            return;
+        }
+
         // 仿真模式下odom由自身控制(MPC步进或沿路径推进)，不依赖外部里程计
         if (simulation_)
             return;
@@ -340,8 +396,24 @@ namespace cane_planner
                 else if (planner_ == 3)
                 {
                     // A* 全局规划 → 生成 waypoints，MPC 局部追踪
-                    if (callAstarPlan())
-                        generateGlobalWaypoints();
+                    bool astar_ok = callAstarPlan();
+                    if (!astar_ok && gazebo_sim_)
+                    {
+                        ros::Duration(0.5).sleep();  // wait for odom/map to settle
+                        astar_ok = callAstarPlan();
+                    }
+                    if (!astar_ok)
+                    {
+                        if (gazebo_sim_)
+                        {
+                            geometry_msgs::Twist cmd;
+                            cmd_vel_pub_.publish(cmd);
+                        }
+                        ROS_WARN_THROTTLE(1.0, "[MPC global] Waiting for a valid global A* path before starting MPC.");
+                        changeFSMExecState(REPLAN_TRAJ);
+                        break;
+                    }
+                    generateGlobalWaypoints();
                     mpcSimInit();
                     changeFSMExecState(MPC_STEP);
                 }
@@ -358,7 +430,9 @@ namespace cane_planner
                         displayMpcPlan();
                         publishMpcPath();
                         success2 = true;
-                        changeFSMExecState(EXEC_TRAJ);
+                        have_target_ = false;
+                        sim_path_.clear();
+                        changeFSMExecState(WAIT_TARGET);
                     }
                     else
                     {
@@ -396,8 +470,18 @@ namespace cane_planner
                 else if (planner_ == 3)
                 {
                     // 重规划：从当前位置重新跑 A* + 生成 waypoints
-                    if (callAstarPlan())
-                        generateGlobalWaypoints();
+                    if (!callAstarPlan())
+                    {
+                        if (gazebo_sim_)
+                        {
+                            geometry_msgs::Twist cmd;
+                            cmd_vel_pub_.publish(cmd);
+                        }
+                        ROS_WARN_THROTTLE(1.0, "[MPC global] Replan has no valid A* path yet; keeping MPC stopped.");
+                        changeFSMExecState(REPLAN_TRAJ);
+                        break;
+                    }
+                    generateGlobalWaypoints();
                     mpcSimInit();
                     changeFSMExecState(MPC_STEP);
                 }
@@ -425,7 +509,7 @@ namespace cane_planner
 
                 double dis2end = (odom_pt - end_pt_).norm();
                 double dis2start = (odom_pt - start_pt_).norm();
-                if (dis2end <= 0.5)
+                if (dis2end <= global_wp_arrival_radius_)
                 {
                     have_target_ = false;
                     sim_path_.clear();
@@ -688,8 +772,9 @@ namespace cane_planner
             return;
         }
 
+        global_waypoints_.push_back(path.front());
+
         // Downsample: walk the A* path, pick points at ~global_wp_spacing_ intervals
-        Eigen::Vector2d last = path[0];
         double accum = 0.0;
         for (size_t i = 1; i < path.size(); ++i)
         {
@@ -700,7 +785,6 @@ namespace cane_planner
             {
                 global_waypoints_.push_back(path[i]);
                 accum = 0.0;
-                last = path[i];
             }
         }
 
@@ -759,6 +843,8 @@ namespace cane_planner
         mpc_step_count_ = 0;
         mpc_stuck_steps_ = 0;
         mpc_reached_goal_ = false;
+        last_theta_ = start_state_(2);
+        last_com_pos_ = com_init_pos.head(2);
 
         // 更新odom初始位置
         odom_pos_ = com_init_pos;
@@ -862,6 +948,27 @@ namespace cane_planner
         }
 
         Eigen::Vector3d current_com = lfpc_model_->getCOMPos();
+        if (gazebo_sim_)
+        {
+            Eigen::Vector3d actual_com(odom_pos_(0), odom_pos_(1), 0.0);
+            const double model_err = (current_com.head(2) - actual_com.head(2)).norm();
+            if (model_err > 0.3)
+            {
+                ROS_WARN_THROTTLE(1.0,
+                                  "[MPC] Syncing LFPC model to localization, drift=%.2fm",
+                                  model_err);
+                mpc_controller_->resetWarmStart();
+            }
+
+            // Gazebo/localization is the ground truth for the next MPC cycle.
+            // Keep the LFPC phase, but re-anchor its CoM/yaw to the real robot pose
+            // so the visual MPC path cannot run ahead of the physical cane.
+            char support = lfpc_model_->getSupportFeet();
+            char reset_arg = (support == LEFT_LEG) ? RIGHT_LEG : LEFT_LEG;
+            Eigen::Vector3d init_v_state(0.0, 0.0, start_state_(2));
+            lfpc_model_->reset(init_v_state, actual_com, reset_arg, lfpc_model_->getStepNum());
+            current_com = lfpc_model_->getCOMPos();
+        }
         Eigen::Vector2d foot_pos = lfpc_model_->getFootPosition();
 
         // 记录当前位置
@@ -877,15 +984,21 @@ namespace cane_planner
         if (dist_to_final < global_wp_arrival_radius_)
         {
             mpc_reached_goal_ = true;
-            ROS_INFO("[MPC] Reached final goal at (%.2f, %.2f), %d steps",
+            ROS_WARN("[MPC] Reached final goal at (%.2f, %.2f), %d steps",
                      current_com(0), current_com(1), mpc_step_count_);
+            if (gazebo_sim_)
+            {
+                geometry_msgs::Twist cmd;
+                cmd_vel_pub_.publish(cmd);  // zero stop
+            }
             return true;
         }
 
         // 卡住检测：基于实际位移而非 waypoint 索引切换
         // (waypoint 间距可能较大，索引不变但机器人仍在前进)
         double moved = (current_com.head(2) - last_com_pos_).norm();
-        if (moved > 0.03)  // 本帧移动超过 3cm → 在前进
+        const double progress_eps = gazebo_sim_ ? 0.01 : 0.03;
+        if (moved > progress_eps)
             mpc_stuck_steps_ = 0;
         else
             mpc_stuck_steps_++;
@@ -895,6 +1008,7 @@ namespace cane_planner
         {
             ROS_WARN("[MPC] Stuck for %d steps, triggering replan", STUCK_THRESHOLD);
             mpc_reached_goal_ = false;
+            if (gazebo_sim_) { geometry_msgs::Twist cmd; cmd_vel_pub_.publish(cmd); }
             return true;
         }
 
@@ -915,6 +1029,7 @@ namespace cane_planner
             publishFovRange();
             publishCurrentWaypoint();
             mpc_step_count_++;
+            if (gazebo_sim_) { geometry_msgs::Twist cmd; cmd_vel_pub_.publish(cmd); }
             return false;
         }
 
@@ -957,11 +1072,44 @@ namespace cane_planner
 
         lfpc_model_->prepareNextStep();
 
-        // 更新里程计位置
         Eigen::Vector3d new_com = lfpc_model_->getCOMPos();
-        odom_pos_(0) = new_com(0);
-        odom_pos_(1) = new_com(1);
-        odom_pos_(2) = new_com(2);
+
+        // Gazebo: virtual human push. The cane has no lateral drive; we command
+        // forward speed plus yaw rate, and use the steering joint only for the
+        // bottom wheel visual.
+        if (gazebo_sim_)
+        {
+            double dx = new_com(0) - last_com_pos_(0);
+            double dy = new_com(1) - last_com_pos_(1);
+            const double dt = 0.35;  // LFPC support duration used by this sim step
+            double v = std::hypot(dx, dy) / dt;
+            double theta_new = lfpc_model_->getNextIterState()(2);
+            double theta_err = std::atan2(std::sin(theta_new - start_state_(2)),
+                                          std::cos(theta_new - start_state_(2)));
+            double yaw_rate = theta_err / dt;
+            yaw_rate = std::max(-1.2, std::min(1.2, yaw_rate));
+
+            geometry_msgs::Twist cmd;
+            cmd.linear.x = v;
+            cmd.linear.y = 0.0;
+            cmd.angular.z = yaw_rate;
+            cmd_vel_pub_.publish(cmd);
+
+            // Visual wheel steering angle relative to the body.
+            std_msgs::Float64 steer;
+            steer.data = std::max(-0.9, std::min(0.9, theta_err));
+            steer_pub_.publish(steer);
+
+            last_theta_ = theta_new;
+        }
+
+        // 非Gazebo模式：用LFPC更新odom
+        if (!gazebo_sim_)
+        {
+            odom_pos_(0) = new_com(0);
+            odom_pos_(1) = new_com(1);
+            odom_pos_(2) = new_com(2);
+        }
 
         // 发布模拟里程计
         publishSimOdom();
@@ -969,6 +1117,7 @@ namespace cane_planner
         // 发布 FOV 范围和当前 waypoint 可视化
         publishFovRange();
         publishCurrentWaypoint();
+        publishWaypointsList();
 
         // 增量发布可视化（每步更新）
         displayMpcPlan();
@@ -980,9 +1129,9 @@ namespace cane_planner
 
     void PlannerManager::publishSimOdom()
     {
-        Eigen::Vector3d com = lfpc_model_->getCOMPos();
-        Eigen::Vector3d vel = lfpc_model_->getNextIterState(); // vx_t, vy_t, theta_
-        double theta = vel(2);
+        Eigen::Vector3d com = (gazebo_sim_) ? odom_pos_ : lfpc_model_->getCOMPos();
+        Eigen::Vector3d vel = lfpc_model_->getNextIterState();
+        double theta = (gazebo_sim_) ? start_state_(2) : vel(2);
 
         nav_msgs::Odometry odom;
         odom.header.frame_id = "world";
@@ -1078,7 +1227,7 @@ namespace cane_planner
             geometry_msgs::Point pt;
             pt.x = global_waypoints_[i](0);
             pt.y = global_waypoints_[i](1);
-            pt.z = 0.15;
+            pt.z = collision_->getSliceHeight();
             mk.points.push_back(pt);
         }
         mpc_wps_pub_.publish(mk);
