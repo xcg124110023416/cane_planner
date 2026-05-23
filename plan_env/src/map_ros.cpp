@@ -79,6 +79,7 @@ namespace fast_planner
     local_updated_ = false;
     esdf_need_update_ = false;
     map_inflate_ = false;
+    local_map_ready_ = false;
     fuse_time_ = 0.0;
     esdf_time_ = 0.0;
     max_fuse_time_ = 0.0;
@@ -104,29 +105,29 @@ namespace fast_planner
     dynamic_bbox_sub_ = node_.subscribe("/onboard_detector/dynamic_bboxes", 1,&MapROS::dynamicBBoxesCallback, this);
 
     // sub init
-    depth_sub_.reset(new message_filters::Subscriber<sensor_msgs::Image>(node_, "/map_ros/depth", 50));
+    depth_sub_.reset(new message_filters::Subscriber<sensor_msgs::Image>(node_, "/map_ros/depth", 5));
     cloud_sub_.reset(
-        new message_filters::Subscriber<sensor_msgs::PointCloud2>(node_, "/map_ros/cloud", 50));
+        new message_filters::Subscriber<sensor_msgs::PointCloud2>(node_, "/map_ros/cloud", 5));
     pose_sub_.reset(
-        new message_filters::Subscriber<geometry_msgs::PoseStamped>(node_, "/map_ros/pose", 25));
+        new message_filters::Subscriber<geometry_msgs::PoseStamped>(node_, "/map_ros/pose", 5));
     odom_sub_.reset(
-        new message_filters::Subscriber<nav_msgs::Odometry>(node_, "/map_ros/odom", 25));
+        new message_filters::Subscriber<nav_msgs::Odometry>(node_, "/map_ros/odom", 5));
 
 
     if(map_ ->is_simulation_)
     {
-        // register callback function
+      // register callback function
       //depth+pose
       sync_image_pose_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyImagePose>(
-          MapROS::SyncPolicyImagePose(100), *depth_sub_, *pose_sub_));
+          MapROS::SyncPolicyImagePose(5), *depth_sub_, *pose_sub_));
       sync_image_pose_->registerCallback(boost::bind(&MapROS::depthPoseCallback, this, _1, _2));
       // depth+odom
       sync_image_odom_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyImageOdom>(
-          MapROS::SyncPolicyImageOdom(100), *depth_sub_, *odom_sub_));
+          MapROS::SyncPolicyImageOdom(5), *depth_sub_, *odom_sub_));
       sync_image_odom_->registerCallback(boost::bind(&MapROS::depthOdomCallback, this, _1, _2));
       // // cloud+pose
       sync_cloud_pose_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudPose>(
-          MapROS::SyncPolicyCloudPose(100), *cloud_sub_, *pose_sub_));
+          MapROS::SyncPolicyCloudPose(5), *cloud_sub_, *pose_sub_));
       sync_cloud_pose_->registerCallback(boost::bind(&MapROS::cloudPoseCallback, this, _1, _2));
     }
     else{
@@ -137,23 +138,24 @@ namespace fast_planner
       //     node_.subscribe<nav_msgs::Odometry>("/map_ros/odom", 10, &MapROS::odomCallback, this);
 
       sync_cloud_odom_.reset(new message_filters::Synchronizer<MapROS::SyncPolicyCloudOdom>(
-          MapROS::SyncPolicyCloudOdom(100), *cloud_sub_, *odom_sub_));
+          MapROS::SyncPolicyCloudOdom(5), *cloud_sub_, *odom_sub_));
       sync_cloud_odom_->registerCallback(boost::bind(&MapROS::cloudOdomCallback, this, _1, _2));
     }
 
 
-    local_update_timer_ = node_.createTimer(ros::Duration(0.05), &MapROS::localUpdateCallback, this);
-		inflateTimer_ = this->node_.createTimer(ros::Duration(0.05), &MapROS::inflateMapCallback, this);
-    // freeMapTimer_ = node_.createTimer(ros::Duration(0.033), &MapROS::freeMapCallback, this);
-    esdf_timer_ = node_.createTimer(ros::Duration(0.05), &MapROS::updateESDFCallback, this);//计算每个体素到最近障碍物的距离
-    vis_timer_ = node_.createTimer(ros::Duration(0.1), &MapROS::visCallback, this);
+    local_update_timer_ = node_.createWallTimer(ros::WallDuration(0.05), &MapROS::localUpdateCallback, this);
+		inflateTimer_ = this->node_.createWallTimer(ros::WallDuration(0.05), &MapROS::inflateMapCallback, this);
+    // freeMapTimer_ = node_.createWallTimer(ros::WallDuration(0.033), &MapROS::freeMapCallback, this);
+    esdf_timer_ = node_.createWallTimer(ros::WallDuration(0.05), &MapROS::updateESDFCallback, this);//计算每个体素到最近障碍物的距离
+    vis_timer_ = node_.createWallTimer(ros::WallDuration(0.1), &MapROS::visCallback, this);
 
       
     map_start_time_ = ros::Time::now();
   }
 
-  void MapROS::visCallback(const ros::TimerEvent &e)
+  void MapROS::visCallback(const ros::WallTimerEvent &e)
   {
+    std::lock_guard<std::mutex> lock(map_mutex_);
     publishMapLocal();
     // if (show_all_map_)
     // {
@@ -173,7 +175,8 @@ namespace fast_planner
     // publishDepth();
   }
 
-  void MapROS::localUpdateCallback(const ros::TimerEvent & /*event*/){
+  void MapROS::localUpdateCallback(const ros::WallTimerEvent & /*event*/){
+    std::lock_guard<std::mutex> lock(map_mutex_);
     if( !local_updated_){
       return;
     }
@@ -183,6 +186,7 @@ namespace fast_planner
     map_->inputPointCloud(point_cloud_, num, camera_pos_);
 
     local_updated_ = false;
+    local_map_ready_ = true;
     map_inflate_ = true;
   }
 
@@ -209,7 +213,8 @@ namespace fast_planner
     return freeRegions;
   }
 
-  void MapROS::inflateMapCallback(const ros::TimerEvent &){
+  void MapROS::inflateMapCallback(const ros::WallTimerEvent &){
+    std::lock_guard<std::mutex> lock(map_mutex_);
     if(map_inflate_){
       map_->clearAndInflateLocalMap();
       map_inflate_ = false;
@@ -218,8 +223,9 @@ namespace fast_planner
 
   }
 
-  void MapROS::updateESDFCallback(const ros::TimerEvent & /*event*/)
+  void MapROS::updateESDFCallback(const ros::WallTimerEvent & /*event*/)
   {
+    std::lock_guard<std::mutex> lock(map_mutex_);
     if (!esdf_need_update_)  return;
     auto t1 = ros::Time::now();
 
@@ -235,7 +241,8 @@ namespace fast_planner
     esdf_need_update_ = false;
   }
 
-  void MapROS::freeMapCallback(const ros::TimerEvent&){
+  void MapROS::freeMapCallback(const ros::WallTimerEvent&){
+    std::lock_guard<std::mutex> lock(map_mutex_);
     std::vector<onboardDetector::box3D> obstacles;
     {
       std::lock_guard<std::mutex> lock(obstacles_mutex_);
@@ -270,6 +277,7 @@ namespace fast_planner
   void MapROS::depthPoseCallback(const sensor_msgs::ImageConstPtr &img,
                                  const geometry_msgs::PoseStampedConstPtr &pose)
   {
+    std::lock_guard<std::mutex> lock(map_mutex_);
     camera_pos_(0) = pose->pose.position.x;
     camera_pos_(1) = pose->pose.position.y;
     camera_pos_(2) = pose->pose.position.z;
@@ -311,6 +319,7 @@ namespace fast_planner
   void MapROS::depthOdomCallback(const sensor_msgs::ImageConstPtr &img,
                                  const nav_msgs::OdometryConstPtr &odom)
   {
+    std::lock_guard<std::mutex> lock(map_mutex_);
     camera_pos_(0) = odom->pose.pose.position.x;
     camera_pos_(1) = odom->pose.pose.position.y;
     camera_pos_(2) = odom->pose.pose.position.z;
@@ -349,6 +358,7 @@ namespace fast_planner
   void MapROS::cloudPoseCallback(const sensor_msgs::PointCloud2ConstPtr &msg,
                                  const geometry_msgs::PoseStampedConstPtr &pose)
   {
+    std::lock_guard<std::mutex> lock(map_mutex_);
     camera_pos_(0) = pose->pose.position.x;
     camera_pos_(1) = pose->pose.position.y;
     camera_pos_(2) = pose->pose.position.z;
@@ -373,13 +383,26 @@ namespace fast_planner
   void MapROS::cloudOdomCallback(const sensor_msgs::PointCloud2ConstPtr &msg,
                                 const nav_msgs::OdometryConstPtr &odom)
   {
+    std::lock_guard<std::mutex> lock(map_mutex_);
     // tf from cam to odom
     // cout<< "cloudOdomCallback" << endl;
     geometry_msgs::PoseStamped pose_cam;
     pose_cam.header = odom->header;//camera_init
     pose_cam.pose = odom->pose.pose;
     geometry_msgs::PoseStamped pose_world;
-    tf_listener_.transformPose("world", pose_cam, pose_world);//camera_init to world，实际没有变化
+    if (pose_cam.header.frame_id.empty() || pose_cam.header.frame_id == "world") {
+      pose_world = pose_cam;
+      pose_world.header.frame_id = "world";
+    } else {
+      try {
+        tf_listener_.transformPose("world", pose_cam, pose_world);//camera_init to world，实际没有变化
+      } catch (const tf::TransformException& ex) {
+        ROS_WARN_THROTTLE(1.0, "[SDFMap] Skip cloud frame: cannot transform %s to world: %s",
+                          pose_cam.header.frame_id.c_str(), ex.what());
+        local_updated_ = false;
+        return;
+      }
+    }
     camera_pos_(0) = pose_world.pose.position.x;
     camera_pos_(1) = pose_world.pose.position.y;
     camera_pos_(2) = pose_world.pose.position.z;
@@ -428,13 +451,25 @@ namespace fast_planner
 
 
   void MapROS::odomCallback(const nav_msgs::OdometryConstPtr& odom) {
+    std::lock_guard<std::mutex> lock(map_mutex_);
 
     // tf from cam to odom
     geometry_msgs::PoseStamped pose_cam;
     pose_cam.header = odom->header;//camera_init
     pose_cam.pose = odom->pose.pose;
     geometry_msgs::PoseStamped pose_world;
-    tf_listener_.transformPose("world", pose_cam, pose_world);//camera_init to world，实际没有变化
+    if (pose_cam.header.frame_id.empty() || pose_cam.header.frame_id == "world") {
+      pose_world = pose_cam;
+      pose_world.header.frame_id = "world";
+    } else {
+      try {
+        tf_listener_.transformPose("world", pose_cam, pose_world);//camera_init to world，实际没有变化
+      } catch (const tf::TransformException& ex) {
+        ROS_WARN_THROTTLE(1.0, "[SDFMap] Skip odom frame: cannot transform %s to world: %s",
+                          pose_cam.header.frame_id.c_str(), ex.what());
+        return;
+      }
+    }
     // if (has_first_depth_) return;
 
     camera_pos_(0) = pose_world.pose.position.x;
@@ -643,6 +678,22 @@ void MapROS::cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img) {
     pcl::PointXYZ pt;
     pcl::PointCloud<pcl::PointXYZ> cloud;
     pcl::PointCloud<pcl::PointXYZ> cloud2;
+    if (!local_map_ready_) {
+      cloud.width = 0;
+      cloud.height = 1;
+      cloud.is_dense = true;
+      cloud.header.frame_id = frame_id_;
+      cloud2.width = 0;
+      cloud2.height = 1;
+      cloud2.is_dense = true;
+      cloud2.header.frame_id = frame_id_;
+      sensor_msgs::PointCloud2 cloud_msg;
+      pcl::toROSMsg(cloud, cloud_msg);
+      map_local_pub_.publish(cloud_msg);
+      pcl::toROSMsg(cloud2, cloud_msg);
+      map_local_inflate_pub_.publish(cloud_msg);
+      return;
+    }
     Eigen::Vector3i min_cut = map_->md_->local_bound_min_;//全局变量
     Eigen::Vector3i max_cut = map_->md_->local_bound_max_;
     map_->boundIndex(min_cut);

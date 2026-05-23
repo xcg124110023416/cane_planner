@@ -13,7 +13,8 @@ int main(int argc, char *argv[])
 
     PlannerManager plan_manage(planner);
     plan_manage.init(nh);
-    ros::Duration(1.0).sleep();
-    ros::spin();
+    ros::AsyncSpinner spinner(4);
+    spinner.start();
+    ros::waitForShutdown();
     return 0;
 }

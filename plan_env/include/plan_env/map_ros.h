@@ -51,13 +51,13 @@ private:
                          const nav_msgs::OdometryConstPtr& odom);  
   void cloudOdomCallback(const sensor_msgs::PointCloud2ConstPtr& msg,
                           const nav_msgs::OdometryConstPtr& odom);  
-  void localUpdateCallback(const ros::TimerEvent & /*event*/);
+  void localUpdateCallback(const ros::WallTimerEvent & /*event*/);
   std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> buildDynamicFreeRegions();
 
-  void updateESDFCallback(const ros::TimerEvent& /*event*/);
-  void inflateMapCallback(const ros::TimerEvent &);
-  void visCallback(const ros::TimerEvent& /*event*/);
-  void freeMapCallback(const ros::TimerEvent& /*event*/);
+  void updateESDFCallback(const ros::WallTimerEvent& /*event*/);
+  void inflateMapCallback(const ros::WallTimerEvent &);
+  void visCallback(const ros::WallTimerEvent& /*event*/);
+  void freeMapCallback(const ros::WallTimerEvent& /*event*/);
 
   void odomCallback(const nav_msgs::OdometryConstPtr& odom);
   void cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img);
@@ -107,7 +107,7 @@ private:
       update_range_pub_, depth_pub_;
   ros::Subscriber indep_depth_sub_, indep_odom_sub_, indep_pose_sub_, indep_cloud_sub_;
     ros::Subscriber dynamic_bbox_sub_;
-  ros::Timer esdf_timer_, vis_timer_, freeMapTimer_, local_update_timer_, inflateTimer_;
+  ros::WallTimer esdf_timer_, vis_timer_, freeMapTimer_, local_update_timer_, inflateTimer_;
 
   // params, depth projection
   double cx_, cy_, fx_, fy_;
@@ -124,7 +124,7 @@ private:
 
   // data
   // flags of map state
-  bool local_updated_, esdf_need_update_, map_inflate_;
+  bool local_updated_, esdf_need_update_, map_inflate_, local_map_ready_;
   // input
   Eigen::Vector3d camera_pos_;
   Eigen::Quaterniond camera_q_;
