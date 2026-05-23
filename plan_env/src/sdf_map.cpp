@@ -524,6 +524,9 @@ SDFMap::closetPointInMap(const Eigen::Vector3d& pt, const Eigen::Vector3d& camer
 }
 
 void SDFMap::clearAndInflateLocalMap() {
+  // Clear raw dynamic-obstacle voxels before rebuilding the inflated map.
+  freeHistoryRegions();
+
   // /*clear outside local*/
   // const int vec_margin = 5;
 
