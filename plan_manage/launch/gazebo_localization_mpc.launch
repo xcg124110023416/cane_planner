@@ -3,8 +3,12 @@
     <arg name="start_teleop" default="true"/>
     <arg name="rviz" default="true"/>
     <arg name="gui" default="true"/>
-    <arg name="use_world_pedestrians" default="false"/>
+    <arg name="use_world_pedestrians" default="true"/>
+    <arg name="use_gazebo_pedestrian_truth" default="true"/>
     <arg name="use_pedestrians" default="false"/>
+    <arg name="dynamic_world_file" default="$(find plan_manage)/worlds/corridor_dynamic_9.world"/>
+    <!-- Human walking gait for the guide-cane simulation. The cane steers; the user supplies forward motion. -->
+    <arg name="user_step_length" default="0.40"/>
     <arg name="static_map_pcd" default="$(find fast_lio_sam_qn)/corridor_dynamic_175.pcd"/>
     <arg name="publish_saved_map" default="true"/>
     <!-- Local ESDF input crop for MPC. Keeps ground/ring-pattern points out of the inflated local map. -->
@@ -52,7 +56,10 @@
         <arg name="rviz" value="$(arg rviz)"/>
         <arg name="gui" value="$(arg gui)"/>
         <arg name="use_world_pedestrians" value="$(arg use_world_pedestrians)"/>
+        <arg name="use_gazebo_pedestrian_truth" value="$(arg use_gazebo_pedestrian_truth)"/>
+        <arg name="dynamic_world_file" value="$(arg dynamic_world_file)"/>
         <arg name="use_pedestrians" value="$(arg use_pedestrians)"/>
+        <arg name="user_step_length" value="$(arg user_step_length)"/>
         <arg name="planner_odom_topic" value="/localization_odom"/>
         <arg name="planner_cloud_topic" value="/corrected_current_pcd"/>
         <arg name="input_min_height" value="$(arg input_min_height)"/>

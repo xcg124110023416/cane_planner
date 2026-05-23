@@ -71,6 +71,7 @@ public:
 
   void updateFreeRegions(const std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>>& freeRegions);
   void freeRegions(const std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>>& freeRegions);
+  void freeHistoryRegions();
   void freeRegion(const Eigen::Vector3d& pos1, const Eigen::Vector3d& pos2);
   void setFree(const Eigen::Vector3i& idx);
 
@@ -290,7 +291,12 @@ struct MapData {
 
   inline void SDFMap::updateFreeRegions(const std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>>& freeRegions){
 		this->freeRegions_ = freeRegions;
-		if (this->histFreeRegions_.size() <= 5){
+		if (freeRegions.empty()){
+			this->histFreeRegions_.clear();
+			this->useFreeRegions_ = false;
+			return;
+		}
+		if (this->histFreeRegions_.size() < 5){
 			this->histFreeRegions_.push_back(freeRegions);
 		}
 		else{
@@ -313,15 +319,24 @@ struct MapData {
 		}
 	}
 
+	inline void SDFMap::freeHistoryRegions(){
+		if (!this->useFreeRegions_) return;
+		for (const auto& freeRegions : this->histFreeRegions_){
+			this->freeRegions(freeRegions);
+		}
+	}
+
   inline void SDFMap::freeRegion(const Eigen::Vector3d& pos1, const Eigen::Vector3d& pos2){
 		Eigen::Vector3i idx1, idx2;
 		this->posToIndex(pos1, idx1);
 		this->posToIndex(pos2, idx2);
 		this->boundIndex(idx1);
 		this->boundIndex(idx2);
-		for (int xID=idx1(0); xID<=idx2(0); ++xID){
-			for (int yID=idx1(1); yID<=idx2(1); ++yID){
-				for (int zID=idx1(2); zID<=idx2(2); ++zID){
+		Eigen::Vector3i min_idx = idx1.cwiseMin(idx2);
+		Eigen::Vector3i max_idx = idx1.cwiseMax(idx2);
+		for (int xID=min_idx(0); xID<=max_idx(0); ++xID){
+			for (int yID=min_idx(1); yID<=max_idx(1); ++yID){
+				for (int zID=min_idx(2); zID<=max_idx(2); ++zID){
 					this->setFree(Eigen::Vector3i (xID, yID, zID));
 				}	
 			}
@@ -346,8 +361,11 @@ struct MapData {
 					inflateIndex(0) = idx(0) + ix;
 					inflateIndex(1) = idx(1) + iy;
 					inflateIndex(2) = idx(2) + iz;
+					if (not this->isInMap(inflateIndex)){
+						continue;
+					}
 					inflateAddress = this->toAddress(inflateIndex);
-					if ((inflateAddress < 0) or (inflateAddress > maxIndex)){
+					if ((inflateAddress < 0) or (inflateAddress >= maxIndex)){
 						continue; // those points are not in the reserved map
 					} 
 					md_->occupancy_buffer_inflate_[inflateAddress] = false;

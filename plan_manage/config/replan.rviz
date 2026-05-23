@@ -263,7 +263,7 @@ Visualization Manager:
           Color: 255; 255; 255
           Color Transformer: Intensity
           Decay Time: 0
-          Enabled: true
+          Enabled: false
           Invert Rainbow: true
           Max Color: 255; 255; 255
           Min Color: 0; 0; 0
@@ -278,7 +278,7 @@ Visualization Manager:
           Unreliable: false
           Use Fixed Frame: true
           Use rainbow: true
-          Value: true
+          Value: false
         - Alpha: 0.6499999761581421
           Autocompute Intensity Bounds: true
           Autocompute Value Bounds:
@@ -470,16 +470,16 @@ Visualization Manager:
       Value: false
     - Class: rviz/MarkerArray
       Enabled: true
-      Marker Topic: /kin_replan_node/onboard_detector/dynamic_bboxes
-      Name: Dynamic_bboxes
+      Marker Topic: /onboard_detector/dynamic_bboxes
+      Name: Gazebo_dynamic_clear_bboxes
       Namespaces:
         {}
       Queue Size: 100
       Value: true
     - Class: rviz/MarkerArray
       Enabled: true
-      Marker Topic: /pedestrian_sim/visualization
-      Name: Pedestrians
+      Marker Topic: /gazebo_pedestrian_truth/visualization
+      Name: Gazebo_pedestrian_truth
       Namespaces:
         {}
       Queue Size: 10

@@ -30,6 +30,11 @@ namespace fast_planner
     std::lock_guard<std::mutex> lock(obstacles_mutex_);
     latest_obstacles_.clear();
     for (const auto& m : msg->markers) {
+      if (m.action != visualization_msgs::Marker::ADD ||
+          m.type != visualization_msgs::Marker::CUBE ||
+          m.scale.x <= 0.0 || m.scale.y <= 0.0 || m.scale.z <= 0.0) {
+        continue;
+      }
       onboardDetector::box3D box;
       box.x = m.pose.position.x;
       box.y = m.pose.position.y;
@@ -181,27 +186,35 @@ namespace fast_planner
   }
 
   void MapROS::inflateMapCallback(const ros::TimerEvent &){
-    if(map_inflate_){
-      map_->clearAndInflateLocalMap();
-      map_inflate_ = false;
-      esdf_need_update_ = true;
-    }
-    //同时清理动态障碍物占据的空间
     std::vector<onboardDetector::box3D> obstacles;
     {
       std::lock_guard<std::mutex> lock(obstacles_mutex_);
       obstacles = latest_obstacles_;
     }
+
     std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> freeRegions;
+    const double clear_margin_xy = map_->mp_->obstacles_inflation_ + 0.5 * map_->mp_->resolution_;
+    const double clear_margin_z = map_->mp_->obstacles_inflation_ + 0.5 * map_->mp_->resolution_;
     for (const auto& ob: obstacles){
-      Eigen::Vector3d lowerBound (ob.x - ob.x_width/2 - 0.1, ob.y - ob.y_width/2 - 0.1, ob.z);
-      Eigen::Vector3d upperBound (ob.x + ob.x_width/2 + 0.1, ob.y + ob.y_width/2 + 0.1, ob.z + ob.z_width + 0.1);
+      Eigen::Vector3d lowerBound (ob.x - ob.x_width/2 - clear_margin_xy,
+                                  ob.y - ob.y_width/2 - clear_margin_xy,
+                                  ob.z - ob.z_width/2 - clear_margin_z);
+      Eigen::Vector3d upperBound (ob.x + ob.x_width/2 + clear_margin_xy,
+                                  ob.y + ob.y_width/2 + clear_margin_xy,
+                                  ob.z + ob.z_width/2 + clear_margin_z);
       freeRegions.push_back(std::make_pair(lowerBound, upperBound));
       // cout<<"free region: "<<lowerBound.transpose()<<" to "<<upperBound.transpose()<<endl;
     }
+    map_->updateFreeRegions(freeRegions);
+    if(map_inflate_){
+      map_->clearAndInflateLocalMap();
+      map_inflate_ = false;
+      esdf_need_update_ = true;
+    }
+
     if (!freeRegions.empty()) {
-      this->map_->updateFreeRegions(freeRegions);
-      this->map_->freeRegions(freeRegions);
+      map_->freeHistoryRegions();
+      esdf_need_update_ = true;
     }
 
   }

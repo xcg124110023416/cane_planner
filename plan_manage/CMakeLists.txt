@@ -79,5 +79,6 @@ catkin_install_python(PROGRAMS
   scripts/load_steering_controllers.py
   scripts/registered_map_accumulator.py
   scripts/model_pose_guard.py
+  scripts/gazebo_pedestrian_truth_bridge.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
