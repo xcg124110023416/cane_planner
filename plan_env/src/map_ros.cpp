@@ -178,6 +178,7 @@ namespace fast_planner
       return;
     }
 
+    map_->updateFreeRegions(buildDynamicFreeRegions());
     int num = point_cloud_.points.size();
     map_->inputPointCloud(point_cloud_, num, camera_pos_);
 
@@ -185,7 +186,7 @@ namespace fast_planner
     map_inflate_ = true;
   }
 
-  void MapROS::inflateMapCallback(const ros::TimerEvent &){
+  std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> MapROS::buildDynamicFreeRegions(){
     std::vector<onboardDetector::box3D> obstacles;
     {
       std::lock_guard<std::mutex> lock(obstacles_mutex_);
@@ -205,6 +206,11 @@ namespace fast_planner
       freeRegions.push_back(std::make_pair(lowerBound, upperBound));
       // cout<<"free region: "<<lowerBound.transpose()<<" to "<<upperBound.transpose()<<endl;
     }
+    return freeRegions;
+  }
+
+  void MapROS::inflateMapCallback(const ros::TimerEvent &){
+    std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> freeRegions = buildDynamicFreeRegions();
     map_->updateFreeRegions(freeRegions);
     if(map_inflate_){
       map_->clearAndInflateLocalMap();

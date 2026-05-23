@@ -72,6 +72,9 @@ public:
   void updateFreeRegions(const std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>>& freeRegions);
   void freeRegions(const std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>>& freeRegions);
   void freeHistoryRegions();
+  bool isInFreeRegion(const Eigen::Vector3d& pos, const std::pair<Eigen::Vector3d, Eigen::Vector3d>& freeRegion);
+  bool isInFreeRegions(const Eigen::Vector3d& pos, const std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>>& freeRegions);
+  bool isInHistoryFreeRegions(const Eigen::Vector3d& pos);
   void freeRegion(const Eigen::Vector3d& pos1, const Eigen::Vector3d& pos2);
   void setFree(const Eigen::Vector3i& idx);
 
@@ -324,6 +327,34 @@ struct MapData {
 		for (const auto& freeRegions : this->histFreeRegions_){
 			this->freeRegions(freeRegions);
 		}
+	}
+
+	inline bool SDFMap::isInFreeRegion(
+			const Eigen::Vector3d& pos,
+			const std::pair<Eigen::Vector3d, Eigen::Vector3d>& freeRegion){
+		return (pos.array() >= freeRegion.first.array()).all() &&
+		       (pos.array() <= freeRegion.second.array()).all();
+	}
+
+	inline bool SDFMap::isInFreeRegions(
+			const Eigen::Vector3d& pos,
+			const std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>>& freeRegions){
+		for (const auto& freeRegion : freeRegions){
+			if (this->isInFreeRegion(pos, freeRegion)){
+				return true;
+			}
+		}
+		return false;
+	}
+
+	inline bool SDFMap::isInHistoryFreeRegions(const Eigen::Vector3d& pos){
+		if (!this->useFreeRegions_) return false;
+		for (const auto& freeRegions : this->histFreeRegions_){
+			if (this->isInFreeRegions(pos, freeRegions)){
+				return true;
+			}
+		}
+		return false;
 	}
 
   inline void SDFMap::freeRegion(const Eigen::Vector3d& pos1, const Eigen::Vector3d& pos2){

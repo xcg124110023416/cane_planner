@@ -11,6 +11,7 @@
 #include <tf/transform_listener.h>
 
 #include <cv_bridge/cv_bridge.h>
+#include <Eigen/Eigen>
 #include <geometry_msgs/PoseStamped.h>
 #include <nav_msgs/Odometry.h>
 #include <visualization_msgs/MarkerArray.h>
@@ -20,6 +21,8 @@
 #include <memory>
 #include <random>
 #include <mutex>
+#include <utility>
+#include <vector>
 
 using std::shared_ptr;
 using std::normal_distribution;
@@ -49,6 +52,7 @@ private:
   void cloudOdomCallback(const sensor_msgs::PointCloud2ConstPtr& msg,
                           const nav_msgs::OdometryConstPtr& odom);  
   void localUpdateCallback(const ros::TimerEvent & /*event*/);
+  std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> buildDynamicFreeRegions();
 
   void updateESDFCallback(const ros::TimerEvent& /*event*/);
   void inflateMapCallback(const ros::TimerEvent &);

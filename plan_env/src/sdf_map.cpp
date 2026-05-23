@@ -412,6 +412,10 @@ void SDFMap::inputPointCloud(
     
     if (pt_w[2] < mp_->input_min_height_ || pt_w[2] > mp_->input_max_height_) continue;
 
+    if (useFreeRegions_ && isInHistoryFreeRegions(pt_w)) {
+      continue;
+    }
+
     for (int k = 0; k < 3; ++k) {
       update_min[k] = min(update_min[k], pt_w[k]);
       update_max[k] = max(update_max[k], pt_w[k]);
@@ -480,6 +484,11 @@ void SDFMap::inputPointCloud(
     if (std::abs(pos(0) - camera_pos(0)) > mp_->local_update_range_(0) ||
         std::abs(pos(1) - camera_pos(1)) > mp_->local_update_range_(1) ||
         std::abs(pos(2) - camera_pos(2)) > mp_->local_update_range_(2)) {
+      continue;
+    }
+
+    if (useFreeRegions_ && isInHistoryFreeRegions(pos)) {
+      setFree(idx);
       continue;
     }
 
