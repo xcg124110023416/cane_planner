@@ -210,16 +210,9 @@ namespace fast_planner
   }
 
   void MapROS::inflateMapCallback(const ros::TimerEvent &){
-    std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> freeRegions = buildDynamicFreeRegions();
-    map_->updateFreeRegions(freeRegions);
     if(map_inflate_){
       map_->clearAndInflateLocalMap();
       map_inflate_ = false;
-      esdf_need_update_ = true;
-    }
-
-    if (!freeRegions.empty()) {
-      map_->freeHistoryRegions();
       esdf_need_update_ = true;
     }
 

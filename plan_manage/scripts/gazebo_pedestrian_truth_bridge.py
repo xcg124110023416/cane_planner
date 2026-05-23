@@ -31,7 +31,7 @@ class GazeboPedestrianTruthBridge:
         self.publish_rate = float(rospy.get_param("~publish_rate", 15.0))
         self.center_z_from_size = bool(rospy.get_param("~center_z_from_size", True))
         self.publish_markers = bool(rospy.get_param("~publish_markers", True))
-        self.dynamic_bbox_size = self._vector_param("~dynamic_bbox_size", [1.3, 1.3, 1.9])
+        self.dynamic_bbox_size = self._vector_param("~dynamic_bbox_size", [1.0, 1.0, 1.9])
         self.dynamic_bbox_past_time = float(rospy.get_param("~dynamic_bbox_past_time", 1.0))
         self.dynamic_bbox_future_time = float(rospy.get_param("~dynamic_bbox_future_time", 0.2))
         self.dynamic_bbox_min_sweep_speed = float(

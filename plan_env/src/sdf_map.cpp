@@ -592,7 +592,6 @@ void SDFMap::clearAndInflateLocalMap() {
 
   // update inflated occupied cells
   // clean outdated occupancy
-  freeHistoryRegions();
 
   int inf_step = ceil(mp_->obstacles_inflation_ / mp_->resolution_);//膨胀的体素数
   vector<Eigen::Vector3i> inf_pts(pow(2 * inf_step + 1, 3));
@@ -635,7 +634,6 @@ void SDFMap::clearAndInflateLocalMap() {
         md_->occupancy_buffer_[toAddress(x, y, ceil_id)] = mp_->clamp_max_log_;
       }
   }
-  freeHistoryRegions();
 }
 
 double SDFMap::getResolution() {
