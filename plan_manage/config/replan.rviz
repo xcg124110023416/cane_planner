@@ -473,7 +473,7 @@ Visualization Manager:
       Marker Topic: /onboard_detector/dynamic_bboxes
       Name: Gazebo_dynamic_clear_bboxes
       Namespaces:
-        {}
+        gazebo_pedestrian_truth_dynamic_bboxes: true
       Queue Size: 100
       Value: true
     - Class: rviz/MarkerArray
@@ -481,7 +481,8 @@ Visualization Manager:
       Marker Topic: /gazebo_pedestrian_truth/visualization
       Name: Gazebo_pedestrian_truth
       Namespaces:
-        {}
+        gazebo_pedestrian_truth: true
+        gazebo_pedestrian_truth_velocity: true
       Queue Size: 10
       Value: true
     - Alpha: 1
@@ -560,7 +561,7 @@ Visualization Manager:
       Buffer Length: 1
       Class: rviz/Path
       Color: 52; 101; 164
-      Enabled: true
+      Enabled: false
       Head Diameter: 0.30000001192092896
       Head Length: 0.20000000298023224
       Length: 0.30000001192092896
@@ -579,12 +580,12 @@ Visualization Manager:
       Shaft Length: 0.10000000149011612
       Topic: /ori_path
       Unreliable: false
-      Value: true
+      Value: false
     - Alpha: 1
       Buffer Length: 1
       Class: rviz/Path
       Color: 0; 255; 0
-      Enabled: true
+      Enabled: false
       Head Diameter: 0.30000001192092896
       Head Length: 0.20000000298023224
       Length: 0.30000001192092896
@@ -603,21 +604,21 @@ Visualization Manager:
       Shaft Length: 0.10000000149011612
       Topic: /corrected_path
       Unreliable: false
-      Value: true
+      Value: false
     - Class: rviz/Marker
-      Enabled: true
+      Enabled: false
       Marker Topic: /map_match
       Name: localization_map_match
       Namespaces:
-        "": true
+        {}
       Queue Size: 100
-      Value: true
+      Value: false
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /mpc/best_traj
       Name: MPC_BestTraj
       Namespaces:
-        {}
+        mpc_best: true
       Queue Size: 10
       Value: true
     - Class: rviz/Marker
@@ -625,7 +626,7 @@ Visualization Manager:
       Marker Topic: /mpc/current_waypoint
       Name: MPC_current_waypoint
       Namespaces:
-        {}
+        mpc_curr_wp: true
       Queue Size: 10
       Value: true
     - Class: rviz/Marker
@@ -834,7 +835,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/XYOrbit
-      Distance: 47.813758850097656
+      Distance: 14.850639343261719
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -842,8 +843,8 @@ Visualization Manager:
         Value: false
       Field of View: 0.800000011920929
       Focal Point:
-        X: 3.1728038787841797
-        Y: 0.2090575098991394
+        X: 7.873909950256348
+        Y: 0.35270652174949646
         Z: 5.538937330129556e-06
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806

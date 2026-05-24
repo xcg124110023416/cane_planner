@@ -2,7 +2,7 @@
     <arg name="planner" default="3"/>
     <arg name="start_teleop" default="true"/>
     <arg name="rviz" default="true"/>
-    <arg name="gui" default="true"/>
+    <arg name="gui" default="false"/>
     <arg name="use_world_pedestrians" default="true"/>
     <arg name="use_gazebo_pedestrian_truth" default="true"/>
     <arg name="use_pedestrians" default="false"/>
@@ -11,6 +11,7 @@
     <arg name="user_step_length" default="0.40"/>
     <arg name="static_map_pcd" default="$(find fast_lio_sam_qn)/corridor_dynamic_175.pcd"/>
     <arg name="publish_saved_map" default="true"/>
+    <arg name="start_laser_map_accumulator" default="false"/>
     <!-- Local ESDF input crop for MPC. Keeps ground/ring-pattern points out of the inflated local map. -->
     <arg name="input_min_height" default="0.45"/>
     <arg name="input_max_height" default="2.0"/>
@@ -60,6 +61,7 @@
         <arg name="dynamic_world_file" value="$(arg dynamic_world_file)"/>
         <arg name="use_pedestrians" value="$(arg use_pedestrians)"/>
         <arg name="user_step_length" value="$(arg user_step_length)"/>
+        <arg name="start_laser_map_accumulator" value="$(arg start_laser_map_accumulator)"/>
         <arg name="planner_odom_topic" value="/localization_odom"/>
         <arg name="planner_cloud_topic" value="/corrected_current_pcd"/>
         <arg name="input_min_height" value="$(arg input_min_height)"/>

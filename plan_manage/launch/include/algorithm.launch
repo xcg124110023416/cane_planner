@@ -59,7 +59,7 @@
         <param name="manager/global_wp_spacing" value="1.0" type="double"/>
         <param name="manager/global_wp_arrival_radius" value="0.1" type="double"/>
         <!-- 前向截断距离：从最近投影点向前看多少米选为当前目标 -->
-        <param name="manager/lookahead_dist" value="1.3" type="double"/>
+        <param name="manager/lookahead_dist" value="2.2" type="double"/>
         <param name="manager/max_vel" value="1.0" type="double"/>
         <param name="manager/max_acc" value="2.0" type="double"/>
         <param name="manager/max_jerk" value="4" type="double"/>
@@ -219,7 +219,7 @@
         <!-- 转向幅度代价：惩罚|api|绝对值，越大越走直线 -->
         <param name="mpc/w_steer" value="0.5" type="double"/>
         <!-- risk已归一化：每点平均risk×权重，不再是累加值 -->
-        <param name="mpc/w_risk" value="1.5" type="double"/>
+        <param name="mpc/w_risk" value="2.0" type="double"/>
         <!-- goal已归一化：最终距离/horizon步数×权重 -->
         <param name="mpc/w_goal" value="25.0" type="double"/>
         <!-- 转向变化率惩罚权重：越大越平滑，越小越灵活（0=不限制） -->
@@ -241,13 +241,13 @@
         <param name="mpc/nominal_al" value="$(arg user_step_length)" type="double"/>
         <param name="mpc/nominal_aw" value="0.0" type="double"/>
         <param name="mpc/nominal_api" value="0.0" type="double"/>
-        <param name="mpc/risk_tau" value="0.5" type="double"/>
+        <param name="mpc/risk_tau" value="0.8" type="double"/>
         <param name="mpc/risk_A" value="5.0" type="double"/>
         <param name="mpc/risk_sigma_x" value="0.6" type="double"/>
         <param name="mpc/risk_sigma_y" value="0.4" type="double"/>
         <param name="mpc/risk_cutoff" value="3.0" type="double"/>
         <!-- 光晕：硬核心外的低幅包络。halo_scale=0关闭(纯高斯)，scale>0时包络宽度=core_sigma*scale，ratio=峰值/A -->
-        <param name="mpc/risk_halo_scale" value="2.0" type="double"/>
+        <param name="mpc/risk_halo_scale" value="2.5" type="double"/>
         <param name="mpc/risk_halo_ratio" value="0.2" type="double"/>
 
         <!-- trajectory optimization 代价权重 -->
