@@ -80,5 +80,9 @@ catkin_install_python(PROGRAMS
   scripts/registered_map_accumulator.py
   scripts/model_pose_guard.py
   scripts/gazebo_pedestrian_truth_bridge.py
+  scripts/mpc_event_monitor.py
+  scripts/record_mpc_eval.sh
+  scripts/analyze_mpc_eval.py
+  scripts/summarize_mpc_eval.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

@@ -44,11 +44,16 @@ namespace cane_planner
         nh.param("mpc/stop_valid_ratio_thresh", mpc_stop_valid_ratio_thresh_, 0.08);
         nh.param("mpc/stop_clearance_thresh", mpc_stop_clearance_thresh_, 0.15);
         nh.param("mpc/stop_ttc_thresh", mpc_stop_ttc_thresh_, 0.5);
+        nh.param("mpc/stop_hold_time", mpc_stop_hold_time_, 0.8);
+        nh.param("mpc/stop_release_clear_time", mpc_stop_release_clear_time_, 0.5);
         nh.param("mpc/yield_enable", mpc_yield_enable_, true);
         nh.param("mpc/yield_front_dist", mpc_yield_front_dist_, 2.0);
         nh.param("mpc/yield_lateral_dist", mpc_yield_lateral_dist_, 0.9);
         nh.param("mpc/yield_cross_speed", mpc_yield_cross_speed_, 0.15);
         nh.param("mpc/yield_time_gap", mpc_yield_time_gap_, 0.8);
+        nh.param("mpc/yield_release_front_margin", mpc_yield_release_front_margin_, 0.4);
+        nh.param("mpc/yield_release_lateral_margin", mpc_yield_release_lateral_margin_, 0.2);
+        nh.param("mpc/yield_release_time_margin", mpc_yield_release_time_margin_, 0.2);
     }
 
 
@@ -861,6 +866,10 @@ namespace cane_planner
         mpc_step_count_ = 0;
         mpc_stuck_steps_ = 0;
         mpc_reached_goal_ = false;
+        mpc_stop_state_active_ = false;
+        mpc_stop_enter_time_ = ros::Time(0);
+        mpc_stop_clear_since_ = ros::Time(0);
+        mpc_latched_stop_reason_ = "OK";
         last_theta_ = start_state_(2);
         last_com_pos_ = com_init_pos.head(2);
 
@@ -1038,7 +1047,7 @@ namespace cane_planner
         {
             const auto dbg = mpc_controller_->getDebugMetrics();
             std_msgs::Float64MultiArray metrics;
-            metrics.data.reserve(10);
+            metrics.data.reserve(12);
             metrics.data.push_back(dbg.plan_time_ms);
             metrics.data.push_back(dbg.valid_sample_ratio);
             metrics.data.push_back(std::isfinite(dbg.best_total_cost) ? dbg.best_total_cost : -1.0);
@@ -1049,67 +1058,141 @@ namespace cane_planner
             metrics.data.push_back((double)dbg.num_samples);
             metrics.data.push_back(dbg.plan_valid ? 1.0 : 0.0);
             metrics.data.push_back(dbg.risk_weight_scale);
+            metrics.data.push_back(std::isfinite(dbg.best_min_dynamic_clearance) ? dbg.best_min_dynamic_clearance : -1.0);
+            metrics.data.push_back(std::isfinite(dbg.best_min_cpa_time) ? dbg.best_min_cpa_time : -1.0);
             mpc_debug_metrics_pub_.publish(metrics);
         }
 
         const auto dbg = mpc_controller_->getDebugMetrics();
-        bool stop_advice = false;
-        std::string stop_reason = "OK";
+        bool raw_stop_advice = false;
+        std::string raw_stop_reason = "OK";
+        auto hasCrossingYieldConflict = [&](double front_dist,
+                                            double lateral_dist,
+                                            double time_gap) -> bool
+        {
+            if (!mpc_yield_enable_)
+                return false;
+
+            const double yaw = start_state_(2);
+            const Eigen::Vector2d forward(std::cos(yaw), std::sin(yaw));
+            const Eigen::Vector2d left(-std::sin(yaw), std::cos(yaw));
+            const Eigen::Vector2d robot_pos(current_com(0), current_com(1));
+            const double planned_speed = std::max(0.15, control(0) / 0.35);
+
+            for (size_t oi = 0; oi < obs_pos.size(); ++oi)
+            {
+                Eigen::Vector2d obs_p(obs_pos[oi](0), obs_pos[oi](1));
+                Eigen::Vector2d obs_v(obs_vel[oi](0), obs_vel[oi](1));
+                Eigen::Vector2d rel = obs_p - robot_pos;
+                double front = rel.dot(forward);
+                double lateral = rel.dot(left);
+                double v_lat = obs_v.dot(left);
+
+                if (front <= 0.0 || front > front_dist)
+                    continue;
+                if (std::abs(lateral) > lateral_dist)
+                    continue;
+                if (std::abs(v_lat) < mpc_yield_cross_speed_)
+                    continue;
+                if (lateral * v_lat >= 0.0)
+                    continue;  // moving away from the robot path centerline
+
+                double ped_time_to_path = std::abs(lateral) / std::max(1e-3, std::abs(v_lat));
+                double robot_time_to_cross = front / planned_speed;
+                if (ped_time_to_path < robot_time_to_cross + time_gap)
+                    return true;
+            }
+            return false;
+        };
+
         if (mpc_stop_advice_enable_ && !obs_pos.empty())
         {
             if (!dbg.plan_valid)
             {
-                stop_advice = true;
-                stop_reason = "NO_VALID_DYNAMIC_PLAN";
+                raw_stop_advice = true;
+                raw_stop_reason = "NO_VALID_DYNAMIC_PLAN";
             }
             else if (std::isfinite(dbg.min_dynamic_clearance) &&
                      dbg.min_dynamic_clearance < mpc_stop_clearance_thresh_ &&
                      dbg.valid_sample_ratio < mpc_stop_valid_ratio_thresh_)
             {
-                stop_advice = true;
-                stop_reason = "LOW_VALID_RATIO_LOW_CLEARANCE";
+                raw_stop_advice = true;
+                raw_stop_reason = "LOW_VALID_RATIO_LOW_CLEARANCE";
             }
             else if (std::isfinite(dbg.min_cpa_time) &&
                      dbg.min_cpa_time < mpc_stop_ttc_thresh_ &&
                      dbg.valid_sample_ratio < mpc_stop_valid_ratio_thresh_)
             {
-                stop_advice = true;
-                stop_reason = "LOW_VALID_RATIO_SHORT_TTC";
+                raw_stop_advice = true;
+                raw_stop_reason = "LOW_VALID_RATIO_SHORT_TTC";
             }
-            else if (mpc_yield_enable_)
+            else if (hasCrossingYieldConflict(mpc_yield_front_dist_,
+                                              mpc_yield_lateral_dist_,
+                                              mpc_yield_time_gap_))
             {
-                const double yaw = start_state_(2);
-                const Eigen::Vector2d forward(std::cos(yaw), std::sin(yaw));
-                const Eigen::Vector2d left(-std::sin(yaw), std::cos(yaw));
-                const Eigen::Vector2d robot_pos(current_com(0), current_com(1));
-                const double planned_speed = std::max(0.15, control(0) / 0.35);
+                raw_stop_advice = true;
+                raw_stop_reason = "YIELD_TO_CROSSING_PEDESTRIAN";
+            }
+        }
 
-                for (size_t oi = 0; oi < obs_pos.size(); ++oi)
+        bool stop_advice = raw_stop_advice;
+        std::string stop_reason = raw_stop_reason;
+        if (!mpc_stop_advice_enable_)
+        {
+            mpc_stop_state_active_ = false;
+            mpc_stop_enter_time_ = ros::Time(0);
+            mpc_stop_clear_since_ = ros::Time(0);
+            mpc_latched_stop_reason_ = "OK";
+        }
+        else
+        {
+            const ros::Time now = ros::Time::now();
+            const bool expanded_yield_conflict =
+                !obs_pos.empty() &&
+                hasCrossingYieldConflict(mpc_yield_front_dist_ + mpc_yield_release_front_margin_,
+                                         mpc_yield_lateral_dist_ + mpc_yield_release_lateral_margin_,
+                                         mpc_yield_time_gap_ + mpc_yield_release_time_margin_);
+
+            if (raw_stop_advice)
+            {
+                if (!mpc_stop_state_active_)
+                    mpc_stop_enter_time_ = now;
+                mpc_stop_state_active_ = true;
+                mpc_stop_clear_since_ = ros::Time(0);
+                mpc_latched_stop_reason_ = raw_stop_reason;
+            }
+            else if (mpc_stop_state_active_)
+            {
+                const bool hold_elapsed =
+                    mpc_stop_enter_time_.isZero() ||
+                    (now - mpc_stop_enter_time_).toSec() >= mpc_stop_hold_time_;
+                const bool release_clear = !expanded_yield_conflict;
+                if (!release_clear)
                 {
-                    Eigen::Vector2d obs_p(obs_pos[oi](0), obs_pos[oi](1));
-                    Eigen::Vector2d obs_v(obs_vel[oi](0), obs_vel[oi](1));
-                    Eigen::Vector2d rel = obs_p - robot_pos;
-                    double front = rel.dot(forward);
-                    double lateral = rel.dot(left);
-                    double v_lat = obs_v.dot(left);
+                    mpc_stop_clear_since_ = ros::Time(0);
+                }
+                else if (mpc_stop_clear_since_.isZero())
+                {
+                    mpc_stop_clear_since_ = now;
+                }
 
-                    if (front <= 0.0 || front > mpc_yield_front_dist_)
-                        continue;
-                    if (std::abs(lateral) > mpc_yield_lateral_dist_)
-                        continue;
-                    if (std::abs(v_lat) < mpc_yield_cross_speed_)
-                        continue;
-                    if (lateral * v_lat >= 0.0)
-                        continue;  // moving away from the robot path centerline
+                const bool clear_elapsed =
+                    !mpc_stop_clear_since_.isZero() &&
+                    (now - mpc_stop_clear_since_).toSec() >= mpc_stop_release_clear_time_;
 
-                    double ped_time_to_path = std::abs(lateral) / std::max(1e-3, std::abs(v_lat));
-                    double robot_time_to_cross = front / planned_speed;
-                    if (ped_time_to_path < robot_time_to_cross + mpc_yield_time_gap_)
-                    {
-                        stop_advice = true;
-                        stop_reason = "YIELD_TO_CROSSING_PEDESTRIAN";
-                        break;
-                    }
+                if (hold_elapsed && clear_elapsed)
+                {
+                    mpc_stop_state_active_ = false;
+                    mpc_stop_enter_time_ = ros::Time(0);
+                    mpc_stop_clear_since_ = ros::Time(0);
+                    mpc_latched_stop_reason_ = "OK";
+                    stop_advice = false;
+                    stop_reason = "OK";
+                }
+                else
+                {
+                    stop_advice = true;
+                    stop_reason = mpc_latched_stop_reason_.empty() ? "STOP_HOLD" : mpc_latched_stop_reason_;
                 }
             }
         }

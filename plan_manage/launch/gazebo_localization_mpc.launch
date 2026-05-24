@@ -39,6 +39,11 @@
     <arg name="global_esdf_min_points_per_cell" default="1"/>
     <arg name="static_endpoint_clear_radius" default="0.25"/>
     <arg name="publish_static_map_debug" default="true"/>
+    <!-- Baseline toggles for ablation experiments. Defaults keep the full method. -->
+    <arg name="mpc_enable_cpa" default="true"/>
+    <arg name="mpc_enable_adaptive_risk" default="true"/>
+    <arg name="mpc_enable_stop_enforce" default="true"/>
+    <arg name="mpc_enable_yield" default="true"/>
 
     <!-- Navigation mode driven by map-based relocalization:
          /localization_odom gives the global pose, and /corrected_current_pcd
@@ -90,5 +95,9 @@
         <arg name="global_esdf_min_points_per_cell" value="$(arg global_esdf_min_points_per_cell)"/>
         <arg name="static_endpoint_clear_radius" value="$(arg static_endpoint_clear_radius)"/>
         <arg name="publish_static_map_debug" value="$(arg publish_static_map_debug)"/>
+        <arg name="mpc_enable_cpa" value="$(arg mpc_enable_cpa)"/>
+        <arg name="mpc_enable_adaptive_risk" value="$(arg mpc_enable_adaptive_risk)"/>
+        <arg name="mpc_enable_stop_enforce" value="$(arg mpc_enable_stop_enforce)"/>
+        <arg name="mpc_enable_yield" value="$(arg mpc_enable_yield)"/>
     </include>
 </launch>

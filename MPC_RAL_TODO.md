@@ -33,7 +33,7 @@ Current relevant parameters:
 - `manager/lookahead_dist = 2.2`
 - `mpc/w_risk = 2.0`
 - `mpc/risk_tau = 0.8`
-- `mpc/risk_halo_scale = 2.5`
+- `mpc/risk_halo_scale = 2.0`
 
 ## Target Contribution
 
@@ -148,7 +148,9 @@ Then use this radius in:
 Status: implemented in the first lightweight prototype. The planner publishes
 `/mpc/debug_metrics` as `std_msgs/Float64MultiArray` with runtime, valid sample
 ratio, best cost, minimum dynamic clearance, minimum CPA time, rejection counts,
-sample count, and plan-valid flag.
+sample count, plan-valid flag, and best-trajectory minimum dynamic
+clearance/CPA time. The original fields are preserved and the best-trajectory
+fields are appended as `data[10]` and `data[11]`.
 
 ### Purpose
 
@@ -169,6 +171,8 @@ system should expose numeric metrics that explain why MPC chose a control.
   - TTC/CPA cost.
 - Minimum predicted pedestrian distance.
 - Minimum predicted TTC/CPA time.
+- Minimum predicted pedestrian distance of the selected best trajectory.
+- Minimum predicted TTC/CPA time of the selected best trajectory.
 - Whether a hard dynamic constraint was triggered.
 - MPC runtime in milliseconds.
 
@@ -185,6 +189,158 @@ system should expose numeric metrics that explain why MPC chose a control.
 - Easier parameter tuning.
 - Quantitative plots for paper figures.
 - Evidence that the proposed conflict risk improves behavior.
+- Clearer distinction between bad sampled rollouts and the selected trajectory.
+
+## Priority 3B: Event-Style MPC Monitor
+
+Status: implemented as a lightweight first version. The previous validation
+workflow relied on raw `rostopic echo`
+for `/mpc/stop_reason`, `/mpc/stop_advice`, and `/mpc/debug_metrics`. These
+topics print continuously and are hard to inspect during simulation. The new
+monitor tool only prints meaningful state changes and compact summaries.
+
+### Purpose
+
+Make validation usable without watching several scrolling terminals. The monitor
+should report stop/yield transitions, reason changes, and selected debug values
+only when they matter.
+
+### Expected Tool Behavior
+
+Example output:
+
+```text
+[32.9s] OK -> YIELD_TO_CROSSING_PEDESTRIAN valid=0.77 clearance=-0.08 ttc=0.00
+[35.1s] YIELD_TO_CROSSING_PEDESTRIAN -> OK valid=0.95 clearance=0.72 ttc=1.40
+```
+
+The implemented monitor defaults to a quiet validation mode: it prints only
+STOP entry, STOP release, long-active warnings, and the final summary. Per-frame
+reason changes can be enabled when debugging with:
+
+```bash
+rosrun plan_manage mpc_event_monitor.py _print_reason_updates:=true
+```
+
+### Expected Code Output
+
+Implemented script:
+
+- `plan_manage/scripts/mpc_event_monitor.py`
+
+Suggested subscriptions:
+
+- `/mpc/stop_reason`
+- `/mpc/stop_advice`
+- `/mpc/debug_metrics`
+
+Optional later extensions:
+
+- write a CSV event log;
+- count stop/yield events per run;
+- report stop duration and release time;
+- warn if stop/yield remains active longer than a configurable threshold.
+
+## Priority 3C: Rosbag Recording Script for MPC Evaluation
+
+Status: implemented as a first lightweight recorder and analyzer. The recorder
+stores the core numeric, state, trajectory, and pedestrian-truth topics needed
+to replay a run without storing large point clouds by default. The analyzer
+prints and saves a compact experiment summary from the recorded bag.
+
+### Purpose
+
+Move from manual terminal observation to repeatable experiment data collection.
+Each run should leave a bag file plus metadata so later scripts can compute
+stop count, stop duration, minimum pedestrian distance, path progress, and MPC
+runtime statistics.
+
+### Implemented Tool
+
+- `plan_manage/scripts/record_mpc_eval.sh`
+- `plan_manage/scripts/analyze_mpc_eval.py`
+
+Usage:
+
+```bash
+rosrun plan_manage record_mpc_eval.sh crossing_test_01
+```
+
+Analyze a completed run:
+
+```bash
+rosrun plan_manage analyze_mpc_eval.py /home/xcg/ws/records/YYYYMMDD_HHMMSS_crossing_test_01
+```
+
+The analyzer writes `summary.txt` next to the bag by default.
+
+Default output directory:
+
+```text
+/home/xcg/ws/records/YYYYMMDD_HHMMSS_crossing_test_01/
+```
+
+Override output root:
+
+```bash
+MPC_EVAL_RECORD_DIR=/tmp/mpc_records rosrun plan_manage record_mpc_eval.sh crossing_test_01
+```
+
+### Recorded Topics
+
+- `/clock`
+- `/mpc/debug_metrics`
+- `/mpc/stop_advice`
+- `/mpc/stop_reason`
+- `/mpc/path`
+- `/mpc/best_traj`
+- `/mpc/current_waypoint`
+- `/mpc/waypoints`
+- `/localization_odom`
+- `/cmd_vel_footprint`
+- `/onboard_detector/dynamic_obstacles_info`
+- `/onboard_detector/dynamic_bboxes`
+- `/gazebo_pedestrian_truth/visualization`
+
+Large point-cloud topics are intentionally excluded in the first version to
+keep bags small and focused on evaluation metrics.
+
+### First Analyzer Outputs
+
+- run duration;
+- stop count and total stop duration;
+- stop reason counts;
+- MPC runtime statistics;
+- valid sample ratio statistics;
+- plan-valid ratio;
+- actual path length, straight-line progress, path efficiency, speed;
+- final goal error and deviation from the global waypoint polyline;
+- best/global dynamic clearance and CPA/TTC statistics;
+- approximate robot-pedestrian center distance and geometry clearance from
+  `/localization_odom` and `/onboard_detector/dynamic_obstacles_info`;
+- per-stop event list.
+
+### Multi-Run Summary Table
+
+Implemented:
+
+- `plan_manage/scripts/summarize_mpc_eval.py`
+
+Usage:
+
+```bash
+rosrun plan_manage summarize_mpc_eval.py /home/xcg/ws/records
+```
+
+This scans all `summary.txt` files under the records directory and writes:
+
+```text
+/home/xcg/ws/records/summary_table.csv
+```
+
+The CSV is intended for baseline/ablation comparison and includes run name,
+stop count, stop duration, minimum actual clearance, MPC runtime, path length,
+path efficiency, final goal error, and key best/global dynamic-risk metrics.
 
 ## Priority 4: Adaptive Lookahead and Adaptive Risk Weight
 
@@ -278,6 +434,36 @@ cross first.
 - pedestrian arrival time at the path overlaps the robot's estimated arrival
   time at the crossing region.
 
+## Priority 4D: Stop/Yield Hysteresis State Machine
+
+Status: implemented in the first prototype. The planner now keeps a latched
+stop/yield state after a dynamic conflict is detected. It enters stop quickly,
+then releases only after a minimum hold time and a continuous clear interval.
+Crossing-pedestrian release uses a slightly expanded front/lateral/time window
+so the system does not alternate between stop and go near a threshold.
+
+### Purpose
+
+Frame-by-frame stop decisions can flicker when pedestrian tracking, MPC
+sampling, or localization hovers around a threshold. For a guide cane, this is
+especially undesirable because a voice stop/wait prompt should be stable enough
+for a human user to follow.
+
+### Current Parameters
+
+- `mpc/stop_hold_time`
+- `mpc/stop_release_clear_time`
+- `mpc/yield_release_front_margin`
+- `mpc/yield_release_lateral_margin`
+- `mpc/yield_release_time_margin`
+
+### Expected Evaluation Output
+
+- Check that crossing-pedestrian stop does not flicker.
+- Check that the robot resumes motion after the pedestrian leaves.
+- Check that same-direction or parallel pedestrians do not cause unnecessary
+  long stops.
+
 ## Priority 5: Formalize Guide-Cane Shared-Control Model
 
 ### Purpose
@@ -306,6 +492,40 @@ Suggested file:
 - `docs/guide_cane_mpc_model.md`
 
 ## Priority 6: Experiment Suite
+
+Status: baseline launch toggles are implemented for the Gazebo localization MPC
+flow. The default launch keeps the full method enabled, while ablation runs can
+disable individual modules from the command line.
+
+### Implemented Baseline Toggles
+
+Available on `gazebo_localization_mpc.launch`, forwarded through
+`gazebo_mpc.launch` into `include/algorithm.launch`:
+
+- `mpc_enable_cpa`: enable/disable CPA/TTC conflict risk.
+- `mpc_enable_adaptive_risk`: enable/disable adaptive dynamic-risk weight.
+- `mpc_enable_yield`: enable/disable pedestrian yielding/right-of-way rule.
+- `mpc_enable_stop_enforce`: enable/disable actually forcing zero command when
+  stop advice is active.
+
+Example runs:
+
+```bash
+# Full method
+roslaunch plan_manage gazebo_localization_mpc.launch start_teleop:=true rviz:=true
+
+# No CPA/TTC risk
+roslaunch plan_manage gazebo_localization_mpc.launch start_teleop:=true rviz:=true mpc_enable_cpa:=false
+
+# Fixed risk weight
+roslaunch plan_manage gazebo_localization_mpc.launch start_teleop:=true rviz:=true mpc_enable_adaptive_risk:=false
+
+# No yielding rule
+roslaunch plan_manage gazebo_localization_mpc.launch start_teleop:=true rviz:=true mpc_enable_yield:=false
+
+# Stop advice is still published, but Gazebo command is not forced to zero
+roslaunch plan_manage gazebo_localization_mpc.launch start_teleop:=true rviz:=true mpc_enable_stop_enforce:=false
+```
 
 ### Required Scenarios
 
@@ -373,9 +593,10 @@ Blind-user experiments may require ethics approval. Early validation can use:
 2. Pass and use pedestrian size/safety radius in MPC.
 3. Add MPC debug metrics.
 4. Run and tune perpendicular crossing scenario.
-5. Add adaptive lookahead/risk only if fixed parameters remain insufficient.
-6. Build experiment scripts and collect baseline results.
-7. Write the guide-cane shared-control model document.
+5. Add an event-style MPC monitor for practical validation.
+6. Add stop/yield hysteresis to make stop prompts stable.
+7. Build experiment scripts and collect baseline results.
+8. Write the guide-cane shared-control model document.
 
 ## Notes for Future Codex Sessions
 

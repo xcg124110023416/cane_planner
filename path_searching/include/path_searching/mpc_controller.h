@@ -96,6 +96,8 @@ public:
         double best_total_cost = std::numeric_limits<double>::infinity();
         double min_dynamic_clearance = std::numeric_limits<double>::infinity();
         double min_cpa_time = std::numeric_limits<double>::infinity();
+        double best_min_dynamic_clearance = std::numeric_limits<double>::infinity();
+        double best_min_cpa_time = std::numeric_limits<double>::infinity();
         double risk_weight_scale = 1.0;
         int dynamic_reject_count = 0;
         int static_reject_count = 0;
@@ -174,7 +176,9 @@ private:
                       const std::vector<Eigen::Vector3d> &obs_vel,
                       const std::vector<Eigen::Vector3d> &obs_size,
                       Eigen::VectorXd &costs,
-                      std::vector<std::vector<Eigen::Vector3d>> &paths);
+                      std::vector<std::vector<Eigen::Vector3d>> &paths,
+                      std::vector<double> &sample_min_dynamic_clearances,
+                      std::vector<double> &sample_min_cpa_times);
     Eigen::VectorXd computeWeights(const Eigen::VectorXd &costs);
     Eigen::MatrixXd weightedUpdate(const std::vector<Eigen::MatrixXd> &samples,
                                     const Eigen::VectorXd &weights,

@@ -164,7 +164,10 @@ Eigen::Vector3d MpcController::plan(const LFPC::Ptr &lfpc_base,
         // 2. Rollout and compute costs
         Eigen::VectorXd costs(K);
         std::vector<std::vector<Eigen::Vector3d>> paths(K);
-        rolloutBatch(lfpc_base, samples, goal_pos, obs_pos, obs_vel, obs_size, costs, paths);
+        std::vector<double> sample_min_dynamic_clearances;
+        std::vector<double> sample_min_cpa_times;
+        rolloutBatch(lfpc_base, samples, goal_pos, obs_pos, obs_vel, obs_size, costs, paths,
+                     sample_min_dynamic_clearances, sample_min_cpa_times);
 
         // 3. Find best trajectory
         int best_idx = -1;
@@ -184,6 +187,10 @@ Eigen::Vector3d MpcController::plan(const LFPC::Ptr &lfpc_base,
         }
         last_debug_metrics_.valid_sample_ratio = K > 0 ? (double)valid_count / (double)K : 0.0;
         last_debug_metrics_.best_total_cost = best_idx >= 0 ? min_cost : std::numeric_limits<double>::infinity();
+        if (best_idx >= 0 && best_idx < (int)sample_min_dynamic_clearances.size())
+            last_debug_metrics_.best_min_dynamic_clearance = sample_min_dynamic_clearances[best_idx];
+        if (best_idx >= 0 && best_idx < (int)sample_min_cpa_times.size())
+            last_debug_metrics_.best_min_cpa_time = sample_min_cpa_times[best_idx];
 
         if (cfg_.use_best && best_idx >= 0)
         {
@@ -226,6 +233,11 @@ Eigen::Vector3d MpcController::plan(const LFPC::Ptr &lfpc_base,
     last_plan_time_ms_ = std::chrono::duration<double, std::milli>(t_end - t_start).count();
     last_debug_metrics_.plan_time_ms = last_plan_time_ms_;
     last_debug_metrics_.plan_valid = last_plan_valid_;
+    if (!last_plan_valid_)
+    {
+        last_debug_metrics_.best_min_dynamic_clearance = std::numeric_limits<double>::infinity();
+        last_debug_metrics_.best_min_cpa_time = std::numeric_limits<double>::infinity();
+    }
 
     return control_cmd;
 }
@@ -314,12 +326,16 @@ void MpcController::rolloutBatch(
     const std::vector<Eigen::Vector3d> &obs_vel,
     const std::vector<Eigen::Vector3d> &obs_size,
     Eigen::VectorXd &costs,
-    std::vector<std::vector<Eigen::Vector3d>> &paths)
+    std::vector<std::vector<Eigen::Vector3d>> &paths,
+    std::vector<double> &sample_min_dynamic_clearances,
+    std::vector<double> &sample_min_cpa_times)
 {
     int K = (int)samples.size();
     int N = cfg_.horizon_steps;
     costs.resize(K);
     costs.setConstant(std::numeric_limits<double>::infinity());
+    sample_min_dynamic_clearances.assign(K, std::numeric_limits<double>::infinity());
+    sample_min_cpa_times.assign(K, std::numeric_limits<double>::infinity());
 
     int n_obs = (int)obs_pos.size();
     last_debug_metrics_.dynamic_reject_count = 0;
@@ -358,6 +374,8 @@ void MpcController::rolloutBatch(
         bool static_collided = false;
         bool dyn_collided = false;
         bool arrived_early = false;
+        double rollout_min_dynamic_clearance = std::numeric_limits<double>::infinity();
+        double rollout_min_cpa_time = std::numeric_limits<double>::infinity();
 
         for (int n = 0; n < N; ++n)
         {
@@ -462,6 +480,8 @@ void MpcController::rolloutBatch(
                         double dyn_clearance = dyn_dist - dyn_radius;
                         if (dyn_clearance < step_min_dynamic_clearance)
                             step_min_dynamic_clearance = dyn_clearance;
+                        if (dyn_clearance < rollout_min_dynamic_clearance)
+                            rollout_min_dynamic_clearance = dyn_clearance;
                         if (dyn_clearance < last_debug_metrics_.min_dynamic_clearance)
                             last_debug_metrics_.min_dynamic_clearance = dyn_clearance;
 
@@ -482,6 +502,8 @@ void MpcController::rolloutBatch(
                             double t_cpa = -(ddx * rel_vx + ddy * rel_vy) / rel_speed_sq;
                             if (t_cpa >= 0.0 && t_cpa < step_min_cpa_time)
                                 step_min_cpa_time = t_cpa;
+                            if (t_cpa >= 0.0 && t_cpa < rollout_min_cpa_time)
+                                rollout_min_cpa_time = t_cpa;
                             if (t_cpa >= 0.0 && t_cpa < last_debug_metrics_.min_cpa_time)
                                 last_debug_metrics_.min_cpa_time = t_cpa;
                         }
@@ -571,6 +593,8 @@ void MpcController::rolloutBatch(
         }
 
         costs(k) = total_cost;
+        sample_min_dynamic_clearances[k] = rollout_min_dynamic_clearance;
+        sample_min_cpa_times[k] = rollout_min_cpa_time;
     }
 }
 

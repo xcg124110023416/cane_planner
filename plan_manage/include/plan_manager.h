@@ -101,11 +101,20 @@ namespace cane_planner
         double mpc_stop_valid_ratio_thresh_ = 0.08;
         double mpc_stop_clearance_thresh_ = 0.15;
         double mpc_stop_ttc_thresh_ = 0.5;
+        double mpc_stop_hold_time_ = 0.8;
+        double mpc_stop_release_clear_time_ = 0.5;
         bool mpc_yield_enable_ = true;
         double mpc_yield_front_dist_ = 2.0;
         double mpc_yield_lateral_dist_ = 0.9;
         double mpc_yield_cross_speed_ = 0.15;
         double mpc_yield_time_gap_ = 0.8;
+        double mpc_yield_release_front_margin_ = 0.4;
+        double mpc_yield_release_lateral_margin_ = 0.2;
+        double mpc_yield_release_time_margin_ = 0.2;
+        bool mpc_stop_state_active_ = false;
+        ros::Time mpc_stop_enter_time_;
+        ros::Time mpc_stop_clear_since_;
+        std::string mpc_latched_stop_reason_ = "OK";
 
         // 仿真路径推进 (planner=1,2 沿规划路径移动 odom)
         std::vector<Eigen::Vector2d> sim_path_;
