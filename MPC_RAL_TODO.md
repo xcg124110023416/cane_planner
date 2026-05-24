@@ -55,6 +55,10 @@ Expected contribution outputs:
 
 ## Priority 1: Add CPA/TTC Dynamic Conflict Risk
 
+Status: implemented in the first prototype. The current implementation adds an
+optional CPA/TTC cost term in `DynamicRiskField` and applies it inside MPC
+rollout using the predicted CoM point velocity and pedestrian velocity.
+
 ### Purpose
 
 The current Gaussian risk field can avoid pedestrians, but it often reacts late
@@ -101,6 +105,10 @@ risk_cpa = exp(-d_min^2 / sigma_d^2) * exp(-t_cpa / tau)
 
 ## Priority 2: Use Pedestrian Size and Safety Radius in MPC
 
+Status: implemented in the first prototype. `PlannerManager` now passes cached
+dynamic obstacle sizes into `MpcController`, and MPC uses an effective dynamic
+safety radius for hard collision rejection and CPA/TTC clearance calculation.
+
 ### Purpose
 
 The current dynamic obstacle callback stores obstacle size, but MPC currently
@@ -136,6 +144,11 @@ Then use this radius in:
 - Reduce parameter sensitivity of `risk_sigma_x` and `risk_sigma_y`.
 
 ## Priority 3: Publish MPC Debug and Evaluation Metrics
+
+Status: implemented in the first lightweight prototype. The planner publishes
+`/mpc/debug_metrics` as `std_msgs/Float64MultiArray` with runtime, valid sample
+ratio, best cost, minimum dynamic clearance, minimum CPA time, rejection counts,
+sample count, and plan-valid flag.
 
 ### Purpose
 
@@ -174,6 +187,11 @@ system should expose numeric metrics that explain why MPC chose a control.
 - Evidence that the proposed conflict risk improves behavior.
 
 ## Priority 4: Adaptive Lookahead and Adaptive Risk Weight
+
+Status: partially implemented. The first prototype enables adaptive dynamic-risk
+weighting only; adaptive lookahead is intentionally deferred until the risk
+behavior is validated. The soft dynamic risk weight scales up near low dynamic
+clearance or short CPA/TTC, while hard safety checks remain unchanged.
 
 ### Purpose
 
@@ -214,6 +232,51 @@ w_risk_eff = w_risk * f(min_ttc, min_distance)
   - empty corridor;
   - crossing pedestrian;
   - multi-pedestrian corridor.
+
+## Priority 4B: Stop/Wait Advice for Unavoidable Dynamic Conflict
+
+Status: implemented in the first prototype. The planner publishes
+`/mpc/stop_advice` and `/mpc/stop_reason`; by default the Gazebo command is
+also forced to zero when an imminent dynamic conflict is detected. This models
+the real guide-cane behavior where the system can tell the user to stop/wait
+through voice feedback, even though it cannot provide active braking force.
+
+### Purpose
+
+Some pedestrian conflicts cannot be solved by steering alone, especially when a
+pedestrian suddenly changes direction or cuts in too close. The guide cane
+should not pretend that a safe steering-only solution exists; it should issue a
+clear stop/wait instruction.
+
+### Current Trigger Signals
+
+- no valid MPC trajectory while dynamic obstacles exist;
+- low valid-sample ratio together with predicted dynamic clearance below the
+  stop threshold;
+- low valid-sample ratio together with short CPA/TTC.
+
+## Priority 4C: Pedestrian Yielding / Right-of-Way Policy
+
+Status: implemented in the first prototype. The planner can stop/wait for a
+near front crossing pedestrian when continuing to move would likely occupy the
+pedestrian's path. This is a behavior-layer rule above MPC collision avoidance.
+Current launch tuning makes yielding trigger earlier and reduces the far-field
+dynamic halo so parallel pedestrians do not push the cane too hard toward walls.
+
+### Purpose
+
+Avoid the guide cane slowly cutting into or blocking a pedestrian's route when
+the safer and more socially natural action is to stop and let the pedestrian
+cross first.
+
+### Current Trigger Signals
+
+- pedestrian is in front of the cane within a configurable distance;
+- pedestrian is laterally close to the robot path corridor;
+- pedestrian has enough lateral crossing speed and is moving toward the path
+  centerline;
+- pedestrian arrival time at the path overlaps the robot's estimated arrival
+  time at the crossing region.
 
 ## Priority 5: Formalize Guide-Cane Shared-Control Model
 
@@ -338,4 +401,3 @@ source /opt/ros/noetic/setup.bash
 source devel/setup.bash
 roslaunch fast_lio_localization_qn sim_corridor_175_fastlio.launch rviz:=false
 ```
-

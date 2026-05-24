@@ -220,6 +220,11 @@
         <param name="mpc/w_steer" value="0.5" type="double"/>
         <!-- risk已归一化：每点平均risk×权重，不再是累加值 -->
         <param name="mpc/w_risk" value="2.0" type="double"/>
+        <!-- Adaptive dynamic-risk weight: only scales soft dynamic risk when a predicted conflict is close. -->
+        <param name="mpc/adaptive_risk_weight" value="true" type="bool"/>
+        <param name="mpc/adaptive_risk_max_scale" value="1.8" type="double"/>
+        <param name="mpc/adaptive_risk_clearance" value="0.8" type="double"/>
+        <param name="mpc/adaptive_risk_ttc" value="1.2" type="double"/>
         <!-- goal已归一化：最终距离/horizon步数×权重 -->
         <param name="mpc/w_goal" value="25.0" type="double"/>
         <!-- 转向变化率惩罚权重：越大越平滑，越小越灵活（0=不限制） -->
@@ -229,6 +234,10 @@
         <!-- 静态障碍物碰撞惩罚（单点），总量级=w_static×n×penalty，巨大→几乎硬约束 -->
         <param name="mpc/static_penalty" value="500.0" type="double"/>
         <param name="mpc/w_static" value="1.0" type="double"/>
+        <!-- Dynamic obstacle geometry: use message size as hard safety radius input. -->
+        <param name="mpc/use_dynamic_size" value="true" type="bool"/>
+        <param name="mpc/dynamic_safety_margin" value="0.15" type="double"/>
+        <param name="mpc/dynamic_min_radius" value="0.35" type="double"/>
         <!-- SDF排斥力权重、排斥生效距离(m)：距墙<margin时二次增长 -->
         <param name="mpc/w_prox" value="4.0" type="double"/>
         <param name="mpc/prox_margin" value="0.3" type="double"/>
@@ -238,6 +247,19 @@
         <param name="mpc/fix_step_params" value="true" type="bool"/>
         <param name="mpc/goal_arrival_threshold" value="0.2" type="double"/>
         <param name="mpc/fov_range" value="5.0" type="double"/>
+        <param name="mpc/debug_enable" value="true" type="bool"/>
+        <!-- Stop advice for guide-cane use: publish/optionally enforce stop when predicted dynamic conflict is unavoidable. -->
+        <param name="mpc/stop_advice_enable" value="true" type="bool"/>
+        <param name="mpc/stop_advice_enforce" value="true" type="bool"/>
+        <param name="mpc/stop_valid_ratio_thresh" value="0.08" type="double"/>
+        <param name="mpc/stop_clearance_thresh" value="0.15" type="double"/>
+        <param name="mpc/stop_ttc_thresh" value="0.5" type="double"/>
+        <!-- Yielding policy: stop/wait for close crossing pedestrians instead of slowly blocking their path. -->
+        <param name="mpc/yield_enable" value="true" type="bool"/>
+        <param name="mpc/yield_front_dist" value="2.6" type="double"/>
+        <param name="mpc/yield_lateral_dist" value="1.1" type="double"/>
+        <param name="mpc/yield_cross_speed" value="0.15" type="double"/>
+        <param name="mpc/yield_time_gap" value="1.2" type="double"/>
         <param name="mpc/nominal_al" value="$(arg user_step_length)" type="double"/>
         <param name="mpc/nominal_aw" value="0.0" type="double"/>
         <param name="mpc/nominal_api" value="0.0" type="double"/>
@@ -247,8 +269,15 @@
         <param name="mpc/risk_sigma_y" value="0.4" type="double"/>
         <param name="mpc/risk_cutoff" value="3.0" type="double"/>
         <!-- 光晕：硬核心外的低幅包络。halo_scale=0关闭(纯高斯)，scale>0时包络宽度=core_sigma*scale，ratio=峰值/A -->
-        <param name="mpc/risk_halo_scale" value="2.5" type="double"/>
-        <param name="mpc/risk_halo_ratio" value="0.2" type="double"/>
+        <param name="mpc/risk_halo_scale" value="2.0" type="double"/>
+        <param name="mpc/risk_halo_ratio" value="0.12" type="double"/>
+        <!-- CPA/TTC dynamic conflict risk: improves crossing-pedestrian avoidance without increasing MPC horizon. -->
+        <param name="mpc/risk_cpa_enable" value="true" type="bool"/>
+        <param name="mpc/risk_cpa_weight" value="0.6" type="double"/>
+        <param name="mpc/risk_cpa_sigma_d" value="0.65" type="double"/>
+        <param name="mpc/risk_cpa_tau" value="1.0" type="double"/>
+        <param name="mpc/risk_cpa_time_horizon" value="2.0" type="double"/>
+        <param name="mpc/risk_cpa_cutoff_dist" value="3.0" type="double"/>
 
         <!-- trajectory optimization 代价权重 -->
         <!-- lambda1: 平滑度, lambda2: 碰撞, lambda3: 可行性, lambda4: 拟合, lambda7: 动力学 -->

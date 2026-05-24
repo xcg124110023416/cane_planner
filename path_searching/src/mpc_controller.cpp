@@ -41,9 +41,16 @@ void MpcController::setParam(ros::NodeHandle &nh)
     nh.param("mpc/w_risk", cfg_.w_risk, 2.0);
     nh.param("mpc/w_goal", cfg_.w_goal, 10.0);
     nh.param("mpc/w_dapi", cfg_.w_dapi, 0.0);
+    nh.param("mpc/adaptive_risk_weight", cfg_.adaptive_risk_weight, false);
+    nh.param("mpc/adaptive_risk_max_scale", cfg_.adaptive_risk_max_scale, 2.0);
+    nh.param("mpc/adaptive_risk_clearance", cfg_.adaptive_risk_clearance, 0.8);
+    nh.param("mpc/adaptive_risk_ttc", cfg_.adaptive_risk_ttc, 1.2);
 
     nh.param("mpc/static_penalty", cfg_.static_penalty, 500.0);
     nh.param("mpc/w_static", cfg_.w_static, 1.0);
+    nh.param("mpc/use_dynamic_size", cfg_.use_dynamic_size, true);
+    nh.param("mpc/dynamic_safety_margin", cfg_.dynamic_safety_margin, 0.15);
+    nh.param("mpc/dynamic_min_radius", cfg_.dynamic_min_radius, 0.35);
     nh.param("mpc/w_prox", cfg_.w_prox, 5.0);
     nh.param("mpc/prox_margin", cfg_.prox_margin, 0.6);
     nh.param("mpc/use_best", cfg_.use_best, true);
@@ -64,6 +71,12 @@ void MpcController::setParam(ros::NodeHandle &nh)
     nh.param("mpc/risk_cutoff", rf_cfg.cutoff_dist, 3.0);
     nh.param("mpc/risk_halo_scale", rf_cfg.halo_scale, 0.0);
     nh.param("mpc/risk_halo_ratio", rf_cfg.halo_ratio, 0.25);
+    nh.param("mpc/risk_cpa_enable", rf_cfg.cpa_enable, false);
+    nh.param("mpc/risk_cpa_weight", rf_cfg.cpa_weight, 0.6);
+    nh.param("mpc/risk_cpa_sigma_d", rf_cfg.cpa_sigma_d, 0.65);
+    nh.param("mpc/risk_cpa_tau", rf_cfg.cpa_tau, 1.0);
+    nh.param("mpc/risk_cpa_time_horizon", rf_cfg.cpa_time_horizon, 2.0);
+    nh.param("mpc/risk_cpa_cutoff_dist", rf_cfg.cpa_cutoff_dist, 3.0);
     risk_field_.setConfig(rf_cfg);
 
     // Hard threshold = peak × ratio, auto-scales with risk_A
@@ -118,12 +131,15 @@ void MpcController::setDynamicObstacles(const std::vector<Eigen::Vector3d> &pos,
 Eigen::Vector3d MpcController::plan(const LFPC::Ptr &lfpc_base,
                                      const Eigen::Vector3d &goal_pos,
                                      const std::vector<Eigen::Vector3d> &obs_pos,
-                                     const std::vector<Eigen::Vector3d> &obs_vel)
+                                     const std::vector<Eigen::Vector3d> &obs_vel,
+                                     const std::vector<Eigen::Vector3d> &obs_size)
 {
     auto t_start = std::chrono::high_resolution_clock::now();
 
     int N = cfg_.horizon_steps;
     int K = cfg_.num_samples;
+    last_debug_metrics_ = DebugMetrics();
+    last_debug_metrics_.num_samples = K;
 
     ensurePool(K);
 
@@ -148,19 +164,26 @@ Eigen::Vector3d MpcController::plan(const LFPC::Ptr &lfpc_base,
         // 2. Rollout and compute costs
         Eigen::VectorXd costs(K);
         std::vector<std::vector<Eigen::Vector3d>> paths(K);
-        rolloutBatch(lfpc_base, samples, goal_pos, obs_pos, obs_vel, costs, paths);
+        rolloutBatch(lfpc_base, samples, goal_pos, obs_pos, obs_vel, obs_size, costs, paths);
 
         // 3. Find best trajectory
         int best_idx = -1;
         double min_cost = std::numeric_limits<double>::max();
+        int valid_count = 0;
         for (int kk = 0; kk < K; ++kk)
         {
-            if (costs(kk) < min_cost)
+            if (std::isfinite(costs(kk)))
             {
-                min_cost = costs(kk);
-                best_idx = kk;
+                valid_count++;
+                if (costs(kk) < min_cost)
+                {
+                    min_cost = costs(kk);
+                    best_idx = kk;
+                }
             }
         }
+        last_debug_metrics_.valid_sample_ratio = K > 0 ? (double)valid_count / (double)K : 0.0;
+        last_debug_metrics_.best_total_cost = best_idx >= 0 ? min_cost : std::numeric_limits<double>::infinity();
 
         if (cfg_.use_best && best_idx >= 0)
         {
@@ -201,6 +224,8 @@ Eigen::Vector3d MpcController::plan(const LFPC::Ptr &lfpc_base,
 
     auto t_end = std::chrono::high_resolution_clock::now();
     last_plan_time_ms_ = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+    last_debug_metrics_.plan_time_ms = last_plan_time_ms_;
+    last_debug_metrics_.plan_valid = last_plan_valid_;
 
     return control_cmd;
 }
@@ -287,6 +312,7 @@ void MpcController::rolloutBatch(
     const Eigen::Vector3d &goal_pos,
     const std::vector<Eigen::Vector3d> &obs_pos,
     const std::vector<Eigen::Vector3d> &obs_vel,
+    const std::vector<Eigen::Vector3d> &obs_size,
     Eigen::VectorXd &costs,
     std::vector<std::vector<Eigen::Vector3d>> &paths)
 {
@@ -296,6 +322,11 @@ void MpcController::rolloutBatch(
     costs.setConstant(std::numeric_limits<double>::infinity());
 
     int n_obs = (int)obs_pos.size();
+    last_debug_metrics_.dynamic_reject_count = 0;
+    last_debug_metrics_.static_reject_count = 0;
+    last_debug_metrics_.min_dynamic_clearance = std::numeric_limits<double>::infinity();
+    last_debug_metrics_.min_cpa_time = std::numeric_limits<double>::infinity();
+    last_debug_metrics_.risk_weight_scale = 1.0;
     double risk_thresh = cfg_.risk_hard_threshold;
     double w_move = cfg_.w_move;
     double w_steer = cfg_.w_steer;
@@ -304,6 +335,8 @@ void MpcController::rolloutBatch(
     double w_goal = cfg_.w_goal;
     double w_prox = cfg_.w_prox;
     double prox_margin = cfg_.prox_margin;
+    double dyn_margin = std::max(0.0, cfg_.dynamic_safety_margin);
+    double dyn_min_radius = std::max(0.0, cfg_.dynamic_min_radius);
     double step_dt = lfpc_base->getTimeUpdate();
     double slice_h = collision_ ? collision_->getSliceHeight() : 0.0;
 
@@ -339,6 +372,7 @@ void MpcController::rolloutBatch(
             Eigen::Vector3d final_com = lfpc->getCOMPos();
             double fx = final_com(0);
             double fy = final_com(1);
+            double path_dt = com_path.empty() ? step_dt : step_dt / (double)com_path.size();
 
             for (const auto &pt : com_path)
                 paths[k].push_back(pt);
@@ -373,6 +407,8 @@ void MpcController::rolloutBatch(
             double prox_cost = 0.0;
             double risk_cost = 0.0;
             int risk_evals = 0;
+            double step_min_dynamic_clearance = std::numeric_limits<double>::infinity();
+            double step_min_cpa_time = std::numeric_limits<double>::infinity();
             for (size_t pi = 0; pi < com_path.size(); ++pi)
             {
                 double px = com_path[pi](0);
@@ -410,10 +446,45 @@ void MpcController::rolloutBatch(
                     // Dynamic obstacle: hard threshold + risk accumulation
                     for (int oi = 0; oi < n_obs; ++oi)
                     {
-                        double ox = obs_pos[oi](0) + n * step_dt * obs_vel[oi](0);
-                        double oy = obs_pos[oi](1) + n * step_dt * obs_vel[oi](1);
+                        double point_t = n * step_dt + (double)(pi + 1) * path_dt;
                         double vx = obs_vel[oi](0);
                         double vy = obs_vel[oi](1);
+                        double ox = obs_pos[oi](0) + point_t * vx;
+                        double oy = obs_pos[oi](1) + point_t * vy;
+                        double dyn_radius = dyn_min_radius;
+                        if (cfg_.use_dynamic_size && oi < (int)obs_size.size())
+                            dyn_radius = std::max(dyn_radius, 0.5 * std::max(obs_size[oi](0), obs_size[oi](1)));
+                        dyn_radius += dyn_margin;
+
+                        double ddx = px - ox;
+                        double ddy = py - oy;
+                        double dyn_dist = std::sqrt(ddx * ddx + ddy * ddy);
+                        double dyn_clearance = dyn_dist - dyn_radius;
+                        if (dyn_clearance < step_min_dynamic_clearance)
+                            step_min_dynamic_clearance = dyn_clearance;
+                        if (dyn_clearance < last_debug_metrics_.min_dynamic_clearance)
+                            last_debug_metrics_.min_dynamic_clearance = dyn_clearance;
+
+                        if (ddx * ddx + ddy * ddy < dyn_radius * dyn_radius)
+                        {
+                            dyn_collided = true;
+                            break;
+                        }
+                        double prev_px = (pi == 0) ? prev_com_x : com_path[pi - 1](0);
+                        double prev_py = (pi == 0) ? prev_com_y : com_path[pi - 1](1);
+                        double rvx = (px - prev_px) / std::max(1e-3, path_dt);
+                        double rvy = (py - prev_py) / std::max(1e-3, path_dt);
+                        double rel_vx = rvx - vx;
+                        double rel_vy = rvy - vy;
+                        double rel_speed_sq = rel_vx * rel_vx + rel_vy * rel_vy;
+                        if (rel_speed_sq > 1e-6)
+                        {
+                            double t_cpa = -(ddx * rel_vx + ddy * rel_vy) / rel_speed_sq;
+                            if (t_cpa >= 0.0 && t_cpa < step_min_cpa_time)
+                                step_min_cpa_time = t_cpa;
+                            if (t_cpa >= 0.0 && t_cpa < last_debug_metrics_.min_cpa_time)
+                                last_debug_metrics_.min_cpa_time = t_cpa;
+                        }
 
                         double r = risk_field_.getIndividualCostFast(px, py, ox, oy, vx, vy);
                         if (r > risk_thresh)
@@ -421,6 +492,7 @@ void MpcController::rolloutBatch(
                             dyn_collided = true;
                             break;
                         }
+                        r += risk_field_.getTimeConflictCostFast(px, py, rvx, rvy, ox, oy, vx, vy, dyn_radius);
                         risk_cost += r;
                         risk_evals++;
                     }
@@ -432,7 +504,23 @@ void MpcController::rolloutBatch(
 
             // Normalize risk: average per evaluation, then apply weight
             if (risk_evals > 0)
-                risk_cost = w_risk * risk_cost / risk_evals;
+            {
+                double risk_scale = 1.0;
+                if (cfg_.adaptive_risk_weight && n_obs > 0)
+                {
+                    double clearance_gate = std::max(1e-3, cfg_.adaptive_risk_clearance);
+                    double ttc_gate = std::max(1e-3, cfg_.adaptive_risk_ttc);
+                    double clearance = std::isfinite(step_min_dynamic_clearance) ? step_min_dynamic_clearance : clearance_gate;
+                    double ttc = std::isfinite(step_min_cpa_time) ? step_min_cpa_time : ttc_gate;
+                    double clearance_urgency = std::max(0.0, std::min(1.0, (clearance_gate - clearance) / clearance_gate));
+                    double ttc_urgency = std::max(0.0, std::min(1.0, (ttc_gate - ttc) / ttc_gate));
+                    double urgency = std::max(clearance_urgency, ttc_urgency);
+                    risk_scale = 1.0 + (std::max(1.0, cfg_.adaptive_risk_max_scale) - 1.0) * urgency;
+                    if (risk_scale > last_debug_metrics_.risk_weight_scale)
+                        last_debug_metrics_.risk_weight_scale = risk_scale;
+                }
+                risk_cost = w_risk * risk_scale * risk_cost / risk_evals;
+            }
 
             if (dyn_collided || static_collided)
             {
@@ -465,6 +553,10 @@ void MpcController::rolloutBatch(
         if (static_collided || dyn_collided)
         {
             total_cost = std::numeric_limits<double>::infinity();
+            if (dyn_collided)
+                last_debug_metrics_.dynamic_reject_count++;
+            if (static_collided)
+                last_debug_metrics_.static_reject_count++;
         }
         else if (!arrived_early)
         {

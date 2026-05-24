@@ -2,6 +2,7 @@
 #define _MPC_CONTROLLER_H_
 
 #include <Eigen/Eigen>
+#include <limits>
 #include <random>
 #include <vector>
 
@@ -45,12 +46,25 @@ public:
         double w_goal = 10.0;
         double w_dapi = 0.0;    // steering rate penalty: |api[n] - api[n-1]|
 
+        // Optional adaptive dynamic-risk weight. It only scales soft risk cost;
+        // hard safety checks remain unchanged.
+        bool adaptive_risk_weight = false;
+        double adaptive_risk_max_scale = 2.0;
+        double adaptive_risk_clearance = 0.8;
+        double adaptive_risk_ttc = 1.2;
+
         // Hard constraint: risk > threshold → INF cost (dynamic obstacles only)
         double risk_hard_threshold = 8.5;
 
         // Static obstacle: high penalty per colliding point (effectively hard)
         double static_penalty = 500.0;
         double w_static = 1.0;
+
+        // Dynamic obstacle geometry. Sizes are interpreted as obstacle boxes
+        // already inflated by the planner manager when available.
+        bool use_dynamic_size = true;
+        double dynamic_safety_margin = 0.15;
+        double dynamic_min_radius = 0.35;
 
         // SDF proximity cost: repulsive gradient around obstacles
         double w_prox = 5.0;
@@ -75,6 +89,20 @@ public:
         double nominal_api = 0.0;
     };
 
+    struct DebugMetrics
+    {
+        double plan_time_ms = 0.0;
+        double valid_sample_ratio = 0.0;
+        double best_total_cost = std::numeric_limits<double>::infinity();
+        double min_dynamic_clearance = std::numeric_limits<double>::infinity();
+        double min_cpa_time = std::numeric_limits<double>::infinity();
+        double risk_weight_scale = 1.0;
+        int dynamic_reject_count = 0;
+        int static_reject_count = 0;
+        int num_samples = 0;
+        bool plan_valid = false;
+    };
+
     MpcController();
     ~MpcController();
 
@@ -93,7 +121,8 @@ public:
     Eigen::Vector3d plan(const LFPC::Ptr &lfpc_base,
                          const Eigen::Vector3d &goal_pos,
                          const std::vector<Eigen::Vector3d> &obs_pos,
-                         const std::vector<Eigen::Vector3d> &obs_vel);
+                         const std::vector<Eigen::Vector3d> &obs_vel,
+                         const std::vector<Eigen::Vector3d> &obs_size = {});
 
     // Return the best predicted CoM path from last plan (for visualization)
     std::vector<Eigen::Vector3d> getBestPath() const { return best_path_; }
@@ -104,6 +133,8 @@ public:
     double lastPlanTimeMs() const { return last_plan_time_ms_; }
 
     bool lastPlanValid() const { return last_plan_valid_; }
+
+    DebugMetrics getDebugMetrics() const { return last_debug_metrics_; }
 
     typedef shared_ptr<MpcController> Ptr;
 
@@ -130,6 +161,7 @@ private:
     // Timing
     double last_plan_time_ms_;
     bool last_plan_valid_ = true;
+    DebugMetrics last_debug_metrics_;
 
     // Internal methods
     Eigen::MatrixXd makeNominalSequence(int N);
@@ -140,6 +172,7 @@ private:
                       const Eigen::Vector3d &goal_pos,
                       const std::vector<Eigen::Vector3d> &obs_pos,
                       const std::vector<Eigen::Vector3d> &obs_vel,
+                      const std::vector<Eigen::Vector3d> &obs_size,
                       Eigen::VectorXd &costs,
                       std::vector<std::vector<Eigen::Vector3d>> &paths);
     Eigen::VectorXd computeWeights(const Eigen::VectorXd &costs);

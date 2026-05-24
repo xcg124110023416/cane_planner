@@ -95,6 +95,17 @@ namespace cane_planner
         double global_wp_arrival_radius_ = 0.1;
         double lookahead_dist_ = 1.0;
         double mpc_fov_range_ = 5.0;
+        bool mpc_debug_enable_ = true;
+        bool mpc_stop_advice_enable_ = true;
+        bool mpc_stop_advice_enforce_ = true;
+        double mpc_stop_valid_ratio_thresh_ = 0.08;
+        double mpc_stop_clearance_thresh_ = 0.15;
+        double mpc_stop_ttc_thresh_ = 0.5;
+        bool mpc_yield_enable_ = true;
+        double mpc_yield_front_dist_ = 2.0;
+        double mpc_yield_lateral_dist_ = 0.9;
+        double mpc_yield_cross_speed_ = 0.15;
+        double mpc_yield_time_gap_ = 0.8;
 
         // 仿真路径推进 (planner=1,2 沿规划路径移动 odom)
         std::vector<Eigen::Vector2d> sim_path_;
@@ -125,6 +136,9 @@ namespace cane_planner
         ros::Publisher mpc_vis_pub_, mpc_foot_pub_, mpc_path_pub_;
         ros::Publisher mpc_fov_pub_, mpc_wp_pub_, mpc_wps_pub_;
         ros::Publisher mpc_best_traj_pub_; // MPC predicted optimal CoM path (LINE_STRIP)
+        ros::Publisher mpc_debug_metrics_pub_; // std_msgs/Float64MultiArray
+        ros::Publisher mpc_stop_advice_pub_;   // std_msgs/Bool
+        ros::Publisher mpc_stop_reason_pub_;   // std_msgs/String
         ros::Publisher risk_field_pub_;   // sensor_msgs::PointCloud2 (risk > hard_threshold)
         ros::Publisher risk_halo_pub_;    // sensor_msgs::PointCloud2 (halo component only)
         ros::Publisher cmd_vel_pub_;      // geometry_msgs::Twist for Gazebo

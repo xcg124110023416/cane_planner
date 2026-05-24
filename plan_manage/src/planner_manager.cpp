@@ -1,7 +1,11 @@
 #include <plan_manager.h>
 #include <geometry_msgs/Twist.h>
+#include <std_msgs/Bool.h>
 #include <std_msgs/Float64.h>
+#include <std_msgs/Float64MultiArray.h>
+#include <std_msgs/String.h>
 
+#include <cmath>
 #include <sstream>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_types.h>
@@ -34,6 +38,17 @@ namespace cane_planner
         nh.param("manager/global_wp_arrival_radius", global_wp_arrival_radius_, 0.1);
         nh.param("manager/lookahead_dist", lookahead_dist_, 1.0);
         nh.param("mpc/fov_range", mpc_fov_range_, 5.0);
+        nh.param("mpc/debug_enable", mpc_debug_enable_, true);
+        nh.param("mpc/stop_advice_enable", mpc_stop_advice_enable_, true);
+        nh.param("mpc/stop_advice_enforce", mpc_stop_advice_enforce_, true);
+        nh.param("mpc/stop_valid_ratio_thresh", mpc_stop_valid_ratio_thresh_, 0.08);
+        nh.param("mpc/stop_clearance_thresh", mpc_stop_clearance_thresh_, 0.15);
+        nh.param("mpc/stop_ttc_thresh", mpc_stop_ttc_thresh_, 0.5);
+        nh.param("mpc/yield_enable", mpc_yield_enable_, true);
+        nh.param("mpc/yield_front_dist", mpc_yield_front_dist_, 2.0);
+        nh.param("mpc/yield_lateral_dist", mpc_yield_lateral_dist_, 0.9);
+        nh.param("mpc/yield_cross_speed", mpc_yield_cross_speed_, 0.15);
+        nh.param("mpc/yield_time_gap", mpc_yield_time_gap_, 0.8);
     }
 
 
@@ -128,6 +143,9 @@ namespace cane_planner
         risk_field_pub_ = nh.advertise<sensor_msgs::PointCloud2>("/mpc/risk_field", 1);
         risk_halo_pub_ = nh.advertise<sensor_msgs::PointCloud2>("/mpc/risk_halo", 1);
         mpc_best_traj_pub_ = nh.advertise<visualization_msgs::Marker>("/mpc/best_traj", 10);
+        mpc_debug_metrics_pub_ = nh.advertise<std_msgs::Float64MultiArray>("/mpc/debug_metrics", 10);
+        mpc_stop_advice_pub_ = nh.advertise<std_msgs::Bool>("/mpc/stop_advice", 10);
+        mpc_stop_reason_pub_ = nh.advertise<std_msgs::String>("/mpc/stop_reason", 10);
         if (gazebo_sim_)
         {
             cmd_vel_pub_ = nh.advertise<geometry_msgs::Twist>("/cmd_vel_footprint", 10);
@@ -940,11 +958,12 @@ namespace cane_planner
     bool PlannerManager::mpcSimStep()
     {
         // 从缓存获取动态障碍物
-        std::vector<Eigen::Vector3d> obs_pos, obs_vel;
+        std::vector<Eigen::Vector3d> obs_pos, obs_vel, obs_size;
         {
             std::lock_guard<std::mutex> lock(dynObsMutex_);
             obs_pos = dynObsPos_;
             obs_vel = dynObsVel_;
+            obs_size = dynObsSize_;
         }
 
         Eigen::Vector3d current_com = lfpc_model_->getCOMPos();
@@ -1014,7 +1033,111 @@ namespace cane_planner
 
         // MPC规划一步
         Eigen::Vector3d control = mpc_controller_->plan(
-            lfpc_model_, mpc_sim_goal_, obs_pos, obs_vel);
+            lfpc_model_, mpc_sim_goal_, obs_pos, obs_vel, obs_size);
+        if (mpc_debug_enable_)
+        {
+            const auto dbg = mpc_controller_->getDebugMetrics();
+            std_msgs::Float64MultiArray metrics;
+            metrics.data.reserve(10);
+            metrics.data.push_back(dbg.plan_time_ms);
+            metrics.data.push_back(dbg.valid_sample_ratio);
+            metrics.data.push_back(std::isfinite(dbg.best_total_cost) ? dbg.best_total_cost : -1.0);
+            metrics.data.push_back(std::isfinite(dbg.min_dynamic_clearance) ? dbg.min_dynamic_clearance : -1.0);
+            metrics.data.push_back(std::isfinite(dbg.min_cpa_time) ? dbg.min_cpa_time : -1.0);
+            metrics.data.push_back((double)dbg.dynamic_reject_count);
+            metrics.data.push_back((double)dbg.static_reject_count);
+            metrics.data.push_back((double)dbg.num_samples);
+            metrics.data.push_back(dbg.plan_valid ? 1.0 : 0.0);
+            metrics.data.push_back(dbg.risk_weight_scale);
+            mpc_debug_metrics_pub_.publish(metrics);
+        }
+
+        const auto dbg = mpc_controller_->getDebugMetrics();
+        bool stop_advice = false;
+        std::string stop_reason = "OK";
+        if (mpc_stop_advice_enable_ && !obs_pos.empty())
+        {
+            if (!dbg.plan_valid)
+            {
+                stop_advice = true;
+                stop_reason = "NO_VALID_DYNAMIC_PLAN";
+            }
+            else if (std::isfinite(dbg.min_dynamic_clearance) &&
+                     dbg.min_dynamic_clearance < mpc_stop_clearance_thresh_ &&
+                     dbg.valid_sample_ratio < mpc_stop_valid_ratio_thresh_)
+            {
+                stop_advice = true;
+                stop_reason = "LOW_VALID_RATIO_LOW_CLEARANCE";
+            }
+            else if (std::isfinite(dbg.min_cpa_time) &&
+                     dbg.min_cpa_time < mpc_stop_ttc_thresh_ &&
+                     dbg.valid_sample_ratio < mpc_stop_valid_ratio_thresh_)
+            {
+                stop_advice = true;
+                stop_reason = "LOW_VALID_RATIO_SHORT_TTC";
+            }
+            else if (mpc_yield_enable_)
+            {
+                const double yaw = start_state_(2);
+                const Eigen::Vector2d forward(std::cos(yaw), std::sin(yaw));
+                const Eigen::Vector2d left(-std::sin(yaw), std::cos(yaw));
+                const Eigen::Vector2d robot_pos(current_com(0), current_com(1));
+                const double planned_speed = std::max(0.15, control(0) / 0.35);
+
+                for (size_t oi = 0; oi < obs_pos.size(); ++oi)
+                {
+                    Eigen::Vector2d obs_p(obs_pos[oi](0), obs_pos[oi](1));
+                    Eigen::Vector2d obs_v(obs_vel[oi](0), obs_vel[oi](1));
+                    Eigen::Vector2d rel = obs_p - robot_pos;
+                    double front = rel.dot(forward);
+                    double lateral = rel.dot(left);
+                    double v_lat = obs_v.dot(left);
+
+                    if (front <= 0.0 || front > mpc_yield_front_dist_)
+                        continue;
+                    if (std::abs(lateral) > mpc_yield_lateral_dist_)
+                        continue;
+                    if (std::abs(v_lat) < mpc_yield_cross_speed_)
+                        continue;
+                    if (lateral * v_lat >= 0.0)
+                        continue;  // moving away from the robot path centerline
+
+                    double ped_time_to_path = std::abs(lateral) / std::max(1e-3, std::abs(v_lat));
+                    double robot_time_to_cross = front / planned_speed;
+                    if (ped_time_to_path < robot_time_to_cross + mpc_yield_time_gap_)
+                    {
+                        stop_advice = true;
+                        stop_reason = "YIELD_TO_CROSSING_PEDESTRIAN";
+                        break;
+                    }
+                }
+            }
+        }
+        if (mpc_stop_advice_enable_)
+        {
+            std_msgs::Bool msg;
+            msg.data = stop_advice;
+            mpc_stop_advice_pub_.publish(msg);
+
+            std_msgs::String reason_msg;
+            reason_msg.data = stop_reason;
+            mpc_stop_reason_pub_.publish(reason_msg);
+        }
+        if (stop_advice && mpc_stop_advice_enforce_)
+        {
+            ROS_WARN_THROTTLE(0.5, "[MPC] STOP advice enforced reason=%s clearance=%.2f ttc=%.2f valid=%.2f",
+                              stop_reason.c_str(),
+                              std::isfinite(dbg.min_dynamic_clearance) ? dbg.min_dynamic_clearance : -1.0,
+                              std::isfinite(dbg.min_cpa_time) ? dbg.min_cpa_time : -1.0,
+                              dbg.valid_sample_ratio);
+            mpc_stuck_steps_ = 0;
+            publishFovRange();
+            publishCurrentWaypoint();
+            publishWaypointsList();
+            mpc_step_count_++;
+            if (gazebo_sim_) { geometry_msgs::Twist cmd; cmd_vel_pub_.publish(cmd); }
+            return false;
+        }
 
         // 无路可走 → 停止本帧
         if (!mpc_controller_->lastPlanValid())

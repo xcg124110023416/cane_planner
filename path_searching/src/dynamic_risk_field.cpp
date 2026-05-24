@@ -149,4 +149,46 @@ double DynamicRiskField::getHaloCostFast(double qx, double qy,
     return A * conf_.halo_ratio * std::exp(-0.5 * r_norm_sq / (hs * hs));
 }
 
+double DynamicRiskField::getTimeConflictCostFast(double qx, double qy,
+                                                 double rvx, double rvy,
+                                                 double ox, double oy,
+                                                 double vx, double vy,
+                                                 double safety_radius) const
+{
+    if (!conf_.cpa_enable || conf_.cpa_weight <= 0.0)
+        return 0.0;
+
+    double rx = qx - ox;
+    double ry = qy - oy;
+    double vrx = rvx - vx;
+    double vry = rvy - vy;
+    double rel_speed_sq = vrx * vrx + vry * vry;
+
+    double t_cpa = 0.0;
+    if (rel_speed_sq > 1e-6)
+    {
+        t_cpa = -(rx * vrx + ry * vry) / rel_speed_sq;
+        if (t_cpa < 0.0)
+            t_cpa = 0.0;
+        else if (t_cpa > conf_.cpa_time_horizon)
+            return 0.0;
+    }
+
+    double cx = rx + vrx * t_cpa;
+    double cy = ry + vry * t_cpa;
+    double dist = std::sqrt(cx * cx + cy * cy);
+    double clearance = std::max(0.0, dist - std::max(0.0, safety_radius));
+    double clearance_sq = clearance * clearance;
+    double cutoff = conf_.cpa_cutoff_dist;
+    if (clearance > cutoff)
+        return 0.0;
+
+    double sigma = std::max(1e-3, conf_.cpa_sigma_d);
+    double tau = std::max(1e-3, conf_.cpa_tau);
+    double dist_term = std::exp(-0.5 * clearance_sq / (sigma * sigma));
+    double time_term = std::exp(-t_cpa / tau);
+
+    return conf_.A_risk * conf_.cpa_weight * dist_term * time_term;
+}
+
 } // namespace

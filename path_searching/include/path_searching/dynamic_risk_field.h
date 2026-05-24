@@ -24,6 +24,16 @@ public:
         // This gives MPC a soft gradient to follow without forcing wide detours.
         double halo_scale = 0.0;   // width multiplier relative to core sigma
         double halo_ratio = 0.25;  // peak amplitude ratio relative to A
+
+        // CPA/TTC: penalize predicted close encounters at the same future time.
+        // This complements the obstacle-centered Gaussian field, especially for
+        // perpendicular pedestrian crossings.
+        bool cpa_enable = false;
+        double cpa_weight = 0.6;        // peak ratio relative to A_risk
+        double cpa_sigma_d = 0.65;      // distance scale for closest approach
+        double cpa_tau = 1.0;           // time decay; smaller = more urgent only
+        double cpa_time_horizon = 2.0;  // seconds ahead from the evaluated point
+        double cpa_cutoff_dist = 3.0;   // skip if closest distance is farther
     };
 
     DynamicRiskField() {}
@@ -48,6 +58,14 @@ public:
     double getHaloCostFast(double qx, double qy,
                            double ox, double oy,
                            double vx, double vy) const;
+
+    // CPA/TTC conflict cost for robot point q with estimated velocity rv.
+    // ox/oy must be the obstacle position at the same timestamp as q.
+    double getTimeConflictCostFast(double qx, double qy,
+                                   double rvx, double rvy,
+                                   double ox, double oy,
+                                   double vx, double vy,
+                                   double safety_radius = 0.0) const;
 
     void setConfig(const Config& conf) { conf_ = conf; }
     const Config& getConfig() const { return conf_; }
