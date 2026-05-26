@@ -11,11 +11,16 @@ class MpcEventMonitor:
         self.reason_topic = rospy.get_param("~stop_reason_topic", "/mpc/stop_reason")
         self.advice_topic = rospy.get_param("~stop_advice_topic", "/mpc/stop_advice")
         self.metrics_topic = rospy.get_param("~debug_metrics_topic", "/mpc/debug_metrics")
+        self.behavior_topic = rospy.get_param("~behavior_state_topic", "/mpc/behavior_state")
+        self.behavior_debug_topic = rospy.get_param("~behavior_debug_topic", "/mpc/behavior_debug")
         self.warn_active_duration = rospy.get_param("~warn_active_duration", 8.0)
         self.update_rate = rospy.get_param("~update_rate", 5.0)
         self.print_reason_updates = rospy.get_param("~print_reason_updates", False)
 
         self.current_reason = "OK"
+        self.current_behavior = "NORMAL"
+        self.latest_behavior_debug = None
+        self.reported_behavior = "NORMAL"
         self.current_advice = False
         self.reported_reason = "OK"
         self.active = False
@@ -30,11 +35,16 @@ class MpcEventMonitor:
         rospy.Subscriber(self.metrics_topic, Float64MultiArray, self.metrics_callback, queue_size=10)
         rospy.Subscriber(self.advice_topic, Bool, self.advice_callback, queue_size=10)
         rospy.Subscriber(self.reason_topic, String, self.reason_callback, queue_size=10)
+        rospy.Subscriber(self.behavior_topic, String, self.behavior_callback, queue_size=10)
+        rospy.Subscriber(self.behavior_debug_topic, Float64MultiArray,
+                         self.behavior_debug_callback, queue_size=10)
         rospy.Timer(rospy.Duration(1.0 / max(0.1, self.update_rate)), self.timer_callback)
 
         rospy.on_shutdown(self.print_summary)
-        rospy.loginfo("MPC event monitor listening: %s, %s, %s",
-                      self.reason_topic, self.advice_topic, self.metrics_topic)
+        rospy.loginfo("MPC event monitor listening: %s, %s, %s, %s, %s",
+                      self.reason_topic, self.advice_topic,
+                      self.metrics_topic, self.behavior_topic,
+                      self.behavior_debug_topic)
 
     def metrics_callback(self, msg):
         self.latest_metrics = msg.data
@@ -44,6 +54,12 @@ class MpcEventMonitor:
 
     def reason_callback(self, msg):
         self.current_reason = msg.data if msg.data else "OK"
+
+    def behavior_callback(self, msg):
+        self.current_behavior = msg.data if msg.data else "NORMAL"
+
+    def behavior_debug_callback(self, msg):
+        self.latest_behavior_debug = msg.data
 
     def timer_callback(self, _event):
         self.update_state()
@@ -81,6 +97,12 @@ class MpcEventMonitor:
             self.last_warn_time = rospy.Time(0)
             self.reported_reason = "OK"
 
+        if self.current_behavior != self.reported_behavior:
+            print("[{:.2f}s] BEHAVIOR {} -> {} {}".format(
+                now.to_sec(), self.reported_behavior,
+                self.current_behavior, self.behavior_text()))
+            self.reported_behavior = self.current_behavior
+
         if self.active and self.warn_active_duration > 0.0 and self.active_start is not None:
             active_duration = (now - self.active_start).to_sec()
             since_warn = (now - self.last_warn_time).to_sec()
@@ -101,9 +123,22 @@ class MpcEventMonitor:
         risk_scale = self.fmt(data[9]) if len(data) > 9 else "NA"
         best_clearance = self.fmt(data[10]) if len(data) > 10 else "NA"
         best_ttc = self.fmt(data[11]) if len(data) > 11 else "NA"
-        return ("valid={} best_clearance={} best_ttc={} "
+        return ("behavior={} valid={} best_clearance={} best_ttc={} "
                 "global_clearance={} global_ttc={} plan_valid={} risk_scale={}").format(
-            valid, best_clearance, best_ttc, clearance, ttc, plan_valid, risk_scale)
+            self.current_behavior, valid, best_clearance, best_ttc,
+            clearance, ttc, plan_valid, risk_scale)
+
+    def behavior_text(self):
+        data = self.latest_behavior_debug
+        if data is None or len(data) < 13:
+            return "behavior_debug=NA"
+        return ("target_front={} target_lat={} dist_goal={} inside={} "
+                "pred={} yield={} occ={} best_unsafe={} plan_valid={} "
+                "valid={} stop={} enforce={}").format(
+            self.fmt(data[1]), self.fmt(data[2]), self.fmt(data[3]),
+            int(data[4]), int(data[5]), int(data[6]), int(data[7]),
+            int(data[8]), int(data[9]), self.fmt(data[10]),
+            int(data[11]), int(data[12]))
 
     @staticmethod
     def fmt(value):

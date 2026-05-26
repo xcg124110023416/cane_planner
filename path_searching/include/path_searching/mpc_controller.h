@@ -54,6 +54,7 @@ public:
         double adaptive_risk_ttc = 1.2;
 
         // Hard constraint: risk > threshold → INF cost (dynamic obstacles only)
+        bool dynamic_hard_reject_enable = true;
         double risk_hard_threshold = 8.5;
 
         // Static obstacle: high penalty per colliding point (effectively hard)
@@ -65,6 +66,11 @@ public:
         bool use_dynamic_size = true;
         double dynamic_safety_margin = 0.15;
         double dynamic_min_radius = 0.35;
+        bool dynamic_uncertainty_enable = true;
+        double dynamic_uncertainty_base_rate = 0.08;      // m/s radius growth for prediction time
+        double dynamic_uncertainty_crossing_rate = 0.25;  // extra m/s for lateral crossing motion
+        double dynamic_uncertainty_slow_speed = 0.20;     // low speed implies weak intent evidence
+        double dynamic_uncertainty_path_lateral = 1.0;    // apply crossing growth near planned path corridor
 
         // SDF proximity cost: repulsive gradient around obstacles
         double w_prox = 5.0;

@@ -46,11 +46,17 @@ void MpcController::setParam(ros::NodeHandle &nh)
     nh.param("mpc/adaptive_risk_clearance", cfg_.adaptive_risk_clearance, 0.8);
     nh.param("mpc/adaptive_risk_ttc", cfg_.adaptive_risk_ttc, 1.2);
 
+    nh.param("mpc/dynamic_hard_reject_enable", cfg_.dynamic_hard_reject_enable, true);
     nh.param("mpc/static_penalty", cfg_.static_penalty, 500.0);
     nh.param("mpc/w_static", cfg_.w_static, 1.0);
     nh.param("mpc/use_dynamic_size", cfg_.use_dynamic_size, true);
     nh.param("mpc/dynamic_safety_margin", cfg_.dynamic_safety_margin, 0.15);
     nh.param("mpc/dynamic_min_radius", cfg_.dynamic_min_radius, 0.35);
+    nh.param("mpc/dynamic_uncertainty_enable", cfg_.dynamic_uncertainty_enable, true);
+    nh.param("mpc/dynamic_uncertainty_base_rate", cfg_.dynamic_uncertainty_base_rate, 0.08);
+    nh.param("mpc/dynamic_uncertainty_crossing_rate", cfg_.dynamic_uncertainty_crossing_rate, 0.25);
+    nh.param("mpc/dynamic_uncertainty_slow_speed", cfg_.dynamic_uncertainty_slow_speed, 0.20);
+    nh.param("mpc/dynamic_uncertainty_path_lateral", cfg_.dynamic_uncertainty_path_lateral, 1.0);
     nh.param("mpc/w_prox", cfg_.w_prox, 5.0);
     nh.param("mpc/prox_margin", cfg_.prox_margin, 0.6);
     nh.param("mpc/use_best", cfg_.use_best, true);
@@ -359,6 +365,12 @@ void MpcController::rolloutBatch(
     // FOV limitation: robot's actual current position (step 0, not rollout)
     double base_x = lfpc_base->getCOMPos()(0);
     double base_y = lfpc_base->getCOMPos()(1);
+    Eigen::Vector2d path_dir(goal_pos(0) - base_x, goal_pos(1) - base_y);
+    if (path_dir.norm() < 1e-3)
+        path_dir = Eigen::Vector2d(1.0, 0.0);
+    else
+        path_dir.normalize();
+    const Eigen::Vector2d path_left(-path_dir.y(), path_dir.x());
     bool limit_fov = (cfg_.fov_range > 0.0);
     double fov_sq = cfg_.fov_range * cfg_.fov_range;
 
@@ -474,6 +486,33 @@ void MpcController::rolloutBatch(
                             dyn_radius = std::max(dyn_radius, 0.5 * std::max(obs_size[oi](0), obs_size[oi](1)));
                         dyn_radius += dyn_margin;
 
+                        if (cfg_.dynamic_uncertainty_enable)
+                        {
+                            Eigen::Vector2d rel_obs(ox - base_x, oy - base_y);
+                            const double obs_front = rel_obs.dot(path_dir);
+                            const double obs_lateral = rel_obs.dot(path_left);
+                            const double speed = std::sqrt(vx * vx + vy * vy);
+                            const double v_cross = std::abs(vx * path_left.x() + vy * path_left.y());
+                            const double crossing_ratio = speed > 1e-3 ? v_cross / speed : 0.0;
+                            const double slow_uncertainty =
+                                std::max(0.0, std::min(1.0,
+                                    (cfg_.dynamic_uncertainty_slow_speed - speed) /
+                                    std::max(1e-3, cfg_.dynamic_uncertainty_slow_speed)));
+                            const double path_lateral =
+                                std::max(1e-3, cfg_.dynamic_uncertainty_path_lateral);
+                            const bool near_path_corridor =
+                                obs_front > -0.5 && std::abs(obs_lateral) < path_lateral;
+                            double uncertainty_rate =
+                                std::max(0.0, cfg_.dynamic_uncertainty_base_rate);
+                            if (near_path_corridor)
+                            {
+                                uncertainty_rate +=
+                                    std::max(0.0, cfg_.dynamic_uncertainty_crossing_rate) *
+                                    std::max(crossing_ratio, slow_uncertainty);
+                            }
+                            dyn_radius += uncertainty_rate * point_t;
+                        }
+
                         double ddx = px - ox;
                         double ddy = py - oy;
                         double dyn_dist = std::sqrt(ddx * ddx + ddy * ddy);
@@ -485,7 +524,8 @@ void MpcController::rolloutBatch(
                         if (dyn_clearance < last_debug_metrics_.min_dynamic_clearance)
                             last_debug_metrics_.min_dynamic_clearance = dyn_clearance;
 
-                        if (ddx * ddx + ddy * ddy < dyn_radius * dyn_radius)
+                        if (cfg_.dynamic_hard_reject_enable &&
+                            ddx * ddx + ddy * ddy < dyn_radius * dyn_radius)
                         {
                             dyn_collided = true;
                             break;
@@ -508,15 +548,23 @@ void MpcController::rolloutBatch(
                                 last_debug_metrics_.min_cpa_time = t_cpa;
                         }
 
-                        double r = risk_field_.getIndividualCostFast(px, py, ox, oy, vx, vy);
-                        if (r > risk_thresh)
+                        const bool eval_dynamic_risk =
+                            cfg_.dynamic_hard_reject_enable || w_risk > 1e-9;
+                        if (eval_dynamic_risk)
                         {
-                            dyn_collided = true;
-                            break;
+                            double r = risk_field_.getIndividualCostFast(px, py, ox, oy, vx, vy);
+                            if (std::isfinite(r) && cfg_.dynamic_hard_reject_enable && r > risk_thresh)
+                            {
+                                dyn_collided = true;
+                                break;
+                            }
+                            r += risk_field_.getTimeConflictCostFast(px, py, rvx, rvy, ox, oy, vx, vy, dyn_radius);
+                            if (std::isfinite(r))
+                            {
+                                risk_cost += r;
+                                risk_evals++;
+                            }
                         }
-                        r += risk_field_.getTimeConflictCostFast(px, py, rvx, rvy, ox, oy, vx, vy, dyn_radius);
-                        risk_cost += r;
-                        risk_evals++;
                     }
                 }
                 // else: beyond FOV, skip all checks (optimistic)

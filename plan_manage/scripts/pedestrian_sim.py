@@ -5,6 +5,8 @@ Publishes onboard_detector::DynamicObstacles and visualization markers.
 """
 import rospy
 import numpy as np
+import rospkg
+import yaml
 from geometry_msgs.msg import Vector3, Point, PoseStamped
 from visualization_msgs.msg import Marker, MarkerArray
 from onboard_detector.msg import DynamicObstacles
@@ -86,11 +88,13 @@ class PedestrianSim:
             "/move_base_simple/goal", PoseStamped, self.goal_cb, queue_size=1)
         self._triggered = False
 
-        # Define pedestrians from rosparam
-        ped_configs = rospy.get_param("~pedestrians", [
+        default_pedestrians = [
             {"start": [-3.0, 3.0, 0.0], "vel": [0.8, 0.0, 0.0], "size": [0.5, 0.5, 1.7], "period": 5.0},
             {"start": [3.0, -2.0, 0.0], "vel": [-0.6, 0.3, 0.0], "size": [0.5, 0.5, 1.7], "period": 4.0},
-        ])
+        ]
+        ped_configs = rospy.get_param("~pedestrians", None)
+        if ped_configs is None:
+            ped_configs = self.load_scenario(default_pedestrians)
 
         self.pedestrians = []
         for i, cfg in enumerate(ped_configs):
@@ -102,6 +106,34 @@ class PedestrianSim:
 
         self.rate = rospy.Rate(10)  # 10 Hz
         rospy.loginfo("PedestrianSim: %d pedestrians, 10Hz", len(self.pedestrians))
+
+    def load_scenario(self, default_pedestrians):
+        scenario = rospy.get_param("~scenario", "mixed")
+        config_path = rospy.get_param("~scenario_config", self.default_scenario_config())
+        try:
+            with open(config_path, "r") as f:
+                config = yaml.safe_load(f) or {}
+        except Exception as exc:
+            rospy.logwarn(
+                "PedestrianSim: failed to read scenario config %s: %s; using defaults",
+                config_path,
+                exc,
+            )
+            return default_pedestrians
+        if scenario not in config:
+            rospy.logwarn(
+                "PedestrianSim: scenario '%s' not found in %s; available=%s; using defaults",
+                scenario,
+                config_path,
+                sorted(config.keys()),
+            )
+            return default_pedestrians
+        rospy.loginfo("PedestrianSim: scenario=%s config=%s", scenario, config_path)
+        return config[scenario]
+
+    def default_scenario_config(self):
+        package_path = rospkg.RosPack().get_path("plan_manage")
+        return package_path + "/config/pedestrian_scenarios.yaml"
 
     def goal_cb(self, msg):
         """Retrigger all pedestrians when a new goal is set."""

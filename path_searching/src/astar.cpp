@@ -1,4 +1,5 @@
 #include <path_searching/astar.h>
+#include <limits>
 #include <sstream>
 
 using namespace std;
@@ -17,6 +18,10 @@ namespace cane_planner
   bool Astar::search(Eigen::Vector2d start_pt, Eigen::Vector2d end_pt, bool dynamic, double time_start)
   {
     const bool use_static = use_static_global_map_ && collision_->hasStaticGlobalMap();
+    auto in_astar_bounds = [this](const Eigen::Vector2d &pt) {
+      return pt(0) > origin_(0) && pt(0) < map_size_2d_(0) &&
+             pt(1) > origin_(1) && pt(1) < map_size_2d_(1);
+    };
     if (use_static)
     {
       bool start_free = collision_->isStaticTraversable(start_pt(0), start_pt(1));
@@ -24,11 +29,46 @@ namespace cane_planner
       const int start_near_free = collision_->countStaticTraversableAround(start_pt, 0.5);
       const int end_near_free = collision_->countStaticTraversableAround(end_pt, 0.5);
       ROS_WARN_THROTTLE(1.0,
-                        "[Astar static] start=(%.2f, %.2f) free=%d near_free=%d dist=%.2f, goal=(%.2f, %.2f) free=%d near_free=%d dist=%.2f",
-                        start_pt(0), start_pt(1), start_free, start_near_free,
+                        "[Astar static] bounds=[%.2f %.2f]x[%.2f %.2f], start=(%.2f, %.2f) in=%d free=%d near_free=%d dist=%.2f, goal=(%.2f, %.2f) in=%d free=%d near_free=%d dist=%.2f",
+                        origin_(0), map_size_2d_(0), origin_(1), map_size_2d_(1),
+                        start_pt(0), start_pt(1), in_astar_bounds(start_pt), start_free, start_near_free,
                         collision_->getStaticCollisionDistance(start_pt),
-                        end_pt(0), end_pt(1), end_free, end_near_free,
+                        end_pt(0), end_pt(1), in_astar_bounds(end_pt), end_free, end_near_free,
                         collision_->getStaticCollisionDistance(end_pt));
+    }
+    else
+    {
+      auto count_near_traversable = [this](const Eigen::Vector2d &pt, double radius) {
+        const int step = std::max(1, static_cast<int>(std::ceil(radius * inv_resolution_)));
+        int count = 0;
+        for (int dx = -step; dx <= step; ++dx)
+        {
+          for (int dy = -step; dy <= step; ++dy)
+          {
+            if (std::hypot(dx, dy) * resolution_ > radius)
+              continue;
+            const double x = pt(0) + dx * resolution_;
+            const double y = pt(1) + dy * resolution_;
+            if (x <= origin_(0) || x >= map_size_2d_(0) ||
+                y <= origin_(1) || y >= map_size_2d_(1))
+              continue;
+            if (collision_->isTraversable(x, y))
+              count++;
+          }
+        }
+        return count;
+      };
+      const bool start_free = collision_->isTraversable(start_pt(0), start_pt(1));
+      const bool end_free = collision_->isTraversable(end_pt(0), end_pt(1));
+      ROS_WARN_THROTTLE(1.0,
+                        "[Astar sdf] bounds=[%.2f %.2f]x[%.2f %.2f], start=(%.2f, %.2f) in=%d free=%d near_free=%d dist=%.2f, goal=(%.2f, %.2f) in=%d free=%d near_free=%d dist=%.2f",
+                        origin_(0), map_size_2d_(0), origin_(1), map_size_2d_(1),
+                        start_pt(0), start_pt(1), in_astar_bounds(start_pt), start_free,
+                        count_near_traversable(start_pt, 0.5),
+                        collision_->getCollisionDistance(start_pt),
+                        end_pt(0), end_pt(1), in_astar_bounds(end_pt), end_free,
+                        count_near_traversable(end_pt, 0.5),
+                        collision_->getCollisionDistance(end_pt));
     }
 
     /* ---------- initialize ---------- */
@@ -62,6 +102,13 @@ namespace cane_planner
 
     // NodePtr neighbor = NULL;
     NodePtr terminate_node = NULL;
+    Eigen::Vector2d expanded_min = start_pt;
+    Eigen::Vector2d expanded_max = start_pt;
+    Eigen::Vector2d closest_to_goal = start_pt;
+    double closest_goal_dist = (start_pt - end_pt).norm();
+    int reject_bounds = 0;
+    int reject_closed = 0;
+    int reject_collision = 0;
 
     /* ---------- search loop ---------- */
     while (!open_set_.empty())
@@ -119,6 +166,14 @@ namespace cane_planner
       open_set_.pop();
       cur_node->node_state = IN_CLOSE_SET;
       iter_num_ += 1;
+      expanded_min = expanded_min.cwiseMin(cur_node->position);
+      expanded_max = expanded_max.cwiseMax(cur_node->position);
+      const double cur_goal_dist = (cur_node->position - end_pt).norm();
+      if (cur_goal_dist < closest_goal_dist)
+      {
+        closest_goal_dist = cur_goal_dist;
+        closest_to_goal = cur_node->position;
+      }
 
       /* ---------- init neighbor expansion ---------- */
 
@@ -145,6 +200,7 @@ namespace cane_planner
           if (pro_pos(0) <= origin_(0) || pro_pos(0) >= map_size_2d_(0) || pro_pos(1) <= origin_(1) || pro_pos(1) >= map_size_2d_(1))
           {
             // cout << "outside map" << endl;
+            reject_bounds++;
             continue;
           }
 
@@ -156,6 +212,7 @@ namespace cane_planner
           if (pro_node != NULL && pro_node->node_state == IN_CLOSE_SET)
           {
             // cout << "in closeset" << endl;
+            reject_closed++;
             continue;
           }
           Eigen::Vector3d pro_pos_3d;
@@ -174,6 +231,7 @@ namespace cane_planner
           // if (!collision_->isTraversable(pro_pos_3d))
           {
             // cout << "Can't Traversable" << endl;
+            reject_collision++;
             continue;
           }
 
@@ -249,6 +307,11 @@ namespace cane_planner
     cout << "open set empty, no path!" << endl;
     cout << "use node num: " << use_node_num_ << endl;
     cout << "iter num: " << iter_num_ << endl;
+    ROS_WARN("[Astar debug] %s expanded_bbox=[%.2f %.2f]x[%.2f %.2f], closest_to_goal=(%.2f, %.2f), closest_dist=%.2f, goal=(%.2f, %.2f), rejects bounds=%d closed=%d collision=%d",
+             use_static ? "static" : "sdf",
+             expanded_min(0), expanded_max(0), expanded_min(1), expanded_max(1),
+             closest_to_goal(0), closest_to_goal(1), closest_goal_dist,
+             end_pt(0), end_pt(1), reject_bounds, reject_closed, reject_collision);
     return false;
   }
 

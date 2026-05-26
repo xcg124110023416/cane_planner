@@ -16,16 +16,17 @@ TOPICS = [
     "/mpc/best_traj",
     "/mpc/current_waypoint",
     "/mpc/waypoints",
-    "/localization_odom",
-    "/cmd_vel_footprint",
+    "/simulation_generator/odom",
+    "/sim_odom",
     "/onboard_detector/dynamic_obstacles_info",
-    "/onboard_detector/dynamic_bboxes",
-    "/gazebo_pedestrian_truth/visualization",
+    "/pedestrian_sim/visualization",
+    "/sdf_map/occupancy_local",
+    "/sdf_map/occupancy_local_inflate",
 ]
 
 
 def main():
-    label = sys.argv[1] if len(sys.argv) > 1 else "run"
+    label = sys.argv[1] if len(sys.argv) > 1 else "lightweight"
     root_dir = os.environ.get("MPC_EVAL_RECORD_DIR", "/home/xcg/ws/records")
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = os.path.join(root_dir, "{}_{}".format(stamp, label))
@@ -36,15 +37,17 @@ def main():
     metadata_path = os.path.join(out_dir, "topics.txt")
     with open(metadata_path, "w", encoding="utf-8") as f:
         f.write("label: {}\n".format(label))
+        f.write("mode: lightweight\n")
         f.write("created_at: {}\n".format(stamp))
         f.write("bag_prefix: {}\n".format(prefix))
+        f.write("odom_topic: /simulation_generator/odom\n")
         f.write("topics:\n")
         for topic in TOPICS:
             f.write("  {}\n".format(topic))
 
-    print("[record_mpc_eval] Writing bag to: {}_*.bag".format(prefix))
-    print("[record_mpc_eval] Metadata: {}".format(metadata_path))
-    print("[record_mpc_eval] Press Ctrl+C to stop recording.")
+    print("[record_lightweight_mpc_eval] Writing bag to: {}_*.bag".format(prefix))
+    print("[record_lightweight_mpc_eval] Metadata: {}".format(metadata_path))
+    print("[record_lightweight_mpc_eval] Press Ctrl+C to stop recording.")
     sys.stdout.flush()
 
     argv = ["rosbag", "record", "-O", prefix] + TOPICS

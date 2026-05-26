@@ -241,12 +241,53 @@ Optional later extensions:
 - report stop duration and release time;
 - warn if stop/yield remains active longer than a configurable threshold.
 
+## Priority 3D: Stop/Yield Behavior Layer
+
+Status: prototype implemented. The existing stop/yield hysteresis prevents
+stop-go flicker once a stop decision is made. The behavior layer now separates
+low valid-sample ratio from hard stop and adds an explicit guide-cane interaction
+state: yield before entering a pedestrian crossing corridor, but commit to pass
+after the robot has already entered that corridor so it does not stop on the
+pedestrian's path.
+
+### Purpose
+
+Stop advice should be a last-resort guide-cane safety behavior, not the primary
+avoidance mechanism. The default response to moderate dynamic risk should remain
+continuous steering through MPC.
+
+### Current Behavior Split
+
+- `NORMAL`: continue MPC steering; do not force zero command.
+- `YIELD_BEFORE_CROSSING`: stop before entering a crossing corridor.
+- `COMMIT_TO_PASS`: after entering the corridor, keep clearing it instead of
+  converting a late `NO_VALID_DYNAMIC_PLAN` into an in-place stop.
+- `BLOCKED`: stop when no valid dynamic plan exists outside the crossing
+  corridor or the selected trajectory is unsafe.
+
+The yielding gate includes a minimum front distance. The system yields before
+entering a pedestrian crossing corridor; once the robot is inside the crossing
+corridor, the behavior state switches to `COMMIT_TO_PASS`. In Gazebo this sends
+a small forward clearing command if the dynamic MPC has no valid plan, matching
+the guide-cane principle that "where to stop" matters as much as "when to stop."
+
+### Remaining Work
+
+Evaluate the state machine over repeated full runs. If it is stable, use
+`/mpc/behavior_state` in the analysis pipeline and decide whether CAUTION should
+explicitly adjust risk/step-length instead of only affecting internal stop
+logic.
+
 ## Priority 3C: Rosbag Recording Script for MPC Evaluation
 
 Status: implemented as a first lightweight recorder and analyzer. The recorder
 stores the core numeric, state, trajectory, and pedestrian-truth topics needed
 to replay a run without storing large point clouds by default. The analyzer
 prints and saves a compact experiment summary from the recorded bag.
+
+An additional fixed-goal publisher is implemented so baseline runs can start
+from the same Gazebo pedestrian phase instead of relying on manual RViz goal
+clicks.
 
 ### Purpose
 
@@ -259,6 +300,7 @@ runtime statistics.
 
 - `plan_manage/scripts/record_mpc_eval.sh`
 - `plan_manage/scripts/analyze_mpc_eval.py`
+- `plan_manage/scripts/publish_fixed_goal.py`
 
 Usage:
 
@@ -285,6 +327,25 @@ Override output root:
 ```bash
 MPC_EVAL_RECORD_DIR=/tmp/mpc_records rosrun plan_manage record_mpc_eval.sh crossing_test_01
 ```
+
+For fair baseline runs, launch Gazebo paused and then publish a fixed RViz-style
+goal at a fixed simulation time:
+
+```bash
+rosrun plan_manage publish_fixed_goal.py _goal_x:=16.27 _goal_y:=1.52 _goal_yaw:=0.0 _start_time:=10.0
+```
+
+The script unpauses Gazebo via `/gazebo/unpause_physics`, waits for `/clock`,
+`/localization_odom`, and `/onboard_detector/dynamic_obstacles_info` by default,
+then publishes `/move_base_simple/goal`. This is important for
+`corridor_dynamic_9.world`, because its Gazebo pedestrian plugin starts moving
+as soon as physics runs. Starting with `gazebo_paused:=true` freezes pedestrian
+phase while all terminals are prepared; unpausing from the fixed-goal script
+makes the pedestrian phase and goal issue time repeatable.
+
+Do not call `/gazebo/reset_simulation` after FAST-LIO/localization has started
+for these trials. Resetting simulation time can make LiDAR timestamps jump
+backward and trigger FAST-LIO buffer clearing.
 
 ### Recorded Topics
 
@@ -349,6 +410,15 @@ weighting only; adaptive lookahead is intentionally deferred until the risk
 behavior is validated. The soft dynamic risk weight scales up near low dynamic
 clearance or short CPA/TTC, while hard safety checks remain unchanged.
 
+Additional prototype: uncertainty-aware dynamic safety buffer. Dynamic obstacle
+hard-radius checks now support a small reachable-set inflation that grows with
+prediction time, especially for pedestrians crossing near the current planned
+path corridor or moving too slowly for constant-velocity prediction to be
+reliable. The guide-cane stop/yield layer also has an occupancy-wait rule: if a
+crossing pedestrian still occupies the forward passing corridor, the cane waits
+instead of trying to slip behind them. This targets reversal/hesitation cases
+without depending on Gazebo-specific pedestrian names or fixed world positions.
+
 ### Purpose
 
 Fixed lookahead and fixed risk weight are simple but can be suboptimal:
@@ -371,6 +441,17 @@ Adaptive risk weight:
 ```text
 w_risk_eff = w_risk * f(min_ttc, min_distance)
 ```
+
+Uncertainty-aware dynamic safety buffer:
+
+```text
+r_i(t) = r_i0 + r_safe + k_base t + k_uncertainty u_i t
+```
+
+where `u_i` increases for lateral crossing motion near the planned path corridor
+or low-speed/ambiguous motion. The planner still uses the measured pedestrian
+position and velocity, but avoids over-trusting a single constant-velocity
+future point.
 
 ### Expected Code Output
 
@@ -493,9 +574,11 @@ Suggested file:
 
 ## Priority 6: Experiment Suite
 
-Status: baseline launch toggles are implemented for the Gazebo localization MPC
-flow. The default launch keeps the full method enabled, while ablation runs can
-disable individual modules from the command line.
+Status: baseline launch toggles and a fixed-goal publisher are implemented for
+the Gazebo localization MPC flow. The default launch keeps the full method
+enabled, while ablation runs can disable individual modules from the command
+line. For fair comparison, use `publish_fixed_goal.py` instead of manually
+clicking a goal in RViz.
 
 ### Implemented Baseline Toggles
 

@@ -82,7 +82,10 @@ catkin_install_python(PROGRAMS
   scripts/gazebo_pedestrian_truth_bridge.py
   scripts/mpc_event_monitor.py
   scripts/record_mpc_eval.sh
+  scripts/record_lightweight_mpc_eval.sh
   scripts/analyze_mpc_eval.py
   scripts/summarize_mpc_eval.py
+  scripts/publish_fixed_goal.py
+  scripts/publish_lightweight_fixed_goal.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

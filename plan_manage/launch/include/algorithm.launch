@@ -18,6 +18,7 @@
     <arg name="map_size_z"/>
     <arg name="kin_horizon"/>
     <arg name="user_step_length" default="0.40"/>
+    <arg name="global_wp_arrival_radius" default="0.25"/>
     <arg name="input_min_height" default="0.15"/>
     <arg name="input_max_height" default="2.6"/>
     <arg name="enable_map_visualization" default="true"/>
@@ -48,7 +49,13 @@
     <arg name="mpc_enable_cpa" default="true"/>
     <arg name="mpc_enable_adaptive_risk" default="true"/>
     <arg name="mpc_enable_stop_enforce" default="true"/>
+    <arg name="mpc_enable_stop_advice" default="true"/>
     <arg name="mpc_enable_yield" default="true"/>
+    <arg name="mpc_w_risk" default="2.0"/>
+    <arg name="mpc_cpa_weight" default="0.6"/>
+    <arg name="mpc_risk_sigma_y" default="0.4"/>
+    <arg name="mpc_num_samples" default="200"/>
+    <arg name="mpc_enable_dynamic_hard_reject" default="true"/>
 
     
     <node pkg="plan_manage" name="kin_replan_node" type="kin_replan_node" output="screen" >
@@ -61,7 +68,7 @@
         <!-- planner manager -->
         <param name="manager/sim_speed" value="1.0" type="double"/>
         <param name="manager/global_wp_spacing" value="1.0" type="double"/>
-        <param name="manager/global_wp_arrival_radius" value="0.1" type="double"/>
+        <param name="manager/global_wp_arrival_radius" value="$(arg global_wp_arrival_radius)" type="double"/>
         <!-- 前向截断距离：从最近投影点向前看多少米选为当前目标 -->
         <param name="manager/lookahead_dist" value="2.2" type="double"/>
         <param name="manager/max_vel" value="1.0" type="double"/>
@@ -206,7 +213,7 @@
         <param name="lfpc/t_sup" value="0.35"/>
         <!-- mpc controller set -->
         <param name="mpc/horizon_steps" value="10" type="int"/>
-        <param name="mpc/num_samples" value="200" type="int"/>
+        <param name="mpc/num_samples" value="$(arg mpc_num_samples)" type="int"/>
         <!-- MPPI温度：越小越贪心(选最优)，越大越平滑(加权平均) -->
         <param name="mpc/temperature" value="0.4" type="double"/>
         <param name="mpc/mpc_iters" value="1" type="int"/>
@@ -223,7 +230,8 @@
         <!-- 转向幅度代价：惩罚|api|绝对值，越大越走直线 -->
         <param name="mpc/w_steer" value="0.5" type="double"/>
         <!-- risk已归一化：每点平均risk×权重，不再是累加值 -->
-        <param name="mpc/w_risk" value="2.0" type="double"/>
+        <param name="mpc/w_risk" value="$(arg mpc_w_risk)" type="double"/>
+        <param name="mpc/dynamic_hard_reject_enable" value="$(arg mpc_enable_dynamic_hard_reject)" type="bool"/>
         <!-- Adaptive dynamic-risk weight: only scales soft dynamic risk when a predicted conflict is close. -->
         <param name="mpc/adaptive_risk_weight" value="$(arg mpc_enable_adaptive_risk)" type="bool"/>
         <param name="mpc/adaptive_risk_max_scale" value="1.8" type="double"/>
@@ -242,6 +250,12 @@
         <param name="mpc/use_dynamic_size" value="true" type="bool"/>
         <param name="mpc/dynamic_safety_margin" value="0.15" type="double"/>
         <param name="mpc/dynamic_min_radius" value="0.35" type="double"/>
+        <!-- Uncertainty-aware reachable-set inflation for short-horizon pedestrian prediction. -->
+        <param name="mpc/dynamic_uncertainty_enable" value="true" type="bool"/>
+        <param name="mpc/dynamic_uncertainty_base_rate" value="0.0" type="double"/>
+        <param name="mpc/dynamic_uncertainty_crossing_rate" value="0.12" type="double"/>
+        <param name="mpc/dynamic_uncertainty_slow_speed" value="0.18" type="double"/>
+        <param name="mpc/dynamic_uncertainty_path_lateral" value="0.8" type="double"/>
         <!-- SDF排斥力权重、排斥生效距离(m)：距墙<margin时二次增长 -->
         <param name="mpc/w_prox" value="4.0" type="double"/>
         <param name="mpc/prox_margin" value="0.3" type="double"/>
@@ -253,11 +267,12 @@
         <param name="mpc/fov_range" value="5.0" type="double"/>
         <param name="mpc/debug_enable" value="true" type="bool"/>
         <!-- Stop advice for guide-cane use: publish/optionally enforce stop when predicted dynamic conflict is unavoidable. -->
-        <param name="mpc/stop_advice_enable" value="true" type="bool"/>
+        <param name="mpc/stop_advice_enable" value="$(arg mpc_enable_stop_advice)" type="bool"/>
         <param name="mpc/stop_advice_enforce" value="$(arg mpc_enable_stop_enforce)" type="bool"/>
         <param name="mpc/stop_valid_ratio_thresh" value="0.08" type="double"/>
         <param name="mpc/stop_clearance_thresh" value="0.15" type="double"/>
         <param name="mpc/stop_ttc_thresh" value="0.5" type="double"/>
+        <param name="mpc/stop_best_traj_min_front_dist" value="0.7" type="double"/>
         <param name="mpc/stop_hold_time" value="0.8" type="double"/>
         <param name="mpc/stop_release_clear_time" value="0.5" type="double"/>
         <!-- Yielding policy: stop/wait for close crossing pedestrians instead of slowly blocking their path. -->
@@ -265,24 +280,50 @@
         <param name="mpc/yield_front_dist" value="2.6" type="double"/>
         <param name="mpc/yield_lateral_dist" value="1.1" type="double"/>
         <param name="mpc/yield_cross_speed" value="0.15" type="double"/>
-        <param name="mpc/yield_time_gap" value="1.2" type="double"/>
-        <param name="mpc/yield_release_front_margin" value="0.4" type="double"/>
-        <param name="mpc/yield_release_lateral_margin" value="0.2" type="double"/>
-        <param name="mpc/yield_release_time_margin" value="0.2" type="double"/>
+        <param name="mpc/yield_time_gap" value="0.8" type="double"/>
+        <param name="mpc/yield_min_front_dist" value="0.7" type="double"/>
+        <param name="mpc/yield_release_front_margin" value="0.2" type="double"/>
+        <param name="mpc/yield_release_lateral_margin" value="0.1" type="double"/>
+        <param name="mpc/yield_release_time_margin" value="0.0" type="double"/>
+        <!-- Occupancy wait: for guide-cane shared control, do not slip past a crossing pedestrian
+             while they still occupy the forward passing corridor. -->
+        <param name="mpc/yield_occupancy_enable" value="true" type="bool"/>
+        <param name="mpc/yield_occupancy_front_dist" value="1.6" type="double"/>
+        <param name="mpc/yield_occupancy_lateral_dist" value="0.75" type="double"/>
+        <param name="mpc/yield_occupancy_time_gap" value="0.1" type="double"/>
+        <!-- Predictive yielding: stop before entering a corridor that a pedestrian will occupy
+             near the robot's expected arrival time. -->
+        <param name="mpc/yield_prediction_enable" value="true" type="bool"/>
+        <param name="mpc/yield_prediction_time" value="2.5" type="double"/>
+        <param name="mpc/yield_prediction_step" value="0.2" type="double"/>
+        <param name="mpc/yield_prediction_longitudinal_dist" value="0.6" type="double"/>
+        <!-- Behavior arbitration for guide-cane interaction:
+             keep predictive yielding, but leave commit-to-pass disabled by default because
+             it can create hesitant stop/go behavior in narrow scripted-pedestrian scenes. -->
+        <param name="mpc/behavior_state_enable" value="true" type="bool"/>
+        <param name="mpc/behavior_commit_enable" value="false" type="bool"/>
+        <param name="mpc/behavior_commit_front_dist" value="1.4" type="double"/>
+        <param name="mpc/behavior_commit_back_dist" value="1.0" type="double"/>
+        <param name="mpc/behavior_commit_speed" value="0.25" type="double"/>
+        <param name="mpc/behavior_commit_yaw_rate" value="0.6" type="double"/>
+        <param name="mpc/behavior_yield_hold_time" value="0.0" type="double"/>
+        <param name="mpc/behavior_yield_clear_time" value="0.0" type="double"/>
+        <param name="mpc/behavior_commit_hold_time" value="0.3" type="double"/>
+        <param name="mpc/behavior_commit_clear_time" value="0.2" type="double"/>
         <param name="mpc/nominal_al" value="$(arg user_step_length)" type="double"/>
         <param name="mpc/nominal_aw" value="0.0" type="double"/>
         <param name="mpc/nominal_api" value="0.0" type="double"/>
         <param name="mpc/risk_tau" value="0.8" type="double"/>
         <param name="mpc/risk_A" value="5.0" type="double"/>
         <param name="mpc/risk_sigma_x" value="0.6" type="double"/>
-        <param name="mpc/risk_sigma_y" value="0.4" type="double"/>
+        <param name="mpc/risk_sigma_y" value="$(arg mpc_risk_sigma_y)" type="double"/>
         <param name="mpc/risk_cutoff" value="3.0" type="double"/>
         <!-- 光晕：硬核心外的低幅包络。halo_scale=0关闭(纯高斯)，scale>0时包络宽度=core_sigma*scale，ratio=峰值/A -->
         <param name="mpc/risk_halo_scale" value="2.0" type="double"/>
         <param name="mpc/risk_halo_ratio" value="0.12" type="double"/>
         <!-- CPA/TTC dynamic conflict risk: improves crossing-pedestrian avoidance without increasing MPC horizon. -->
         <param name="mpc/risk_cpa_enable" value="$(arg mpc_enable_cpa)" type="bool"/>
-        <param name="mpc/risk_cpa_weight" value="0.6" type="double"/>
+        <param name="mpc/risk_cpa_weight" value="$(arg mpc_cpa_weight)" type="double"/>
         <param name="mpc/risk_cpa_sigma_d" value="0.65" type="double"/>
         <param name="mpc/risk_cpa_tau" value="1.0" type="double"/>
         <param name="mpc/risk_cpa_time_horizon" value="2.0" type="double"/>

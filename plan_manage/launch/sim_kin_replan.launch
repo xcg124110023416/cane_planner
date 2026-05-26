@@ -1,6 +1,36 @@
 <launch>
     <arg name="odometry_topic" value = "/simulation_generator/odom"/>
     <arg name="planner" default="2"/>  <!-- A*:1, kinodynamic:2, MPC:3 -->
+    <!-- MPC ablation switches for lightweight simulation. -->
+    <arg name="mpc_w_risk" default="2.0"/>
+    <arg name="mpc_enable_cpa" default="true"/>
+    <arg name="mpc_enable_adaptive_risk" default="true"/>
+    <arg name="mpc_enable_stop_enforce" default="true"/>
+    <arg name="mpc_enable_stop_advice" default="true"/>
+    <arg name="mpc_enable_yield" default="true"/>
+    <arg name="mpc_cpa_weight" default="0.6"/>
+    <arg name="mpc_risk_sigma_y" default="0.4"/>
+    <arg name="mpc_num_samples" default="200"/>
+    <arg name="global_wp_arrival_radius" default="0.25"/>
+    <!-- Optional full-PCD global map for A*. Keep local SDF for MPC. -->
+    <arg name="mpc_enable_dynamic_hard_reject" default="true"/>
+    <arg name="pedestrian_scenario" default="mixed"/>
+    <arg name="use_static_global_map" default="false"/>
+    <arg name="use_static_global_esdf" default="false"/>
+    <arg name="static_map_pcd" default="$(find map_generator)/resource/office2_modify.pcd"/>
+    <arg name="static_map_min_height" default="0.60"/>
+    <arg name="static_map_max_height" default="2.0"/>
+    <arg name="static_map_inflation" default="0.08"/>
+    <arg name="static_map_min_points_per_cell" default="3"/>
+    <arg name="static_map_min_component_cells" default="6"/>
+    <arg name="static_require_known_region" default="true"/>
+    <arg name="static_known_use_enclosed_region" default="true"/>
+    <arg name="static_known_min_height" default="-0.25"/>
+    <arg name="static_known_max_height" default="0.35"/>
+    <arg name="static_known_inflation" default="0.55"/>
+    <arg name="static_known_boundary_inflation" default="0.35"/>
+    <arg name="static_endpoint_clear_radius" default="0.25"/>
+    <arg name="publish_static_map_debug" default="true"/>
     <!-- simulation -->
     <include file="$(find plan_manage)/launch/include/simulation.launch"/>
     <!-- unified planner (A*/kinodynamic/MPC all via kin_replan_node FSM) -->
@@ -15,9 +45,36 @@
         <arg name="slice_height" value="0.0"/>
         <arg name="collision_margin" value="0.3"/>
         <arg name="kin_horizon" value="200.0"/>
+        <arg name="global_wp_arrival_radius" value="$(arg global_wp_arrival_radius)"/>
         <arg name="map_size_x" value="40.0"/>
         <arg name="map_size_y" value="40.0"/>
         <arg name="map_size_z" value="5.0"/>
+        <arg name="mpc_w_risk" value="$(arg mpc_w_risk)"/>
+        <arg name="mpc_enable_cpa" value="$(arg mpc_enable_cpa)"/>
+        <arg name="mpc_cpa_weight" value="$(arg mpc_cpa_weight)"/>
+        <arg name="mpc_risk_sigma_y" value="$(arg mpc_risk_sigma_y)"/>
+        <arg name="mpc_num_samples" value="$(arg mpc_num_samples)"/>
+        <arg name="mpc_enable_adaptive_risk" value="$(arg mpc_enable_adaptive_risk)"/>
+        <arg name="mpc_enable_stop_enforce" value="$(arg mpc_enable_stop_enforce)"/>
+        <arg name="mpc_enable_stop_advice" value="$(arg mpc_enable_stop_advice)"/>
+        <arg name="mpc_enable_yield" value="$(arg mpc_enable_yield)"/>
+        <arg name="mpc_enable_dynamic_hard_reject" value="$(arg mpc_enable_dynamic_hard_reject)"/>
+        <arg name="use_static_global_map" value="$(arg use_static_global_map)"/>
+        <arg name="use_static_global_esdf" value="$(arg use_static_global_esdf)"/>
+        <arg name="static_map_pcd" value="$(arg static_map_pcd)"/>
+        <arg name="static_map_min_height" value="$(arg static_map_min_height)"/>
+        <arg name="static_map_max_height" value="$(arg static_map_max_height)"/>
+        <arg name="static_map_inflation" value="$(arg static_map_inflation)"/>
+        <arg name="static_map_min_points_per_cell" value="$(arg static_map_min_points_per_cell)"/>
+        <arg name="static_map_min_component_cells" value="$(arg static_map_min_component_cells)"/>
+        <arg name="static_require_known_region" value="$(arg static_require_known_region)"/>
+        <arg name="static_known_use_enclosed_region" value="$(arg static_known_use_enclosed_region)"/>
+        <arg name="static_known_min_height" value="$(arg static_known_min_height)"/>
+        <arg name="static_known_max_height" value="$(arg static_known_max_height)"/>
+        <arg name="static_known_inflation" value="$(arg static_known_inflation)"/>
+        <arg name="static_known_boundary_inflation" value="$(arg static_known_boundary_inflation)"/>
+        <arg name="static_endpoint_clear_radius" value="$(arg static_endpoint_clear_radius)"/>
+        <arg name="publish_static_map_debug" value="$(arg publish_static_map_debug)"/>
     </include>
     <!-- L1 controller -->
     <node pkg="plan_ctrl" type="L1_controller_v2" respawn="false" name="L1_controller_v2" output="screen">
@@ -42,19 +99,10 @@
     <arg name="use_pedestrians" default="true"/>
     <group if="$(arg use_pedestrians)">
         <node pkg="plan_manage" type="pedestrian_sim.py" name="pedestrian_sim" output="screen">
-            <!-- Customize pedestrians via rosparam or leave defaults -->
             <!-- trigger mode: pedestrian stays at start, walks once on goal, then disappears.
-                 Re-triggered automatically when a new goal is set.
-                 vel = [vx, vy, 0]  gives walking direction and speed (m/s).
-                 period = total walk duration (s).  -->
-            <rosparam param="pedestrians">
-            # 场景1: 横向穿越 (从侧面穿过)
-            - {start: [1, 2.5, 0], vel: [0, 0.5, 0], size: [0.5, 0.5, 1.7], period: 4.0, mode: trigger}
-            # 场景2: 迎面行人 (从前方走来)
-            - {start: [-2.5, -3, 0], vel: [0, 0.5, 0], size: [0.5, 0.5, 1.7], period: 6.0, mode: loop}
-            # 场景3: 背后超越 (同向，机器人更快)
-            - {start: [0, -4.5, 0], vel: [0.3, 0, 0], size: [0.5, 0.5, 1.7], period: 4.0, mode: loop}
-            </rosparam>
+                 loop mode repeats continuously. -->
+            <param name="scenario" value="$(arg pedestrian_scenario)"/>
+            <param name="scenario_config" value="$(find plan_manage)/config/pedestrian_scenarios.yaml"/>
         </node>
     </group>
 
