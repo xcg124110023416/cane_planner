@@ -48,22 +48,12 @@ void MpcController::setParam(ros::NodeHandle &nh)
     nh.param("mpc/interaction_social_corridor_width", cfg_.interaction_corridor_width, 0.8);
     nh.param("mpc/interaction_front_buffer", cfg_.interaction_front_buffer, 0.25);
     nh.param("mpc/interaction_target_dist_cap", cfg_.interaction_target_dist_cap, 3.0);
-    nh.param("mpc/adaptive_risk_weight", cfg_.adaptive_risk_weight, false);
-    nh.param("mpc/adaptive_risk_max_scale", cfg_.adaptive_risk_max_scale, 2.0);
-    nh.param("mpc/adaptive_risk_clearance", cfg_.adaptive_risk_clearance, 0.8);
-    nh.param("mpc/adaptive_risk_ttc", cfg_.adaptive_risk_ttc, 1.2);
-
     nh.param("mpc/dynamic_hard_reject_enable", cfg_.dynamic_hard_reject_enable, true);
     nh.param("mpc/static_penalty", cfg_.static_penalty, 500.0);
     nh.param("mpc/w_static", cfg_.w_static, 1.0);
     nh.param("mpc/use_dynamic_size", cfg_.use_dynamic_size, true);
-    nh.param("mpc/dynamic_safety_margin", cfg_.dynamic_safety_margin, 0.15);
-    nh.param("mpc/dynamic_min_radius", cfg_.dynamic_min_radius, 0.35);
-    nh.param("mpc/dynamic_uncertainty_enable", cfg_.dynamic_uncertainty_enable, true);
-    nh.param("mpc/dynamic_uncertainty_base_rate", cfg_.dynamic_uncertainty_base_rate, 0.08);
-    nh.param("mpc/dynamic_uncertainty_crossing_rate", cfg_.dynamic_uncertainty_crossing_rate, 0.25);
-    nh.param("mpc/dynamic_uncertainty_slow_speed", cfg_.dynamic_uncertainty_slow_speed, 0.20);
-    nh.param("mpc/dynamic_uncertainty_path_lateral", cfg_.dynamic_uncertainty_path_lateral, 1.0);
+    nh.param("mpc/dynamic_safety_margin", cfg_.dynamic_safety_margin, 0.05);
+    nh.param("mpc/dynamic_min_radius", cfg_.dynamic_min_radius, 0.20);
     nh.param("mpc/w_prox", cfg_.w_prox, 5.0);
     nh.param("mpc/prox_margin", cfg_.prox_margin, 0.6);
     nh.param("mpc/use_best", cfg_.use_best, true);
@@ -365,7 +355,6 @@ void MpcController::rolloutBatch(
     last_debug_metrics_.static_reject_count = 0;
     last_debug_metrics_.min_dynamic_clearance = std::numeric_limits<double>::infinity();
     last_debug_metrics_.min_cpa_time = std::numeric_limits<double>::infinity();
-    last_debug_metrics_.risk_weight_scale = 1.0;
     double risk_thresh = cfg_.risk_hard_threshold;
     double w_move = cfg_.w_move;
     double w_steer = cfg_.w_steer;
@@ -404,12 +393,6 @@ void MpcController::rolloutBatch(
     // FOV limitation: robot's actual current position (step 0, not rollout)
     double base_x = lfpc_base->getCOMPos()(0);
     double base_y = lfpc_base->getCOMPos()(1);
-    Eigen::Vector2d path_dir(goal_pos(0) - base_x, goal_pos(1) - base_y);
-    if (path_dir.norm() < 1e-3)
-        path_dir = Eigen::Vector2d(1.0, 0.0);
-    else
-        path_dir.normalize();
-    const Eigen::Vector2d path_left(-path_dir.y(), path_dir.x());
     bool limit_fov = (cfg_.fov_range > 0.0);
     double fov_sq = cfg_.fov_range * cfg_.fov_range;
 
@@ -551,33 +534,6 @@ void MpcController::rolloutBatch(
                             dyn_radius = std::max(dyn_radius, 0.5 * std::max(obs_size[oi](0), obs_size[oi](1)));
                         dyn_radius += dyn_margin;
 
-                        if (cfg_.dynamic_uncertainty_enable)
-                        {
-                            Eigen::Vector2d rel_obs(ox - base_x, oy - base_y);
-                            const double obs_front = rel_obs.dot(path_dir);
-                            const double obs_lateral = rel_obs.dot(path_left);
-                            const double speed = std::sqrt(vx * vx + vy * vy);
-                            const double v_cross = std::abs(vx * path_left.x() + vy * path_left.y());
-                            const double crossing_ratio = speed > 1e-3 ? v_cross / speed : 0.0;
-                            const double slow_uncertainty =
-                                std::max(0.0, std::min(1.0,
-                                    (cfg_.dynamic_uncertainty_slow_speed - speed) /
-                                    std::max(1e-3, cfg_.dynamic_uncertainty_slow_speed)));
-                            const double path_lateral =
-                                std::max(1e-3, cfg_.dynamic_uncertainty_path_lateral);
-                            const bool near_path_corridor =
-                                obs_front > -0.5 && std::abs(obs_lateral) < path_lateral;
-                            double uncertainty_rate =
-                                std::max(0.0, cfg_.dynamic_uncertainty_base_rate);
-                            if (near_path_corridor)
-                            {
-                                uncertainty_rate +=
-                                    std::max(0.0, cfg_.dynamic_uncertainty_crossing_rate) *
-                                    std::max(crossing_ratio, slow_uncertainty);
-                            }
-                            dyn_radius += uncertainty_rate * point_t;
-                        }
-
                         double ddx = px - ox;
                         double ddy = py - oy;
                         double dyn_dist = std::sqrt(ddx * ddx + ddy * ddy);
@@ -640,21 +596,7 @@ void MpcController::rolloutBatch(
             // Normalize risk: average per evaluation, then apply weight
             if (risk_evals > 0)
             {
-                double risk_scale = 1.0;
-                if (cfg_.adaptive_risk_weight && n_obs > 0)
-                {
-                    double clearance_gate = std::max(1e-3, cfg_.adaptive_risk_clearance);
-                    double ttc_gate = std::max(1e-3, cfg_.adaptive_risk_ttc);
-                    double clearance = std::isfinite(step_min_dynamic_clearance) ? step_min_dynamic_clearance : clearance_gate;
-                    double ttc = std::isfinite(step_min_cpa_time) ? step_min_cpa_time : ttc_gate;
-                    double clearance_urgency = std::max(0.0, std::min(1.0, (clearance_gate - clearance) / clearance_gate));
-                    double ttc_urgency = std::max(0.0, std::min(1.0, (ttc_gate - ttc) / ttc_gate));
-                    double urgency = std::max(clearance_urgency, ttc_urgency);
-                    risk_scale = 1.0 + (std::max(1.0, cfg_.adaptive_risk_max_scale) - 1.0) * urgency;
-                    if (risk_scale > last_debug_metrics_.risk_weight_scale)
-                        last_debug_metrics_.risk_weight_scale = risk_scale;
-                }
-                risk_cost = w_risk * risk_scale * risk_cost / risk_evals;
+                risk_cost = w_risk * risk_cost / risk_evals;
             }
 
             if (dyn_collided || static_collided)

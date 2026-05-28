@@ -12,8 +12,6 @@ import rosbag
 DEBUG_TOPIC = "/mpc/debug_metrics"
 STOP_ADVICE_TOPIC = "/mpc/stop_advice"
 STOP_REASON_TOPIC = "/mpc/stop_reason"
-BEHAVIOR_STATE_TOPIC = "/mpc/behavior_state"
-BEHAVIOR_DEBUG_TOPIC = "/mpc/behavior_debug"
 INTERACTION_SCENE_TOPIC = "/mpc/interaction_scene"
 INTERACTION_MODE_TOPIC = "/mpc/interaction_mode"
 INTERACTION_DEBUG_TOPIC = "/mpc/interaction_debug"
@@ -173,7 +171,6 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
 
     plan_time = RunningStats()
     valid_ratio = RunningStats()
-    risk_scale = RunningStats()
     best_clearance = RunningStats()
     best_ttc = RunningStats()
     global_clearance = RunningStats()
@@ -190,21 +187,6 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
     current_reason = "OK"
     current_advice = False
     active_reason = "OK"
-    behavior_counter = Counter()
-    behavior_transitions = []
-    current_behavior = None
-    behavior_debug_count = 0
-    target_front = RunningStats()
-    target_lateral = RunningStats()
-    behavior_dist_goal = RunningStats()
-    target_behind_count = 0
-    inside_corridor_count = 0
-    predicted_conflict_count = 0
-    crossing_yield_count = 0
-    occupancy_conflict_count = 0
-    best_unsafe_count = 0
-    behavior_plan_valid_count = 0
-    behavior_stop_count = 0
 
     # Interaction (Stage 2)
     interaction_scene_counter = Counter()
@@ -304,13 +286,11 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
                     if data[8] > 0.5:
                         plan_valid_count += 1
                 if len(data) > 9:
-                    risk_scale.add(data[9])
-                if len(data) > 10:
-                    value = metric_or_none(data, 10)
+                    value = metric_or_none(data, 9)
                     if value is not None:
                         best_clearance.add(value)
-                if len(data) > 11:
-                    value = metric_or_none(data, 11)
+                if len(data) > 10:
+                    value = metric_or_none(data, 10)
                     if value is not None:
                         best_ttc.add(value)
 
@@ -447,41 +427,6 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
             elif topic == STOP_ADVICE_TOPIC:
                 current_advice = bool(msg.data)
 
-            elif topic == BEHAVIOR_STATE_TOPIC:
-                new_behavior = msg.data if msg.data else "UNKNOWN"
-                behavior_counter[new_behavior] += 1
-                if current_behavior is None:
-                    current_behavior = new_behavior
-                elif new_behavior != current_behavior:
-                    behavior_transitions.append((t, current_behavior, new_behavior))
-                    current_behavior = new_behavior
-
-            elif topic == BEHAVIOR_DEBUG_TOPIC:
-                data = list(msg.data)
-                behavior_debug_count += 1
-                if len(data) > 1:
-                    target_front.add(data[1])
-                    if data[1] < -0.1:
-                        target_behind_count += 1
-                if len(data) > 2:
-                    target_lateral.add(data[2])
-                if len(data) > 3:
-                    behavior_dist_goal.add(data[3])
-                if len(data) > 4 and data[4] > 0.5:
-                    inside_corridor_count += 1
-                if len(data) > 5 and data[5] > 0.5:
-                    predicted_conflict_count += 1
-                if len(data) > 6 and data[6] > 0.5:
-                    crossing_yield_count += 1
-                if len(data) > 7 and data[7] > 0.5:
-                    occupancy_conflict_count += 1
-                if len(data) > 8 and data[8] > 0.5:
-                    best_unsafe_count += 1
-                if len(data) > 9 and data[9] > 0.5:
-                    behavior_plan_valid_count += 1
-                if len(data) > 11 and data[11] > 0.5:
-                    behavior_stop_count += 1
-
             elif topic == INTERACTION_SCENE_TOPIC:
                 new_scene = msg.data if msg.data else "none"
                 interaction_scene_counter[new_scene] += 1
@@ -610,12 +555,9 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
         lines.append("stop_time_ratio: {:.3f}".format(total_stop_duration / run_duration))
     lines.append("stop_reasons: {}".format(
         ", ".join("{}={}".format(k, v) for k, v in sorted(reason_counter.items())) or "none"))
-    lines.append("behavior_states: {}".format(
-        ", ".join("{}={}".format(k, v) for k, v in sorted(behavior_counter.items())) or "none"))
     lines.append("")
     lines.append(plan_time.line("mpc_plan_time", "ms"))
     lines.append(valid_ratio.line("valid_sample_ratio"))
-    lines.append(risk_scale.line("risk_weight_scale"))
     if total_plan_count > 0:
         lines.append("plan_valid_ratio: {:.3f} ({}/{})".format(
             plan_valid_count / float(total_plan_count), plan_valid_count, total_plan_count))
@@ -687,22 +629,6 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
                 closest_encounter["ped_radius"],
             )
         )
-    lines.append("")
-    lines.append("behavior_debug_messages: {}".format(behavior_debug_count))
-    lines.append(target_front.line("behavior_target_front", "m"))
-    lines.append(target_lateral.line("behavior_target_lateral", "m"))
-    lines.append(behavior_dist_goal.line("behavior_dist_to_goal", "m"))
-    lines.append("behavior_target_behind_count: {}".format(target_behind_count))
-    if behavior_debug_count > 0:
-        lines.append("behavior_flags_ratio: inside={:.3f} pred={:.3f} yield={:.3f} occ={:.3f} best_unsafe={:.3f} plan_valid={:.3f} stop={:.3f}".format(
-            inside_corridor_count / float(behavior_debug_count),
-            predicted_conflict_count / float(behavior_debug_count),
-            crossing_yield_count / float(behavior_debug_count),
-            occupancy_conflict_count / float(behavior_debug_count),
-            best_unsafe_count / float(behavior_debug_count),
-            behavior_plan_valid_count / float(behavior_debug_count),
-            behavior_stop_count / float(behavior_debug_count)))
-    lines.append("")
     lines.append("best_traj_messages: {}".format(best_traj_count))
     lines.append(best_traj_min_front.line("best_traj_min_front", "m"))
     lines.append(best_traj_end_front.line("best_traj_end_front", "m"))
@@ -727,16 +653,6 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
         for idx, (start, end, duration, reason) in enumerate(stop_events, 1):
             lines.append("  {}. start={:.2f}s end={:.2f}s duration={:.2f}s reason={}".format(
                 idx, start - base, end - base, duration, reason))
-
-    lines.append("")
-    lines.append("behavior_transitions:")
-    if not behavior_transitions:
-        lines.append("  none")
-    else:
-        base = first_time if first_time is not None else 0.0
-        for idx, (bt, old_state, new_state) in enumerate(behavior_transitions, 1):
-            lines.append("  {}. time={:.2f}s {} -> {}".format(
-                idx, bt - base, old_state, new_state))
 
     # Interaction (Stage 2)
     lines.append("")

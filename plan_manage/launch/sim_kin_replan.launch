@@ -3,22 +3,19 @@
     <arg name="planner" default="2"/>  <!-- A*:1, kinodynamic:2, MPC:3 -->
     <!-- MPC ablation switches for lightweight simulation. -->
     <arg name="mpc_w_risk" default="2.0"/>
-    <arg name="mpc_enable_cpa" default="true"/>
-    <arg name="mpc_enable_adaptive_risk" default="true"/>
+    <arg name="mpc_enable_cpa" default="false"/>
     <arg name="mpc_enable_stop_enforce" default="true"/>
     <arg name="mpc_enable_stop_advice" default="true"/>
-    <arg name="mpc_enable_yield" default="true"/>
     <arg name="mpc_cpa_weight" default="0.6"/>
     <arg name="mpc_risk_sigma_y" default="0.4"/>
     <arg name="mpc_num_samples" default="200"/>
     <arg name="global_wp_arrival_radius" default="0.25"/>
     <!-- Optional full-PCD global map for A*. Keep local SDF for MPC. -->
     <arg name="mpc_enable_dynamic_hard_reject" default="true"/>
-    <arg name="mpc_enable_interaction" default="false"/>
-    <arg name="mpc_interaction_enable_pass_behind" default="false"/>
-    <arg name="mpc_interaction_enable_yield" default="false"/>
+    <arg name="mpc_enable_interaction" default="true"/>
+    <arg name="mpc_interaction_enable_pass_behind" default="true"/>
+    <arg name="mpc_interaction_enable_yield" default="true"/>
     <arg name="mpc_interaction_enable_social_cost" default="false"/>
-    <arg name="mpc_interaction_enable_switch_penalty" default="false"/>
     <arg name="mpc_interaction_w_front_pass" default="0.0"/>
     <arg name="mpc_interaction_enable_behind_corridor" default="false"/>
     <arg name="mpc_interaction_w_behind_corridor" default="0.0"/>
@@ -91,16 +88,13 @@
         <arg name="mpc_cpa_weight" value="$(arg mpc_cpa_weight)"/>
         <arg name="mpc_risk_sigma_y" value="$(arg mpc_risk_sigma_y)"/>
         <arg name="mpc_num_samples" value="$(arg mpc_num_samples)"/>
-        <arg name="mpc_enable_adaptive_risk" value="$(arg mpc_enable_adaptive_risk)"/>
         <arg name="mpc_enable_stop_enforce" value="$(arg mpc_enable_stop_enforce)"/>
         <arg name="mpc_enable_stop_advice" value="$(arg mpc_enable_stop_advice)"/>
-        <arg name="mpc_enable_yield" value="$(arg mpc_enable_yield)"/>
         <arg name="mpc_enable_dynamic_hard_reject" value="$(arg mpc_enable_dynamic_hard_reject)"/>
         <arg name="mpc_enable_interaction" value="$(arg mpc_enable_interaction)"/>
         <arg name="mpc_interaction_enable_pass_behind" value="$(arg mpc_interaction_enable_pass_behind)"/>
         <arg name="mpc_interaction_enable_yield" value="$(arg mpc_interaction_enable_yield)"/>
         <arg name="mpc_interaction_enable_social_cost" value="$(arg mpc_interaction_enable_social_cost)"/>
-        <arg name="mpc_interaction_enable_switch_penalty" value="$(arg mpc_interaction_enable_switch_penalty)"/>
         <arg name="mpc_interaction_w_front_pass" value="$(arg mpc_interaction_w_front_pass)"/>
         <arg name="mpc_interaction_enable_behind_corridor" value="$(arg mpc_interaction_enable_behind_corridor)"/>
         <arg name="mpc_interaction_w_behind_corridor" value="$(arg mpc_interaction_w_behind_corridor)"/>

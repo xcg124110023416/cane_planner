@@ -41,44 +41,12 @@ namespace cane_planner
         nh.param("mpc/debug_enable", mpc_debug_enable_, true);
         nh.param("mpc/stop_advice_enable", mpc_stop_advice_enable_, true);
         nh.param("mpc/stop_advice_enforce", mpc_stop_advice_enforce_, true);
-        nh.param("mpc/stop_valid_ratio_thresh", mpc_stop_valid_ratio_thresh_, 0.08);
-        nh.param("mpc/stop_clearance_thresh", mpc_stop_clearance_thresh_, 0.15);
-        nh.param("mpc/stop_ttc_thresh", mpc_stop_ttc_thresh_, 0.5);
-        nh.param("mpc/stop_best_traj_min_front_dist", mpc_stop_best_traj_min_front_dist_, 0.7);
         nh.param("mpc/stop_hold_time", mpc_stop_hold_time_, 0.8);
         nh.param("mpc/stop_release_clear_time", mpc_stop_release_clear_time_, 0.5);
-        nh.param("mpc/yield_enable", mpc_yield_enable_, true);
-        nh.param("mpc/yield_front_dist", mpc_yield_front_dist_, 2.0);
-        nh.param("mpc/yield_lateral_dist", mpc_yield_lateral_dist_, 0.9);
-        nh.param("mpc/yield_cross_speed", mpc_yield_cross_speed_, 0.15);
-        nh.param("mpc/yield_time_gap", mpc_yield_time_gap_, 0.8);
-        nh.param("mpc/yield_min_front_dist", mpc_yield_min_front_dist_, 0.7);
-        nh.param("mpc/yield_release_front_margin", mpc_yield_release_front_margin_, 0.4);
-        nh.param("mpc/yield_release_lateral_margin", mpc_yield_release_lateral_margin_, 0.2);
-        nh.param("mpc/yield_release_time_margin", mpc_yield_release_time_margin_, 0.2);
-        nh.param("mpc/yield_occupancy_enable", mpc_yield_occupancy_enable_, true);
-        nh.param("mpc/yield_occupancy_lateral_dist", mpc_yield_occupancy_lateral_dist_, 1.25);
-        nh.param("mpc/yield_occupancy_front_dist", mpc_yield_occupancy_front_dist_, 3.0);
-        nh.param("mpc/yield_occupancy_time_gap", mpc_yield_occupancy_time_gap_, 0.6);
-        nh.param("mpc/yield_prediction_enable", mpc_yield_prediction_enable_, true);
-        nh.param("mpc/yield_prediction_time", mpc_yield_prediction_time_, 3.5);
-        nh.param("mpc/yield_prediction_step", mpc_yield_prediction_step_, 0.2);
-        nh.param("mpc/yield_prediction_longitudinal_dist", mpc_yield_prediction_longitudinal_dist_, 0.8);
-        nh.param("mpc/behavior_state_enable", mpc_behavior_state_enable_, true);
-        nh.param("mpc/behavior_commit_enable", mpc_behavior_commit_enable_, false);
-        nh.param("mpc/behavior_commit_front_dist", mpc_behavior_commit_front_dist_, 0.9);
-        nh.param("mpc/behavior_commit_back_dist", mpc_behavior_commit_back_dist_, 0.6);
-        nh.param("mpc/behavior_commit_speed", mpc_behavior_commit_speed_, 0.25);
-        nh.param("mpc/behavior_commit_yaw_rate", mpc_behavior_commit_yaw_rate_, 0.6);
-        nh.param("mpc/behavior_yield_hold_time", mpc_behavior_yield_hold_time_, 0.8);
-        nh.param("mpc/behavior_yield_clear_time", mpc_behavior_yield_clear_time_, 0.7);
-        nh.param("mpc/behavior_commit_hold_time", mpc_behavior_commit_hold_time_, 0.5);
-        nh.param("mpc/behavior_commit_clear_time", mpc_behavior_commit_clear_time_, 0.3);
         nh.param("mpc/interaction_enable", mpc_interaction_enable_, false);
         nh.param("mpc/interaction_enable_pass_behind", mpc_interaction_enable_pass_behind_, false);
         nh.param("mpc/interaction_enable_yield", mpc_interaction_enable_yield_, false);
         nh.param("mpc/interaction_enable_social_cost", mpc_interaction_enable_social_cost_, false);
-        nh.param("mpc/interaction_enable_switch_penalty", mpc_interaction_enable_switch_penalty_, false);
         nh.param("mpc/interaction_front_min", mpc_interaction_front_min_, 0.3);
         nh.param("mpc/interaction_front_max", mpc_interaction_front_max_, 4.0);
         nh.param("mpc/interaction_corridor_width", mpc_interaction_corridor_width_, 0.7);
@@ -204,11 +172,10 @@ namespace cane_planner
         mpc_debug_metrics_pub_ = nh.advertise<std_msgs::Float64MultiArray>("/mpc/debug_metrics", 10);
         mpc_stop_advice_pub_ = nh.advertise<std_msgs::Bool>("/mpc/stop_advice", 10);
         mpc_stop_reason_pub_ = nh.advertise<std_msgs::String>("/mpc/stop_reason", 10);
-        mpc_behavior_state_pub_ = nh.advertise<std_msgs::String>("/mpc/behavior_state", 10);
-        mpc_behavior_debug_pub_ = nh.advertise<std_msgs::Float64MultiArray>("/mpc/behavior_debug", 10);
         mpc_interaction_scene_pub_ = nh.advertise<std_msgs::String>("/mpc/interaction_scene", 10);
         mpc_interaction_mode_pub_ = nh.advertise<std_msgs::String>("/mpc/interaction_mode", 10);
         mpc_interaction_debug_pub_ = nh.advertise<std_msgs::Float64MultiArray>("/mpc/interaction_debug", 10);
+        mpc_dynamic_body_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/mpc/dynamic_obstacle_bodies", 10);
         if (gazebo_sim_)
         {
             cmd_vel_pub_ = nh.advertise<geometry_msgs::Twist>("/cmd_vel_footprint", 10);
@@ -916,8 +883,60 @@ namespace cane_planner
     }
 
     // 动态障碍物话题回调函数
+    void PlannerManager::publishDynamicObstacleBodies(const onboard_detector::DynamicObstacles::ConstPtr &msg)
+    {
+        visualization_msgs::MarkerArray markers;
+
+        visualization_msgs::Marker clear;
+        clear.header = msg->header;
+        // Planner visualization uses the RViz fixed frame "world"; the lightweight
+        // pedestrian simulator publishes obstacle messages in "map" without a map->world TF.
+        clear.header.frame_id = "world";
+        clear.header.stamp = ros::Time::now();
+        clear.ns = "mpc_dynamic_obstacle_bodies";
+        clear.action = visualization_msgs::Marker::DELETEALL;
+        clear.pose.orientation.w = 1.0;
+        markers.markers.push_back(clear);
+
+        const size_t count = std::min(
+            static_cast<size_t>(msg->num),
+            std::min(msg->position.size(), msg->size.size()));
+        for (size_t i = 0; i < count; ++i)
+        {
+            const double sx = std::max(0.01, msg->size[i].x);
+            const double sy = std::max(0.01, msg->size[i].y);
+            const double sz = std::max(0.01, msg->size[i].z);
+
+            visualization_msgs::Marker body;
+            body.header = clear.header;
+            body.ns = "mpc_dynamic_obstacle_bodies";
+            body.id = static_cast<int>(i);
+            body.type = visualization_msgs::Marker::CUBE;
+            body.action = visualization_msgs::Marker::ADD;
+            body.pose.position.x = msg->position[i].x;
+            body.pose.position.y = msg->position[i].y;
+            body.pose.position.z = msg->position[i].z;
+            if (body.pose.position.z < 0.5 * sz)
+                body.pose.position.z += 0.5 * sz;
+            body.pose.orientation.w = 1.0;
+            body.scale.x = sx;
+            body.scale.y = sy;
+            body.scale.z = sz;
+            body.color.r = 0.05;
+            body.color.g = 0.85;
+            body.color.b = 0.95;
+            body.color.a = 0.35;
+            body.lifetime = ros::Duration(0.3);
+            markers.markers.push_back(body);
+        }
+
+        mpc_dynamic_body_pub_.publish(markers);
+    }
+
     void PlannerManager::dynamicObstaclesCallback(const onboard_detector::DynamicObstacles::ConstPtr &msg)
     {
+        publishDynamicObstacleBodies(msg);
+
         std::lock_guard<std::mutex> lock(dynObsMutex_);
         
         // 清空旧数据
@@ -925,17 +944,13 @@ namespace cane_planner
         dynObsVel_.clear();
         dynObsSize_.clear();
         
-        // 机器人尺寸用于膨胀障碍物
-        Eigen::Vector3d robotSize(0.5, 0.5, 0);
-        
         // 从消息中提取动态障碍物信息
         for (size_t i = 0; i < msg->num; ++i) {
             Eigen::Vector3d pos(msg->position[i].x, msg->position[i].y, msg->position[i].z);
             Eigen::Vector3d vel(msg->velocity[i].x, msg->velocity[i].y, msg->velocity[i].z);
-            // 尺寸膨胀机器人大小
-            Eigen::Vector3d size(msg->size[i].x + robotSize(0), 
-                                 msg->size[i].y + robotSize(1), 
-                                 msg->size[i].z + robotSize(2));
+            Eigen::Vector3d size(msg->size[i].x,
+                                 msg->size[i].y,
+                                 msg->size[i].z);
             
             dynObsPos_.push_back(pos);
             dynObsVel_.push_back(vel);
@@ -1466,10 +1481,6 @@ namespace cane_planner
         mpc_stop_enter_time_ = ros::Time(0);
         mpc_stop_clear_since_ = ros::Time(0);
         mpc_latched_stop_reason_ = "OK";
-        mpc_behavior_state_ = BEHAVIOR_NORMAL;
-        mpc_last_logged_behavior_state_ = BEHAVIOR_NORMAL;
-        mpc_behavior_enter_time_ = ros::Time(0);
-        mpc_behavior_clear_since_ = ros::Time(0);
         mpc_interaction_scene_ = SCENE_NONE;
         mpc_interaction_mode_ = MODE_CONTINUE;
         mpc_interaction_candidate_mode_ = MODE_CONTINUE;
@@ -1723,7 +1734,7 @@ namespace cane_planner
         {
             const auto dbg = mpc_controller_->getDebugMetrics();
             std_msgs::Float64MultiArray metrics;
-            metrics.data.reserve(12);
+            metrics.data.reserve(11);
             metrics.data.push_back(dbg.plan_time_ms);
             metrics.data.push_back(dbg.valid_sample_ratio);
             metrics.data.push_back(std::isfinite(dbg.best_total_cost) ? dbg.best_total_cost : -1.0);
@@ -1733,253 +1744,12 @@ namespace cane_planner
             metrics.data.push_back((double)dbg.static_reject_count);
             metrics.data.push_back((double)dbg.num_samples);
             metrics.data.push_back(dbg.plan_valid ? 1.0 : 0.0);
-            metrics.data.push_back(dbg.risk_weight_scale);
             metrics.data.push_back(std::isfinite(dbg.best_min_dynamic_clearance) ? dbg.best_min_dynamic_clearance : -1.0);
             metrics.data.push_back(std::isfinite(dbg.best_min_cpa_time) ? dbg.best_min_cpa_time : -1.0);
             mpc_debug_metrics_pub_.publish(metrics);
         }
 
         const auto dbg = mpc_controller_->getDebugMetrics();
-        bool raw_stop_advice = false;
-        std::string raw_stop_reason = "OK";
-        auto hasCrossingYieldConflict = [&](double front_dist,
-                                            double lateral_dist,
-                                            double time_gap,
-                                            double min_front_dist) -> bool
-        {
-            if (!mpc_yield_enable_)
-                return false;
-
-            const double yaw = start_state_(2);
-            const Eigen::Vector2d forward(std::cos(yaw), std::sin(yaw));
-            const Eigen::Vector2d left(-std::sin(yaw), std::cos(yaw));
-            const Eigen::Vector2d robot_pos(current_com(0), current_com(1));
-            const double planned_speed = std::max(0.15, control(0) / 0.35);
-
-            for (size_t oi = 0; oi < obs_pos.size(); ++oi)
-            {
-                Eigen::Vector2d obs_p(obs_pos[oi](0), obs_pos[oi](1));
-                Eigen::Vector2d obs_v(obs_vel[oi](0), obs_vel[oi](1));
-                Eigen::Vector2d rel = obs_p - robot_pos;
-                double front = rel.dot(forward);
-                double lateral = rel.dot(left);
-                double v_lat = obs_v.dot(left);
-
-                if (front <= min_front_dist || front > front_dist)
-                    continue;
-                if (std::abs(lateral) > lateral_dist)
-                    continue;
-                if (std::abs(v_lat) < mpc_yield_cross_speed_)
-                    continue;
-                if (lateral * v_lat >= 0.0)
-                    continue;  // moving away from the robot path centerline
-
-                double ped_time_to_path = std::abs(lateral) / std::max(1e-3, std::abs(v_lat));
-                double robot_time_to_cross = front / planned_speed;
-                if (ped_time_to_path < robot_time_to_cross + time_gap)
-                    return true;
-            }
-            return false;
-        };
-        auto hasCrossingOccupancyConflict = [&](double front_dist,
-                                                double lateral_dist,
-                                                double time_gap,
-                                                double min_front_dist) -> bool
-        {
-            if (!mpc_yield_enable_ || !mpc_yield_occupancy_enable_)
-                return false;
-
-            const double yaw = start_state_(2);
-            const Eigen::Vector2d forward(std::cos(yaw), std::sin(yaw));
-            const Eigen::Vector2d left(-std::sin(yaw), std::cos(yaw));
-            const Eigen::Vector2d robot_pos(current_com(0), current_com(1));
-            const double planned_speed = std::max(0.15, control(0) / 0.35);
-
-            for (size_t oi = 0; oi < obs_pos.size(); ++oi)
-            {
-                Eigen::Vector2d obs_p(obs_pos[oi](0), obs_pos[oi](1));
-                Eigen::Vector2d obs_v(obs_vel[oi](0), obs_vel[oi](1));
-                Eigen::Vector2d rel = obs_p - robot_pos;
-                double front = rel.dot(forward);
-                double lateral = rel.dot(left);
-                double v_lat = obs_v.dot(left);
-
-                if (front <= min_front_dist || front > front_dist)
-                    continue;
-                if (std::abs(lateral) > lateral_dist)
-                    continue;
-                if (std::abs(v_lat) < mpc_yield_cross_speed_)
-                    continue;
-
-                // Yield before entering a pedestrian's crossing corridor. Once
-                // the robot is already very close to the crossing point, forcing
-                // a stop can block the pedestrian; the MPC/hard safety layer
-                // should then keep clearing the corridor or stop only if blocked.
-                double robot_time_to_cross = front / planned_speed;
-                double clearance_time = 0.0;
-                if (lateral * v_lat > 0.0)
-                    clearance_time = (lateral_dist - std::abs(lateral)) /
-                                     std::max(1e-3, std::abs(v_lat));
-                if (robot_time_to_cross + time_gap > clearance_time)
-                    return true;
-            }
-            return false;
-        };
-        auto hasPredictedCrossingConflict = [&](double front_dist,
-                                                double lateral_dist,
-                                                double time_gap,
-                                                double min_front_dist) -> bool
-        {
-            if (!mpc_yield_enable_ || !mpc_yield_prediction_enable_)
-                return false;
-
-            const double yaw = start_state_(2);
-            const Eigen::Vector2d forward(std::cos(yaw), std::sin(yaw));
-            const Eigen::Vector2d left(-std::sin(yaw), std::cos(yaw));
-            const Eigen::Vector2d robot_pos(current_com(0), current_com(1));
-            const double planned_speed = std::max(0.15, control(0) / 0.35);
-            const double pred_time = std::max(0.0, mpc_yield_prediction_time_);
-            const double pred_step = std::max(0.05, mpc_yield_prediction_step_);
-            const double long_dist = std::max(0.05, mpc_yield_prediction_longitudinal_dist_);
-            const double effective_front_dist =
-                std::max(front_dist, planned_speed * pred_time + long_dist);
-
-            for (size_t oi = 0; oi < obs_pos.size(); ++oi)
-            {
-                const Eigen::Vector2d obs_p(obs_pos[oi](0), obs_pos[oi](1));
-                const Eigen::Vector2d obs_v(obs_vel[oi](0), obs_vel[oi](1));
-                const double cross_speed = std::abs(obs_v.dot(left));
-                if (cross_speed < mpc_yield_cross_speed_)
-                    continue;
-
-                for (double t = 0.0; t <= pred_time + 1e-6; t += pred_step)
-                {
-                    const Eigen::Vector2d pred_p = obs_p + obs_v * t;
-                    const Eigen::Vector2d rel = pred_p - robot_pos;
-                    const double ped_front = rel.dot(forward);
-                    const double ped_lateral = rel.dot(left);
-                    if (ped_front <= min_front_dist || ped_front > effective_front_dist)
-                        continue;
-                    if (std::abs(ped_lateral) > lateral_dist)
-                        continue;
-
-                    const double robot_front = planned_speed * t;
-                    const double arrival_time = ped_front / planned_speed;
-                    const bool same_place = std::abs(ped_front - robot_front) < long_dist;
-                    const bool same_time = std::abs(arrival_time - t) < time_gap;
-                    if (same_place || same_time)
-                        return true;
-                }
-            }
-            return false;
-        };
-        auto hasCrossingCorridorOccupancy = [&](double front_dist,
-                                                double back_dist,
-                                                double lateral_dist) -> bool
-        {
-            if (!mpc_yield_enable_)
-                return false;
-
-            const double yaw = start_state_(2);
-            const Eigen::Vector2d forward(std::cos(yaw), std::sin(yaw));
-            const Eigen::Vector2d left(-std::sin(yaw), std::cos(yaw));
-            const Eigen::Vector2d robot_pos(current_com(0), current_com(1));
-
-            for (size_t oi = 0; oi < obs_pos.size(); ++oi)
-            {
-                Eigen::Vector2d obs_p(obs_pos[oi](0), obs_pos[oi](1));
-                Eigen::Vector2d obs_v(obs_vel[oi](0), obs_vel[oi](1));
-                Eigen::Vector2d rel = obs_p - robot_pos;
-                double front = rel.dot(forward);
-                double lateral = rel.dot(left);
-                double v_lat = obs_v.dot(left);
-
-                if (front < -back_dist || front > front_dist)
-                    continue;
-                if (std::abs(lateral) > lateral_dist)
-                    continue;
-                if (std::abs(v_lat) < mpc_yield_cross_speed_)
-                    continue;
-                return true;
-            }
-            return false;
-        };
-        auto behaviorStateName = [](MpcBehaviorState state) -> const char*
-        {
-            switch (state)
-            {
-                case BEHAVIOR_YIELD_BEFORE_CROSSING:
-                    return "YIELD_BEFORE_CROSSING";
-                case BEHAVIOR_COMMIT_TO_PASS:
-                    return "COMMIT_TO_PASS";
-                case BEHAVIOR_NORMAL:
-                default:
-                    return "NORMAL";
-            }
-        };
-        auto bestTrajStopAllowed = [&]() -> bool
-        {
-            const double yaw = start_state_(2);
-            const Eigen::Vector2d forward(std::cos(yaw), std::sin(yaw));
-            const Eigen::Vector2d left(-std::sin(yaw), std::cos(yaw));
-            const Eigen::Vector2d robot_pos(current_com(0), current_com(1));
-
-            for (size_t oi = 0; oi < obs_pos.size(); ++oi)
-            {
-                Eigen::Vector2d obs_p(obs_pos[oi](0), obs_pos[oi](1));
-                Eigen::Vector2d obs_v(obs_vel[oi](0), obs_vel[oi](1));
-                Eigen::Vector2d rel = obs_p - robot_pos;
-                double front = rel.dot(forward);
-                double lateral = rel.dot(left);
-                double v_lat = obs_v.dot(left);
-
-                if (front > 0.0 && front < mpc_stop_best_traj_min_front_dist_ &&
-                    std::abs(lateral) < mpc_yield_occupancy_lateral_dist_ &&
-                    std::abs(v_lat) >= mpc_yield_cross_speed_)
-                {
-                    // Already inside/near the crossing corridor. A forced stop
-                    // can block a non-reactive Gazebo pedestrian; let MPC clear
-                    // the corridor unless there is truly no valid plan.
-                    return false;
-                }
-            }
-            return true;
-        };
-
-        const bool predicted_crossing_conflict =
-            hasPredictedCrossingConflict(mpc_yield_front_dist_,
-                                         mpc_yield_lateral_dist_,
-                                         mpc_yield_time_gap_,
-                                         mpc_yield_min_front_dist_);
-        const bool crossing_yield_conflict =
-            hasCrossingYieldConflict(mpc_yield_front_dist_,
-                                     mpc_yield_lateral_dist_,
-                                     mpc_yield_time_gap_,
-                                     mpc_yield_min_front_dist_);
-        const bool crossing_occupancy_conflict =
-            hasCrossingOccupancyConflict(mpc_yield_occupancy_front_dist_,
-                                         mpc_yield_occupancy_lateral_dist_,
-                                         mpc_yield_occupancy_time_gap_,
-                                         mpc_yield_min_front_dist_);
-        const bool inside_crossing_corridor =
-            hasCrossingCorridorOccupancy(mpc_behavior_commit_front_dist_,
-                                         mpc_behavior_commit_back_dist_,
-                                         mpc_yield_lateral_dist_ + 0.2);
-        const double robot_yaw = start_state_(2);
-        const Eigen::Vector2d robot_forward(std::cos(robot_yaw), std::sin(robot_yaw));
-        const Eigen::Vector2d robot_left(-std::sin(robot_yaw), std::cos(robot_yaw));
-        const Eigen::Vector2d local_target(mpc_sim_goal_(0) - current_com(0),
-                                           mpc_sim_goal_(1) - current_com(1));
-        const double target_front = local_target.dot(robot_forward);
-        const double target_lateral = local_target.dot(robot_left);
-        const bool best_clearance_unsafe =
-            std::isfinite(dbg.best_min_dynamic_clearance) &&
-            dbg.best_min_dynamic_clearance < mpc_stop_clearance_thresh_;
-        const bool best_ttc_unsafe =
-            std::isfinite(dbg.best_min_cpa_time) &&
-            dbg.best_min_cpa_time < mpc_stop_ttc_thresh_;
-        const bool best_traj_unsafe = best_clearance_unsafe || best_ttc_unsafe;
-
         const bool interaction_yield_active =
             mpc_interaction_enable_ &&
             mpc_interaction_enable_yield_ &&
@@ -1990,148 +1760,12 @@ namespace cane_planner
             mpc_interaction_scene_ == SCENE_CROSSING &&
             (interaction_yield_active || mpc_interaction_debug_.yield_required);
 
-        MpcBehaviorState raw_behavior_state = BEHAVIOR_NORMAL;
-        if (mpc_interaction_enable_)
-        {
-            raw_behavior_state = BEHAVIOR_NORMAL;
-        }
-        else if (!mpc_behavior_state_enable_ || obs_pos.empty())
-        {
-            raw_behavior_state = BEHAVIOR_NORMAL;
-        }
-        else if (mpc_behavior_commit_enable_ &&
-                 inside_crossing_corridor &&
-                 !dbg.plan_valid)
-        {
-            raw_behavior_state = BEHAVIOR_COMMIT_TO_PASS;
-        }
-        else if (predicted_crossing_conflict ||
-                 crossing_yield_conflict ||
-                 crossing_occupancy_conflict)
-        {
-            raw_behavior_state = BEHAVIOR_YIELD_BEFORE_CROSSING;
-        }
-
-        const ros::Time behavior_now = ros::Time::now();
-        if (raw_behavior_state == mpc_behavior_state_)
-        {
-            mpc_behavior_clear_since_ = ros::Time(0);
-        }
-        else if (raw_behavior_state != BEHAVIOR_NORMAL)
-        {
-            mpc_behavior_state_ = raw_behavior_state;
-            mpc_behavior_enter_time_ = behavior_now;
-            mpc_behavior_clear_since_ = ros::Time(0);
-        }
-        else if (mpc_behavior_state_ != BEHAVIOR_NORMAL)
-        {
-            const double hold_time =
-                (mpc_behavior_state_ == BEHAVIOR_COMMIT_TO_PASS) ?
-                mpc_behavior_commit_hold_time_ : mpc_behavior_yield_hold_time_;
-            const double clear_time =
-                (mpc_behavior_state_ == BEHAVIOR_COMMIT_TO_PASS) ?
-                mpc_behavior_commit_clear_time_ : mpc_behavior_yield_clear_time_;
-            const bool hold_elapsed =
-                mpc_behavior_enter_time_.isZero() ||
-                (behavior_now - mpc_behavior_enter_time_).toSec() >= hold_time;
-            if (!hold_elapsed)
-            {
-                mpc_behavior_clear_since_ = ros::Time(0);
-            }
-            else if (mpc_behavior_clear_since_.isZero())
-            {
-                mpc_behavior_clear_since_ = behavior_now;
-            }
-            else if ((behavior_now - mpc_behavior_clear_since_).toSec() >= clear_time)
-            {
-                mpc_behavior_state_ = BEHAVIOR_NORMAL;
-                mpc_behavior_enter_time_ = ros::Time(0);
-                mpc_behavior_clear_since_ = ros::Time(0);
-            }
-        }
-        else
-        {
-            mpc_behavior_clear_since_ = ros::Time(0);
-        }
-
-        if (mpc_behavior_state_ == BEHAVIOR_COMMIT_TO_PASS)
-        {
-            mpc_stop_state_active_ = false;
-            mpc_stop_enter_time_ = ros::Time(0);
-            mpc_stop_clear_since_ = ros::Time(0);
-            mpc_latched_stop_reason_ = "OK";
-        }
-        if (mpc_behavior_state_ != mpc_last_logged_behavior_state_)
-        {
-            ROS_WARN("[MPC behavior] %s -> %s target_front=%.2f target_lat=%.2f dist_goal=%.2f inside=%d pred=%d yield=%d occ=%d best_unsafe=%d plan_valid=%d valid=%.2f",
-                     behaviorStateName(mpc_last_logged_behavior_state_),
-                     behaviorStateName(mpc_behavior_state_),
-                     target_front, target_lateral,
-                     (current_com.head(2) - end_pt_).norm(),
-                     inside_crossing_corridor ? 1 : 0,
-                     predicted_crossing_conflict ? 1 : 0,
-                     crossing_yield_conflict ? 1 : 0,
-                     crossing_occupancy_conflict ? 1 : 0,
-                     best_traj_unsafe ? 1 : 0,
-                     dbg.plan_valid ? 1 : 0,
-                     dbg.valid_sample_ratio);
-            mpc_last_logged_behavior_state_ = mpc_behavior_state_;
-        }
-
+        bool raw_stop_advice = false;
+        std::string raw_stop_reason = "OK";
         if (mpc_stop_advice_enable_ && interaction_yield_stop_active)
         {
             raw_stop_advice = true;
             raw_stop_reason = "INTERACTION_YIELD_CROSSING";
-        }
-        else if (!mpc_interaction_enable_ && mpc_stop_advice_enable_ && !obs_pos.empty())
-        {
-            if (mpc_behavior_state_ == BEHAVIOR_YIELD_BEFORE_CROSSING &&
-                predicted_crossing_conflict)
-            {
-                raw_stop_advice = true;
-                raw_stop_reason = "YIELD_TO_PREDICTED_PEDESTRIAN";
-            }
-            else if (mpc_behavior_state_ != BEHAVIOR_COMMIT_TO_PASS &&
-                     !dbg.plan_valid)
-            {
-                raw_stop_advice = true;
-                raw_stop_reason = "NO_VALID_DYNAMIC_PLAN";
-            }
-            else if (mpc_behavior_state_ == BEHAVIOR_YIELD_BEFORE_CROSSING &&
-                     crossing_yield_conflict)
-            {
-                raw_stop_advice = true;
-                raw_stop_reason = "YIELD_TO_CROSSING_PEDESTRIAN";
-            }
-            else if (mpc_behavior_state_ == BEHAVIOR_YIELD_BEFORE_CROSSING &&
-                     crossing_occupancy_conflict)
-            {
-                raw_stop_advice = true;
-                raw_stop_reason = "YIELD_TO_UNCERTAIN_PEDESTRIAN";
-            }
-            else if (mpc_behavior_state_ == BEHAVIOR_YIELD_BEFORE_CROSSING)
-            {
-                raw_stop_advice = true;
-                raw_stop_reason = "YIELD_HOLD";
-            }
-            else if (mpc_behavior_state_ != BEHAVIOR_COMMIT_TO_PASS &&
-                     dbg.valid_sample_ratio < mpc_stop_valid_ratio_thresh_)
-            {
-                // Behavior-mode split:
-                // Low valid-sample ratio alone is CAUTION, not an immediate stop.
-                // Stop only if the selected/best trajectory is also unsafe.
-                const bool allow_best_traj_stop = bestTrajStopAllowed();
-                if (allow_best_traj_stop && best_clearance_unsafe)
-                {
-                    raw_stop_advice = true;
-                    raw_stop_reason = "BEST_TRAJ_LOW_CLEARANCE";
-                }
-                else if (allow_best_traj_stop && best_ttc_unsafe)
-                {
-                    raw_stop_advice = true;
-                    raw_stop_reason = "BEST_TRAJ_SHORT_TTC";
-                }
-            }
         }
 
         bool stop_advice = raw_stop_advice;
@@ -2146,19 +1780,6 @@ namespace cane_planner
         else
         {
             const ros::Time now = ros::Time::now();
-            const bool old_expanded_yield_conflict =
-                !obs_pos.empty() &&
-	                (hasCrossingYieldConflict(mpc_yield_front_dist_ + mpc_yield_release_front_margin_,
-	                                          mpc_yield_lateral_dist_ + mpc_yield_release_lateral_margin_,
-	                                          mpc_yield_time_gap_ + mpc_yield_release_time_margin_,
-	                                          0.0) ||
-		                 hasCrossingOccupancyConflict(mpc_yield_occupancy_front_dist_ + mpc_yield_release_front_margin_,
-		                                              mpc_yield_occupancy_lateral_dist_ + mpc_yield_release_lateral_margin_,
-		                                              mpc_yield_occupancy_time_gap_ + mpc_yield_release_time_margin_,
-		                                              0.0));
-            const bool expanded_stop_conflict =
-                mpc_interaction_enable_ ? interaction_yield_stop_active : old_expanded_yield_conflict;
-
             if (raw_stop_advice)
             {
                 if (!mpc_stop_state_active_)
@@ -2172,7 +1793,7 @@ namespace cane_planner
                 const bool hold_elapsed =
                     mpc_stop_enter_time_.isZero() ||
                     (now - mpc_stop_enter_time_).toSec() >= mpc_stop_hold_time_;
-                const bool release_clear = !expanded_stop_conflict;
+                const bool release_clear = !interaction_yield_stop_active;
                 if (!release_clear)
                 {
                     mpc_stop_clear_since_ = ros::Time(0);
@@ -2219,36 +1840,6 @@ namespace cane_planner
             reason_msg.data = stop_reason;
             mpc_stop_reason_pub_.publish(reason_msg);
         }
-        {
-            std_msgs::String behavior_msg;
-            behavior_msg.data = behaviorStateName(mpc_behavior_state_);
-            mpc_behavior_state_pub_.publish(behavior_msg);
-
-            std_msgs::Float64MultiArray behavior_dbg;
-            behavior_dbg.data.reserve(13);
-            behavior_dbg.data.push_back((double)mpc_behavior_state_);
-            behavior_dbg.data.push_back(target_front);
-            behavior_dbg.data.push_back(target_lateral);
-            behavior_dbg.data.push_back((current_com.head(2) - end_pt_).norm());
-            behavior_dbg.data.push_back(inside_crossing_corridor ? 1.0 : 0.0);
-            behavior_dbg.data.push_back(predicted_crossing_conflict ? 1.0 : 0.0);
-            behavior_dbg.data.push_back(crossing_yield_conflict ? 1.0 : 0.0);
-            behavior_dbg.data.push_back(crossing_occupancy_conflict ? 1.0 : 0.0);
-            behavior_dbg.data.push_back(best_traj_unsafe ? 1.0 : 0.0);
-            behavior_dbg.data.push_back(dbg.plan_valid ? 1.0 : 0.0);
-            behavior_dbg.data.push_back(dbg.valid_sample_ratio);
-            behavior_dbg.data.push_back(stop_advice ? 1.0 : 0.0);
-            behavior_dbg.data.push_back(mpc_stop_advice_enforce_ ? 1.0 : 0.0);
-            mpc_behavior_debug_pub_.publish(behavior_dbg);
-
-            if (target_front < -0.1)
-            {
-                ROS_WARN_THROTTLE(0.5,
-                                  "[MPC] local target is behind robot: front=%.2f lateral=%.2f state=%s wp_idx=%zu goal=(%.2f, %.2f)",
-                                  target_front, target_lateral, behaviorStateName(mpc_behavior_state_),
-                                  global_wp_idx_, mpc_sim_goal_(0), mpc_sim_goal_(1));
-            }
-        }
         if (stop_advice && mpc_stop_advice_enforce_)
         {
             mpc_controller_->resetWarmStart();
@@ -2269,36 +1860,6 @@ namespace cane_planner
         // 无路可走 → 停止本帧
         if (!mpc_controller_->lastPlanValid())
         {
-            if (mpc_behavior_state_enable_ &&
-                mpc_behavior_commit_enable_ &&
-                mpc_behavior_state_ == BEHAVIOR_COMMIT_TO_PASS &&
-                gazebo_sim_)
-            {
-                Eigen::Vector2d to_goal(mpc_sim_goal_(0) - current_com(0),
-                                        mpc_sim_goal_(1) - current_com(1));
-                double desired_yaw = start_state_(2);
-                if (to_goal.norm() > 1e-3)
-                    desired_yaw = std::atan2(to_goal.y(), to_goal.x());
-                double yaw_err = std::atan2(std::sin(desired_yaw - start_state_(2)),
-                                            std::cos(desired_yaw - start_state_(2)));
-                double yaw_rate = yaw_err / 0.35;
-                yaw_rate = std::max(-mpc_behavior_commit_yaw_rate_,
-                                    std::min(mpc_behavior_commit_yaw_rate_, yaw_rate));
-
-                geometry_msgs::Twist cmd;
-                cmd.linear.x = std::max(0.0, mpc_behavior_commit_speed_);
-                cmd.angular.z = yaw_rate;
-                cmd_vel_pub_.publish(cmd);
-
-                ROS_WARN_THROTTLE(0.5,
-                                  "[MPC] COMMIT_TO_PASS: clearing pedestrian corridor despite no valid dynamic plan");
-                mpc_stuck_steps_ = 0;
-                publishFovRange();
-                publishCurrentWaypoint();
-                publishWaypointsList();
-                mpc_step_count_++;
-                return false;
-            }
             if (obs_pos.empty())
                 ROS_WARN("[MPC] STOP reason=NO_VALID_PLAN type=static");
             else

@@ -461,6 +461,14 @@ Visualization Manager:
       Value: true
     - Class: rviz/MarkerArray
       Enabled: true
+      Marker Topic: /mpc/dynamic_obstacle_bodies
+      Name: MPC_dynamic_obstacle_bodies
+      Namespaces:
+        {}
+      Queue Size: 10
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
       Marker Topic: /gazebo_pedestrian_truth/visualization
       Name: Gazebo_pedestrian_truth
       Namespaces:

@@ -161,7 +161,6 @@ mpc_enable_interaction:=false
 mpc_interaction_enable_pass_behind:=false
 mpc_interaction_enable_yield:=false
 mpc_interaction_enable_social_cost:=false
-mpc_interaction_enable_switch_penalty:=false
 ```
 
 If existing names already use `mpc_enable_intent`, keep names consistent for minimal code churn, but document that the method is now an interaction decision layer rather than human intent prediction.
@@ -434,9 +433,6 @@ Target marker appears only for feasible crossing conflicts.
 - [ ] Add parameters:
 
 ```text
-mpc_interaction_switch_margin:=0.8
-mpc_interaction_switch_penalty:=1.0
-mpc_interaction_min_debounce_time:=0.3
 mpc_interaction_mode_confirm_frames:=2
 mpc_interaction_mode_clear_frames:=2
 mpc_interaction_pass_behind_clear_time:=0.5
@@ -655,13 +651,13 @@ cd /home/xcg/ws && source /opt/ros/noetic/setup.bash && catkin build plan_manage
 Run C baseline:
 
 ```shell
-cd /home/xcg/ws && source /opt/ros/noetic/setup.bash && source devel/setup.bash && roslaunch plan_manage sim_kin_replan.launch planner:=3 use_pedestrians:=true pedestrian_scenario:=crossing mpc_w_risk:=2.0 mpc_risk_sigma_y:=0.38 mpc_enable_cpa:=false mpc_enable_adaptive_risk:=false mpc_enable_yield:=false mpc_enable_stop_advice:=false mpc_enable_stop_enforce:=false mpc_enable_dynamic_hard_reject:=false
+cd /home/xcg/ws && source /opt/ros/noetic/setup.bash && source devel/setup.bash && roslaunch plan_manage sim_kin_replan.launch planner:=3 use_pedestrians:=true pedestrian_scenario:=crossing mpc_w_risk:=2.0 mpc_risk_sigma_y:=0.38 mpc_enable_cpa:=false mpc_enable_stop_advice:=false mpc_enable_stop_enforce:=false mpc_enable_dynamic_hard_reject:=false
 ```
 
 Run E1:
 
 ```shell
-cd /home/xcg/ws && source /opt/ros/noetic/setup.bash && source devel/setup.bash && roslaunch plan_manage sim_kin_replan.launch planner:=3 use_pedestrians:=true pedestrian_scenario:=crossing mpc_w_risk:=2.0 mpc_risk_sigma_y:=0.38 mpc_enable_cpa:=false mpc_enable_adaptive_risk:=false mpc_enable_yield:=false mpc_enable_stop_advice:=false mpc_enable_stop_enforce:=false mpc_enable_dynamic_hard_reject:=false mpc_enable_interaction:=true mpc_interaction_enable_pass_behind:=true mpc_interaction_enable_yield:=false
+cd /home/xcg/ws && source /opt/ros/noetic/setup.bash && source devel/setup.bash && roslaunch plan_manage sim_kin_replan.launch planner:=3 use_pedestrians:=true pedestrian_scenario:=crossing mpc_w_risk:=2.0 mpc_risk_sigma_y:=0.38 mpc_enable_cpa:=false mpc_enable_stop_advice:=false mpc_enable_stop_enforce:=false mpc_enable_dynamic_hard_reject:=false mpc_enable_interaction:=true mpc_interaction_enable_pass_behind:=true mpc_interaction_enable_yield:=false
 ```
 
 If the current code still uses `mpc_enable_intent` names, use the existing names until parameters are renamed consistently.

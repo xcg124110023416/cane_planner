@@ -10,8 +10,6 @@ TOPICS = [
     "/mpc/debug_metrics",
     "/mpc/stop_advice",
     "/mpc/stop_reason",
-    "/mpc/behavior_state",
-    "/mpc/behavior_debug",
     "/mpc/path",
     "/mpc/best_traj",
     "/mpc/current_waypoint",

@@ -52,13 +52,6 @@ public:
         double interaction_front_buffer = 0.25;
         double interaction_target_dist_cap = 3.0;
 
-        // Optional adaptive dynamic-risk weight. It only scales soft risk cost;
-        // hard safety checks remain unchanged.
-        bool adaptive_risk_weight = false;
-        double adaptive_risk_max_scale = 2.0;
-        double adaptive_risk_clearance = 0.8;
-        double adaptive_risk_ttc = 1.2;
-
         // Hard constraint: risk > threshold → INF cost (dynamic obstacles only)
         bool dynamic_hard_reject_enable = true;
         double risk_hard_threshold = 8.5;
@@ -67,16 +60,11 @@ public:
         double static_penalty = 500.0;
         double w_static = 1.0;
 
-        // Dynamic obstacle geometry. Sizes are interpreted as obstacle boxes
-        // already inflated by the planner manager when available.
+        // Dynamic obstacle geometry. This is a physical collision fallback;
+        // DRF hard risk remains the primary dynamic keep-out region.
         bool use_dynamic_size = true;
-        double dynamic_safety_margin = 0.15;
-        double dynamic_min_radius = 0.35;
-        bool dynamic_uncertainty_enable = true;
-        double dynamic_uncertainty_base_rate = 0.08;      // m/s radius growth for prediction time
-        double dynamic_uncertainty_crossing_rate = 0.25;  // extra m/s for lateral crossing motion
-        double dynamic_uncertainty_slow_speed = 0.20;     // low speed implies weak intent evidence
-        double dynamic_uncertainty_path_lateral = 1.0;    // apply crossing growth near planned path corridor
+        double dynamic_safety_margin = 0.05;
+        double dynamic_min_radius = 0.20;
 
         // SDF proximity cost: repulsive gradient around obstacles
         double w_prox = 5.0;
@@ -110,7 +98,6 @@ public:
         double min_cpa_time = std::numeric_limits<double>::infinity();
         double best_min_dynamic_clearance = std::numeric_limits<double>::infinity();
         double best_min_cpa_time = std::numeric_limits<double>::infinity();
-        double risk_weight_scale = 1.0;
         int dynamic_reject_count = 0;
         int static_reject_count = 0;
         int num_samples = 0;

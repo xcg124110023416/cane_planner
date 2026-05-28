@@ -55,8 +55,6 @@ DRF means:
 
 - `mpc_w_risk > 0`
 - `mpc_enable_cpa=false`
-- `mpc_enable_adaptive_risk=false`
-- `mpc_enable_yield=false`
 - `mpc_enable_stop_advice=false`
 - `mpc_enable_stop_enforce=false`
 - `mpc_enable_dynamic_hard_reject=false`

@@ -153,8 +153,8 @@ def analyze_bag(bag_path, odom_topic, robot_radius):
 
             elif topic == DEBUG_TOPIC:
                 data = list(msg.data)
-                if len(data) > 10 and data[10] > -0.999:
-                    value = data[10]
+                if len(data) > 9 and data[9] > -0.999:
+                    value = data[9]
                     if not math.isfinite(best_min_dynamic_clearance) or value < best_min_dynamic_clearance:
                         best_min_dynamic_clearance = value
 
