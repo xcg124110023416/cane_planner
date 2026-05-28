@@ -41,6 +41,13 @@ void MpcController::setParam(ros::NodeHandle &nh)
     nh.param("mpc/w_risk", cfg_.w_risk, 2.0);
     nh.param("mpc/w_goal", cfg_.w_goal, 10.0);
     nh.param("mpc/w_dapi", cfg_.w_dapi, 0.0);
+    nh.param("mpc/interaction_w_front_pass", cfg_.interaction_w_front_pass, 0.0);
+    nh.param("mpc/interaction_enable_behind_corridor",
+             cfg_.interaction_enable_behind_corridor, false);
+    nh.param("mpc/interaction_w_behind_corridor", cfg_.interaction_w_behind_corridor, 0.0);
+    nh.param("mpc/interaction_social_corridor_width", cfg_.interaction_corridor_width, 0.8);
+    nh.param("mpc/interaction_front_buffer", cfg_.interaction_front_buffer, 0.25);
+    nh.param("mpc/interaction_target_dist_cap", cfg_.interaction_target_dist_cap, 3.0);
     nh.param("mpc/adaptive_risk_weight", cfg_.adaptive_risk_weight, false);
     nh.param("mpc/adaptive_risk_max_scale", cfg_.adaptive_risk_max_scale, 2.0);
     nh.param("mpc/adaptive_risk_clearance", cfg_.adaptive_risk_clearance, 0.8);
@@ -128,6 +135,16 @@ void MpcController::setDynamicObstacles(const std::vector<Eigen::Vector3d> &pos,
 {
     // No-op: obstacles are passed in plan() directly.
     // This method exists for API compatibility.
+}
+
+void MpcController::setInteractionContext(const InteractionContext &ctx)
+{
+    interaction_ctx_ = ctx;
+}
+
+void MpcController::clearInteractionContext()
+{
+    interaction_ctx_ = InteractionContext();
 }
 
 // =========================================================================
@@ -356,6 +373,28 @@ void MpcController::rolloutBatch(
     double w_risk = cfg_.w_risk;
     double w_goal = cfg_.w_goal;
     double w_prox = cfg_.w_prox;
+    const bool interaction_pass_behind_active =
+        interaction_ctx_.enabled &&
+        interaction_ctx_.scene == 1 &&
+        interaction_ctx_.mode == 1 &&
+        interaction_ctx_.target_valid &&
+        (cfg_.interaction_w_front_pass > 1e-9 ||
+         (cfg_.interaction_enable_behind_corridor &&
+          cfg_.interaction_w_behind_corridor > 1e-9));
+    const double interaction_front_w = cfg_.interaction_w_front_pass;
+    const double interaction_behind_w = cfg_.interaction_w_behind_corridor;
+    const double interaction_corridor_width =
+        std::max(1e-3, cfg_.interaction_corridor_width);
+    const double interaction_front_buffer =
+        std::max(0.0, cfg_.interaction_front_buffer);
+    const double interaction_target_dist_cap =
+        std::max(0.0, cfg_.interaction_target_dist_cap);
+    Eigen::Vector2d interaction_ped_dir = Eigen::Vector2d::Zero();
+    const double interaction_ped_speed = interaction_ctx_.ped_vel.norm();
+    if (interaction_ped_speed > 1e-3)
+        interaction_ped_dir = interaction_ctx_.ped_vel / interaction_ped_speed;
+    const Eigen::Vector2d interaction_ped_left(-interaction_ped_dir.y(),
+                                               interaction_ped_dir.x());
     double prox_margin = cfg_.prox_margin;
     double dyn_margin = std::max(0.0, cfg_.dynamic_safety_margin);
     double dyn_min_radius = std::max(0.0, cfg_.dynamic_min_radius);
@@ -386,6 +425,8 @@ void MpcController::rolloutBatch(
         bool static_collided = false;
         bool dyn_collided = false;
         bool arrived_early = false;
+        double front_pass_cost = 0.0;
+        double behind_target_min_dist_sq = std::numeric_limits<double>::infinity();
         double rollout_min_dynamic_clearance = std::numeric_limits<double>::infinity();
         double rollout_min_cpa_time = std::numeric_limits<double>::infinity();
 
@@ -443,6 +484,31 @@ void MpcController::rolloutBatch(
             {
                 double px = com_path[pi](0);
                 double py = com_path[pi](1);
+                const double point_t = n * step_dt + (double)(pi + 1) * path_dt;
+
+                if (interaction_pass_behind_active && interaction_ped_speed > 1e-3)
+                {
+                    const Eigen::Vector2d p(px, py);
+                    const Eigen::Vector2d ped_pred =
+                        interaction_ctx_.ped_pos + interaction_ctx_.ped_vel * point_t;
+                    const Eigen::Vector2d rel_to_ped = p - ped_pred;
+                    const double along_ped = rel_to_ped.dot(interaction_ped_dir);
+                    const double cross_ped = rel_to_ped.dot(interaction_ped_left);
+                    const double front_violation =
+                        std::max(0.0, along_ped + interaction_front_buffer);
+                    const double lateral_gate =
+                        std::exp(-0.5 * (cross_ped * cross_ped) /
+                                 (interaction_corridor_width * interaction_corridor_width));
+                    front_pass_cost += lateral_gate * front_violation * front_violation;
+
+                    if (cfg_.interaction_enable_behind_corridor)
+                    {
+                        const double target_dist_sq =
+                            (p - interaction_ctx_.behind_target).squaredNorm();
+                        if (target_dist_sq < behind_target_min_dist_sq)
+                            behind_target_min_dist_sq = target_dist_sq;
+                    }
+                }
 
                 // FOV gate: beyond perception range → treat as traversable
                 bool in_fov = true;
@@ -476,7 +542,6 @@ void MpcController::rolloutBatch(
                     // Dynamic obstacle: hard threshold + risk accumulation
                     for (int oi = 0; oi < n_obs; ++oi)
                     {
-                        double point_t = n * step_dt + (double)(pi + 1) * path_dt;
                         double vx = obs_vel[oi](0);
                         double vy = obs_vel[oi](1);
                         double ox = obs_pos[oi](0) + point_t * vx;
@@ -638,6 +703,23 @@ void MpcController::rolloutBatch(
             double dx = fx - gx;
             double dy = fy - gy;
             total_cost += (w_goal / N) * std::sqrt(dx * dx + dy * dy);
+        }
+
+        if (std::isfinite(total_cost) && interaction_pass_behind_active)
+        {
+            if (interaction_front_w > 1e-9)
+                total_cost += interaction_front_w * front_pass_cost;
+            if (cfg_.interaction_enable_behind_corridor &&
+                interaction_behind_w > 1e-9 &&
+                std::isfinite(behind_target_min_dist_sq))
+            {
+                const double capped_dist_sq =
+                    interaction_target_dist_cap > 0.0 ?
+                    std::min(behind_target_min_dist_sq,
+                             interaction_target_dist_cap * interaction_target_dist_cap) :
+                    behind_target_min_dist_sq;
+                total_cost += interaction_behind_w * capped_dist_sq;
+            }
         }
 
         costs(k) = total_cost;

@@ -138,6 +138,39 @@ namespace cane_planner
         double mpc_behavior_yield_clear_time_ = 0.7;
         double mpc_behavior_commit_hold_time_ = 0.5;
         double mpc_behavior_commit_clear_time_ = 0.3;
+        bool mpc_interaction_enable_ = false;
+        bool mpc_interaction_enable_pass_behind_ = false;
+        bool mpc_interaction_enable_yield_ = false;
+        bool mpc_interaction_enable_social_cost_ = false;
+        bool mpc_interaction_enable_switch_penalty_ = false;
+        double mpc_interaction_front_min_ = 0.3;
+        double mpc_interaction_front_max_ = 4.0;
+        double mpc_interaction_corridor_width_ = 0.7;
+        double mpc_interaction_cross_speed_ = 0.15;
+        double mpc_interaction_time_gap_ = 0.8;
+        double mpc_interaction_min_robot_speed_ = 0.15;
+        double mpc_interaction_cpa_horizon_ = 3.0;
+        double mpc_interaction_cpa_dist_ = 0.8;
+        bool mpc_interaction_use_cpa_check_ = true;
+        double mpc_interaction_cross_enter_threshold_ = 0.7;
+        double mpc_interaction_cross_exit_threshold_ = 0.3;
+        int mpc_interaction_cross_confirm_frames_ = 3;
+        int mpc_interaction_cross_clear_frames_ = 3;
+        int mpc_interaction_mode_confirm_frames_ = 2;
+        double mpc_interaction_candidate_latch_time_ = 1.0;
+        double mpc_interaction_stop_release_clear_time_ = 0.15;
+        double mpc_interaction_post_yield_grace_time_ = 0.6;
+        double mpc_interaction_pass_behind_clear_time_ = 0.7;
+        double mpc_interaction_pass_behind_hold_time_ = 0.6;
+        double mpc_interaction_risk_low_ = 0.3;
+        double mpc_interaction_behind_dist_ = 0.8;
+        double mpc_interaction_forward_bias_ = 0.6;
+        double mpc_interaction_target_front_min_ = 0.4;
+        double mpc_interaction_target_front_max_ = 3.5;
+        double mpc_interaction_target_lateral_max_ = 1.8;
+        double mpc_interaction_target_ped_clearance_ = 0.7;
+        double mpc_nominal_al_ = 0.40;
+        double lfpc_t_sup_ = 0.35;
         bool mpc_stop_state_active_ = false;
         ros::Time mpc_stop_enter_time_;
         ros::Time mpc_stop_clear_since_;
@@ -151,11 +184,57 @@ namespace cane_planner
         // MPC 步进状态
         enum MpcSimState { MPC_IDLE, MPC_ACTIVE, MPC_DONE };
         enum MpcBehaviorState { BEHAVIOR_NORMAL, BEHAVIOR_YIELD_BEFORE_CROSSING, BEHAVIOR_COMMIT_TO_PASS };
+        enum InteractionScene { SCENE_NONE = 0, SCENE_CROSSING = 1 };
+        enum InteractionMode { MODE_CONTINUE = 0, MODE_PASS_BEHIND = 1, MODE_YIELD = 2 };
+        struct InteractionDebug
+        {
+            bool candidate_valid = false;
+            int obs_idx = -1;
+            double front = 0.0;
+            double lateral = 0.0;
+            double v_front = 0.0;
+            double v_lateral = 0.0;
+            double t_ped_to_path = -1.0;
+            double signed_t_ped_to_path = -1.0;
+            bool ped_before_path = false;
+            bool ped_at_or_after_path = false;
+            double t_robot_to_cross = -1.0;
+            double time_gap = 0.0;
+            double t_cpa = -1.0;
+            double d_cpa = -1.0;
+            bool cpa_conflict = false;
+            double robot_speed_used = 0.0;
+            double r_crossing = 0.0;
+            int crossing_confirm_count = 0;
+            int crossing_clear_count = 0;
+            double risk_front = 0.0;
+            double r_behind_free = 0.0;
+            bool behind_feasible = false;
+            bool target_valid = false;
+            bool yield_required = false;
+            bool pass_behind_ready = false;
+            double target_front = 0.0;
+            double target_lateral = 0.0;
+            double target_ped_clearance = -1.0;
+            Eigen::Vector2d interaction_target = Eigen::Vector2d::Zero();
+            Eigen::Vector2d path_forward = Eigen::Vector2d::Zero();
+        };
         MpcSimState mpc_sim_state_;
         MpcBehaviorState mpc_behavior_state_ = BEHAVIOR_NORMAL;
         MpcBehaviorState mpc_last_logged_behavior_state_ = BEHAVIOR_NORMAL;
         ros::Time mpc_behavior_enter_time_;
         ros::Time mpc_behavior_clear_since_;
+        InteractionScene mpc_interaction_scene_ = SCENE_NONE;
+        InteractionMode mpc_interaction_mode_ = MODE_CONTINUE;
+        InteractionMode mpc_interaction_candidate_mode_ = MODE_CONTINUE;
+        InteractionDebug mpc_interaction_debug_;
+        InteractionDebug mpc_interaction_latched_debug_;
+        ros::Time mpc_interaction_latched_stamp_;
+        bool mpc_interaction_latched_valid_ = false;
+        ros::Time mpc_interaction_pass_behind_enter_time_;
+        int mpc_interaction_crossing_confirm_count_ = 0;
+        int mpc_interaction_crossing_clear_count_ = 0;
+        int mpc_interaction_mode_candidate_count_ = 0;
         int mpc_step_count_;             // 总步数计数 (仅用于日志)
         int mpc_stuck_steps_;            // waypoint 未推进的连续步数
         Eigen::Vector2d last_com_pos_;   // 上一帧CoM位置，用于检测是否实际移动
@@ -182,6 +261,9 @@ namespace cane_planner
         ros::Publisher mpc_stop_reason_pub_;   // std_msgs/String
         ros::Publisher mpc_behavior_state_pub_; // std_msgs/String
         ros::Publisher mpc_behavior_debug_pub_; // std_msgs/Float64MultiArray
+        ros::Publisher mpc_interaction_scene_pub_; // std_msgs/String
+        ros::Publisher mpc_interaction_mode_pub_;  // std_msgs/String
+        ros::Publisher mpc_interaction_debug_pub_; // std_msgs/Float64MultiArray
         ros::Publisher risk_field_pub_;   // sensor_msgs::PointCloud2 (risk > hard_threshold)
         ros::Publisher risk_halo_pub_;    // sensor_msgs::PointCloud2 (halo component only)
         ros::Publisher cmd_vel_pub_;      // geometry_msgs::Twist for Gazebo
@@ -217,6 +299,19 @@ namespace cane_planner
         double QuatenionToYaw(geometry_msgs::Quaternion ori);
         double QuatenionToYaw(Eigen::Quaterniond ori);
         bool shouldIgnoreDuplicateGoal(const Eigen::Vector2d& goal, double yaw, const char* source);
+        Eigen::Vector2d computeInteractionPathForward(const Eigen::Vector3d& current_com) const;
+        double estimateInteractionRobotSpeed() const;
+        double computeCrossingRisk(const InteractionDebug& candidate) const;
+        void updateCrossingSceneFsm(double r_crossing,
+                                    const InteractionDebug& debug);
+        void updateInteractionModeFsm(InteractionMode desired_mode);
+        void updateInteractionModeDebug(InteractionDebug& debug);
+        void updateInteractionDebug(const Eigen::Vector3d& current_com,
+                                    const std::vector<Eigen::Vector3d>& obs_pos,
+                                    const std::vector<Eigen::Vector3d>& obs_vel);
+        void publishInteractionState();
+        const char* interactionSceneName(InteractionScene scene) const;
+        const char* interactionModeName(InteractionMode mode) const;
 
         /*---------- ROS function -----------*/
         void execFSMCallback(const ros::TimerEvent &e);

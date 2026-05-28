@@ -19,6 +19,9 @@ TOPICS = [
     "/simulation_generator/odom",
     "/sim_odom",
     "/onboard_detector/dynamic_obstacles_info",
+    "/mpc/interaction_scene",
+    "/mpc/interaction_mode",
+    "/mpc/interaction_debug",
     "/pedestrian_sim/visualization",
     "/sdf_map/occupancy_local",
     "/sdf_map/occupancy_local_inflate",
@@ -40,7 +43,7 @@ def main():
         f.write("mode: lightweight\n")
         f.write("created_at: {}\n".format(stamp))
         f.write("bag_prefix: {}\n".format(prefix))
-        f.write("odom_topic: /simulation_generator/odom\n")
+        f.write("odom_topic: /sim_odom\n")
         f.write("topics:\n")
         for topic in TOPICS:
             f.write("  {}\n".format(topic))

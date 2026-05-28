@@ -14,6 +14,43 @@
     <arg name="global_wp_arrival_radius" default="0.25"/>
     <!-- Optional full-PCD global map for A*. Keep local SDF for MPC. -->
     <arg name="mpc_enable_dynamic_hard_reject" default="true"/>
+    <arg name="mpc_enable_interaction" default="false"/>
+    <arg name="mpc_interaction_enable_pass_behind" default="false"/>
+    <arg name="mpc_interaction_enable_yield" default="false"/>
+    <arg name="mpc_interaction_enable_social_cost" default="false"/>
+    <arg name="mpc_interaction_enable_switch_penalty" default="false"/>
+    <arg name="mpc_interaction_w_front_pass" default="0.0"/>
+    <arg name="mpc_interaction_enable_behind_corridor" default="false"/>
+    <arg name="mpc_interaction_w_behind_corridor" default="0.0"/>
+    <arg name="mpc_interaction_social_corridor_width" default="0.8"/>
+    <arg name="mpc_interaction_front_buffer" default="0.25"/>
+    <arg name="mpc_interaction_target_dist_cap" default="3.0"/>
+    <arg name="mpc_interaction_front_min" default="0.3"/>
+    <arg name="mpc_interaction_front_max" default="4.0"/>
+    <arg name="mpc_interaction_corridor_width" default="0.7"/>
+    <arg name="mpc_interaction_cross_speed" default="0.15"/>
+    <arg name="mpc_interaction_time_gap" default="0.8"/>
+    <arg name="mpc_interaction_min_robot_speed" default="0.15"/>
+    <arg name="mpc_interaction_cpa_horizon" default="3.0"/>
+    <arg name="mpc_interaction_cpa_dist" default="0.8"/>
+    <arg name="mpc_interaction_use_cpa_check" default="true"/>
+    <arg name="mpc_interaction_cross_enter_threshold" default="0.7"/>
+    <arg name="mpc_interaction_cross_exit_threshold" default="0.3"/>
+    <arg name="mpc_interaction_cross_confirm_frames" default="3"/>
+    <arg name="mpc_interaction_cross_clear_frames" default="3"/>
+    <arg name="mpc_interaction_mode_confirm_frames" default="2"/>
+    <arg name="mpc_interaction_candidate_latch_time" default="1.0"/>
+    <arg name="mpc_interaction_stop_release_clear_time" default="0.15"/>
+    <arg name="mpc_interaction_post_yield_grace_time" default="0.6"/>
+    <arg name="mpc_interaction_pass_behind_clear_time" default="0.7"/>
+    <arg name="mpc_interaction_pass_behind_hold_time" default="0.6"/>
+    <arg name="mpc_interaction_risk_low" default="0.3"/>
+    <arg name="mpc_interaction_behind_dist" default="0.8"/>
+    <arg name="mpc_interaction_forward_bias" default="0.6"/>
+    <arg name="mpc_interaction_target_front_min" default="0.4"/>
+    <arg name="mpc_interaction_target_front_max" default="3.5"/>
+    <arg name="mpc_interaction_target_lateral_max" default="1.8"/>
+    <arg name="mpc_interaction_target_ped_clearance" default="0.7"/>
     <arg name="pedestrian_scenario" default="mixed"/>
     <arg name="use_static_global_map" default="false"/>
     <arg name="use_static_global_esdf" default="false"/>
@@ -59,6 +96,43 @@
         <arg name="mpc_enable_stop_advice" value="$(arg mpc_enable_stop_advice)"/>
         <arg name="mpc_enable_yield" value="$(arg mpc_enable_yield)"/>
         <arg name="mpc_enable_dynamic_hard_reject" value="$(arg mpc_enable_dynamic_hard_reject)"/>
+        <arg name="mpc_enable_interaction" value="$(arg mpc_enable_interaction)"/>
+        <arg name="mpc_interaction_enable_pass_behind" value="$(arg mpc_interaction_enable_pass_behind)"/>
+        <arg name="mpc_interaction_enable_yield" value="$(arg mpc_interaction_enable_yield)"/>
+        <arg name="mpc_interaction_enable_social_cost" value="$(arg mpc_interaction_enable_social_cost)"/>
+        <arg name="mpc_interaction_enable_switch_penalty" value="$(arg mpc_interaction_enable_switch_penalty)"/>
+        <arg name="mpc_interaction_w_front_pass" value="$(arg mpc_interaction_w_front_pass)"/>
+        <arg name="mpc_interaction_enable_behind_corridor" value="$(arg mpc_interaction_enable_behind_corridor)"/>
+        <arg name="mpc_interaction_w_behind_corridor" value="$(arg mpc_interaction_w_behind_corridor)"/>
+        <arg name="mpc_interaction_social_corridor_width" value="$(arg mpc_interaction_social_corridor_width)"/>
+        <arg name="mpc_interaction_front_buffer" value="$(arg mpc_interaction_front_buffer)"/>
+        <arg name="mpc_interaction_target_dist_cap" value="$(arg mpc_interaction_target_dist_cap)"/>
+        <arg name="mpc_interaction_front_min" value="$(arg mpc_interaction_front_min)"/>
+        <arg name="mpc_interaction_front_max" value="$(arg mpc_interaction_front_max)"/>
+        <arg name="mpc_interaction_corridor_width" value="$(arg mpc_interaction_corridor_width)"/>
+        <arg name="mpc_interaction_cross_speed" value="$(arg mpc_interaction_cross_speed)"/>
+        <arg name="mpc_interaction_time_gap" value="$(arg mpc_interaction_time_gap)"/>
+        <arg name="mpc_interaction_min_robot_speed" value="$(arg mpc_interaction_min_robot_speed)"/>
+        <arg name="mpc_interaction_cpa_horizon" value="$(arg mpc_interaction_cpa_horizon)"/>
+        <arg name="mpc_interaction_cpa_dist" value="$(arg mpc_interaction_cpa_dist)"/>
+        <arg name="mpc_interaction_use_cpa_check" value="$(arg mpc_interaction_use_cpa_check)"/>
+        <arg name="mpc_interaction_cross_enter_threshold" value="$(arg mpc_interaction_cross_enter_threshold)"/>
+        <arg name="mpc_interaction_cross_exit_threshold" value="$(arg mpc_interaction_cross_exit_threshold)"/>
+        <arg name="mpc_interaction_cross_confirm_frames" value="$(arg mpc_interaction_cross_confirm_frames)"/>
+        <arg name="mpc_interaction_cross_clear_frames" value="$(arg mpc_interaction_cross_clear_frames)"/>
+        <arg name="mpc_interaction_mode_confirm_frames" value="$(arg mpc_interaction_mode_confirm_frames)"/>
+        <arg name="mpc_interaction_candidate_latch_time" value="$(arg mpc_interaction_candidate_latch_time)"/>
+        <arg name="mpc_interaction_stop_release_clear_time" value="$(arg mpc_interaction_stop_release_clear_time)"/>
+        <arg name="mpc_interaction_post_yield_grace_time" value="$(arg mpc_interaction_post_yield_grace_time)"/>
+        <arg name="mpc_interaction_pass_behind_clear_time" value="$(arg mpc_interaction_pass_behind_clear_time)"/>
+        <arg name="mpc_interaction_pass_behind_hold_time" value="$(arg mpc_interaction_pass_behind_hold_time)"/>
+        <arg name="mpc_interaction_risk_low" value="$(arg mpc_interaction_risk_low)"/>
+        <arg name="mpc_interaction_behind_dist" value="$(arg mpc_interaction_behind_dist)"/>
+        <arg name="mpc_interaction_forward_bias" value="$(arg mpc_interaction_forward_bias)"/>
+        <arg name="mpc_interaction_target_front_min" value="$(arg mpc_interaction_target_front_min)"/>
+        <arg name="mpc_interaction_target_front_max" value="$(arg mpc_interaction_target_front_max)"/>
+        <arg name="mpc_interaction_target_lateral_max" value="$(arg mpc_interaction_target_lateral_max)"/>
+        <arg name="mpc_interaction_target_ped_clearance" value="$(arg mpc_interaction_target_ped_clearance)"/>
         <arg name="use_static_global_map" value="$(arg use_static_global_map)"/>
         <arg name="use_static_global_esdf" value="$(arg use_static_global_esdf)"/>
         <arg name="static_map_pcd" value="$(arg static_map_pcd)"/>

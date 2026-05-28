@@ -14,8 +14,11 @@ STOP_ADVICE_TOPIC = "/mpc/stop_advice"
 STOP_REASON_TOPIC = "/mpc/stop_reason"
 BEHAVIOR_STATE_TOPIC = "/mpc/behavior_state"
 BEHAVIOR_DEBUG_TOPIC = "/mpc/behavior_debug"
+INTERACTION_SCENE_TOPIC = "/mpc/interaction_scene"
+INTERACTION_MODE_TOPIC = "/mpc/interaction_mode"
+INTERACTION_DEBUG_TOPIC = "/mpc/interaction_debug"
 DEFAULT_ODOM_TOPIC = "/localization_odom"
-LIGHTWEIGHT_ODOM_TOPIC = "/simulation_generator/odom"
+LIGHTWEIGHT_ODOM_TOPIC = "/sim_odom"
 CMD_TOPIC = "/cmd_vel_footprint"
 DYN_OBS_TOPIC = "/onboard_detector/dynamic_obstacles_info"
 CLOCK_TOPIC = "/clock"
@@ -202,6 +205,36 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
     best_unsafe_count = 0
     behavior_plan_valid_count = 0
     behavior_stop_count = 0
+
+    # Interaction (Stage 2)
+    interaction_scene_counter = Counter()
+    interaction_mode_counter = Counter()
+    interaction_scene_transitions = []
+    interaction_mode_transitions = []
+    current_interaction_scene = None
+    current_interaction_mode = None
+    interaction_scene_last_time = None
+    interaction_mode_last_time = None
+    interaction_scene_dwell = {}
+    interaction_mode_dwell = {}
+    interaction_debug_count = 0
+    int_r_crossing = RunningStats()
+    int_risk_front = RunningStats()
+    int_r_behind_free = RunningStats()
+    int_time_gap = RunningStats()
+    int_t_cpa = RunningStats()
+    int_d_cpa = RunningStats()
+    int_signed_t_ped_to_path = RunningStats()
+    int_target_front = RunningStats()
+    int_target_lateral = RunningStats()
+    int_target_ped_clearance = RunningStats()
+    int_target_valid_count = 0
+    int_behind_feasible_count = 0
+    int_cpa_conflict_count = 0
+    int_ped_before_count = 0
+    int_ped_at_or_after_count = 0
+    int_yield_required_count = 0
+    int_pass_behind_ready_count = 0
 
     first_time = None
     last_time = None
@@ -449,6 +482,66 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
                 if len(data) > 11 and data[11] > 0.5:
                     behavior_stop_count += 1
 
+            elif topic == INTERACTION_SCENE_TOPIC:
+                new_scene = msg.data if msg.data else "none"
+                interaction_scene_counter[new_scene] += 1
+                if current_interaction_scene is not None and new_scene != current_interaction_scene:
+                    interaction_scene_transitions.append((t, current_interaction_scene, new_scene))
+                if current_interaction_scene is not None and interaction_scene_last_time is not None:
+                    dt = max(0.0, t - interaction_scene_last_time)
+                    interaction_scene_dwell[current_interaction_scene] = interaction_scene_dwell.get(current_interaction_scene, 0.0) + dt
+                current_interaction_scene = new_scene
+                interaction_scene_last_time = t
+
+            elif topic == INTERACTION_MODE_TOPIC:
+                new_mode = msg.data if msg.data else "CONTINUE"
+                interaction_mode_counter[new_mode] += 1
+                if current_interaction_mode is not None and new_mode != current_interaction_mode:
+                    interaction_mode_transitions.append((t, current_interaction_mode, new_mode))
+                if current_interaction_mode is not None and interaction_mode_last_time is not None:
+                    dt = max(0.0, t - interaction_mode_last_time)
+                    interaction_mode_dwell[current_interaction_mode] = interaction_mode_dwell.get(current_interaction_mode, 0.0) + dt
+                current_interaction_mode = new_mode
+                interaction_mode_last_time = t
+
+            elif topic == INTERACTION_DEBUG_TOPIC:
+                data = list(msg.data)
+                interaction_debug_count += 1
+                if len(data) > 18:
+                    int_r_crossing.add(data[18])
+                if len(data) > 21:
+                    int_risk_front.add(data[21])
+                if len(data) > 22:
+                    int_r_behind_free.add(data[22])
+                if len(data) > 11:
+                    int_time_gap.add(data[11])
+                if len(data) > 12:
+                    int_t_cpa.add(data[12])
+                if len(data) > 13:
+                    int_d_cpa.add(data[13])
+                if len(data) > 14 and data[14] > 0.5:
+                    int_cpa_conflict_count += 1
+                if len(data) > 23 and data[23] > 0.5:
+                    int_behind_feasible_count += 1
+                if len(data) > 24 and data[24] > 0.5:
+                    int_target_valid_count += 1
+                if len(data) > 25:
+                    int_target_front.add(data[25])
+                if len(data) > 26:
+                    int_target_lateral.add(data[26])
+                if len(data) > 27:
+                    int_target_ped_clearance.add(data[27])
+                if len(data) > 30:
+                    int_signed_t_ped_to_path.add(data[30])
+                if len(data) > 31 and data[31] > 0.5:
+                    int_ped_before_count += 1
+                if len(data) > 32 and data[32] > 0.5:
+                    int_ped_at_or_after_count += 1
+                if len(data) > 33 and data[33] > 0.5:
+                    int_yield_required_count += 1
+                if len(data) > 34 and data[34] > 0.5:
+                    int_pass_behind_ready_count += 1
+
             if topic in (STOP_REASON_TOPIC, STOP_ADVICE_TOPIC):
                 should_stop = current_advice or current_reason != "OK"
                 display_reason = current_reason if current_reason != "OK" else "STOP_ADVICE"
@@ -496,6 +589,14 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
     if final_waypoints:
         for px, py in odom_points:
             deviation.add(distance_to_polyline(px, py, final_waypoints))
+
+    # Finalize interaction dwell times for still-active scene/mode
+    if current_interaction_scene is not None and interaction_scene_last_time is not None and last_time is not None:
+        dt = max(0.0, last_time - interaction_scene_last_time)
+        interaction_scene_dwell[current_interaction_scene] = interaction_scene_dwell.get(current_interaction_scene, 0.0) + dt
+    if current_interaction_mode is not None and interaction_mode_last_time is not None and last_time is not None:
+        dt = max(0.0, last_time - interaction_mode_last_time)
+        interaction_mode_dwell[current_interaction_mode] = interaction_mode_dwell.get(current_interaction_mode, 0.0) + dt
 
     lines = []
     lines.append("MPC Evaluation Summary")
@@ -634,6 +735,75 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
     else:
         base = first_time if first_time is not None else 0.0
         for idx, (bt, old_state, new_state) in enumerate(behavior_transitions, 1):
+            lines.append("  {}. time={:.2f}s {} -> {}".format(
+                idx, bt - base, old_state, new_state))
+
+    # Interaction (Stage 2)
+    lines.append("")
+    lines.append("--- Interaction (Stage 2) ---")
+    lines.append("interaction_debug_messages: {}".format(interaction_debug_count))
+    lines.append("interaction_scenes: {}".format(
+        ", ".join("{}={}".format(k, v) for k, v in sorted(interaction_scene_counter.items())) or "none"))
+    lines.append("interaction_modes: {}".format(
+        ", ".join("{}={}".format(k, v) for k, v in sorted(interaction_mode_counter.items())) or "none"))
+    lines.append("interaction_scene_transitions: {}".format(len(interaction_scene_transitions)))
+    lines.append("interaction_mode_transitions: {}".format(len(interaction_mode_transitions)))
+    if interaction_mode_transitions:
+        # Count switches away from CONTINUE (actual interaction decisions)
+        pass_behind_switch_count = sum(1 for _, old, new in interaction_mode_transitions if new == "PASS_BEHIND")
+        yield_switch_count = sum(1 for _, old, new in interaction_mode_transitions if new == "YIELD")
+        lines.append("pass_behind_entry_count: {}".format(pass_behind_switch_count))
+        lines.append("yield_entry_count: {}".format(yield_switch_count))
+    lines.append("interaction_scene_dwell:")
+    if interaction_scene_dwell:
+        for scene_name in sorted(interaction_scene_dwell.keys()):
+            dt = interaction_scene_dwell[scene_name]
+            lines.append("  {}: {:.2f}s".format(scene_name, dt))
+    else:
+        lines.append("  none")
+    lines.append("interaction_mode_dwell:")
+    if interaction_mode_dwell:
+        for mode_name in sorted(interaction_mode_dwell.keys()):
+            dt = interaction_mode_dwell[mode_name]
+            lines.append("  {}: {:.2f}s".format(mode_name, dt))
+    else:
+        lines.append("  none")
+    lines.append("")
+    lines.append("interaction_risk_scores:")
+    lines.append("  " + int_r_crossing.line("R_crossing"))
+    lines.append("  " + int_risk_front.line("risk_front"))
+    lines.append("  " + int_r_behind_free.line("R_behind_free"))
+    lines.append("  " + int_time_gap.line("time_gap", "s"))
+    lines.append("  " + int_signed_t_ped_to_path.line("signed_t_ped_to_path", "s"))
+    lines.append("  " + int_t_cpa.line("t_cpa", "s"))
+    lines.append("  " + int_d_cpa.line("d_cpa", "m"))
+    lines.append("  cpa_conflict_count: {} / {}".format(int_cpa_conflict_count, interaction_debug_count))
+    lines.append("  behind_feasible_count: {} / {}".format(int_behind_feasible_count, interaction_debug_count))
+    lines.append("  target_valid_count: {} / {}".format(int_target_valid_count, interaction_debug_count))
+    lines.append("  ped_before_path_count: {} / {}".format(int_ped_before_count, interaction_debug_count))
+    lines.append("  ped_at_or_after_path_count: {} / {}".format(int_ped_at_or_after_count, interaction_debug_count))
+    lines.append("  yield_required_count: {} / {}".format(int_yield_required_count, interaction_debug_count))
+    lines.append("  pass_behind_ready_count: {} / {}".format(int_pass_behind_ready_count, interaction_debug_count))
+    lines.append("")
+    lines.append("interaction_target:")
+    lines.append("  " + int_target_front.line("target_front", "m"))
+    lines.append("  " + int_target_lateral.line("target_lateral", "m"))
+    lines.append("  " + int_target_ped_clearance.line("target_ped_clearance", "m"))
+    lines.append("")
+    lines.append("interaction_mode_transitions:")
+    if not interaction_mode_transitions:
+        lines.append("  none")
+    else:
+        base = first_time if first_time is not None else 0.0
+        for idx, (bt, old_state, new_state) in enumerate(interaction_mode_transitions, 1):
+            lines.append("  {}. time={:.2f}s {} -> {}".format(
+                idx, bt - base, old_state, new_state))
+    lines.append("interaction_scene_transitions:")
+    if not interaction_scene_transitions:
+        lines.append("  none")
+    else:
+        base = first_time if first_time is not None else 0.0
+        for idx, (bt, old_state, new_state) in enumerate(interaction_scene_transitions, 1):
             lines.append("  {}. time={:.2f}s {} -> {}".format(
                 idx, bt - base, old_state, new_state))
 
