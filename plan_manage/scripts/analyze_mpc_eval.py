@@ -23,6 +23,23 @@ CLOCK_TOPIC = "/clock"
 WAYPOINTS_TOPIC = "/mpc/waypoints"
 BEST_TRAJ_TOPIC = "/mpc/best_traj"
 
+INTERACTION_DEBUG_FIELD_COUNT = 35
+INT_R_CROSSING_IDX = 18
+INT_RISK_FRONT_IDX = 21
+INT_SIGNED_T_PED_TO_PATH_IDX = 22
+INT_PED_BEFORE_PATH_IDX = 23
+INT_PED_AT_OR_AFTER_PATH_IDX = 24
+INT_YIELD_REQUIRED_IDX = 25
+INT_ST_CONFLICT_IDX = 26
+INT_ST_T_CONFLICT_IDX = 27
+INT_ST_D_CONFLICT_IDX = 28
+INT_ST_SAFETY_RADIUS_IDX = 29
+INT_ST_ROBOT_S_IDX = 30
+INT_ST_PED_S_IDX = 31
+INT_ST_PATH_OCCUPIED_IDX = 32
+INT_ST_PATH_T_ENTER_IDX = 33
+INT_ST_PATH_T_EXIT_IDX = 34
+
 
 def yaw_from_quaternion(q):
     siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
@@ -154,13 +171,6 @@ def classify_encounter_pass_mode(encounter, near_clearance=0.15, along_deadband=
             return "PASS_AHEAD"
         return "SIDE_PASS"
 
-    # Fallback for old summaries/tests where pedestrian velocity is unavailable.
-    lateral = encounter.get("rel_lateral", float("nan"))
-    if math.isfinite(lateral):
-        if lateral > along_deadband:
-            return "PASS_BEHIND"
-        if lateral < -along_deadband:
-            return "PASS_AHEAD"
     return "UNKNOWN"
 
 
@@ -202,14 +212,10 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
     interaction_debug_count = 0
     int_r_crossing = RunningStats()
     int_risk_front = RunningStats()
-    int_r_behind_free = RunningStats()
     int_time_gap = RunningStats()
     int_t_cpa = RunningStats()
     int_d_cpa = RunningStats()
     int_signed_t_ped_to_path = RunningStats()
-    int_target_front = RunningStats()
-    int_target_lateral = RunningStats()
-    int_target_ped_clearance = RunningStats()
     int_st_t_conflict = RunningStats()
     int_st_d_conflict = RunningStats()
     int_st_safety_radius = RunningStats()
@@ -217,13 +223,10 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
     int_st_ped_s = RunningStats()
     int_st_path_t_enter = RunningStats()
     int_st_path_t_exit = RunningStats()
-    int_target_valid_count = 0
-    int_behind_feasible_count = 0
     int_cpa_conflict_count = 0
     int_ped_before_count = 0
     int_ped_at_or_after_count = 0
     int_yield_required_count = 0
-    int_pass_behind_ready_count = 0
     int_st_conflict_count = 0
     int_st_path_occupied_count = 0
 
@@ -460,13 +463,13 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
 
             elif topic == INTERACTION_DEBUG_TOPIC:
                 data = list(msg.data)
+                if len(data) != INTERACTION_DEBUG_FIELD_COUNT:
+                    continue
                 interaction_debug_count += 1
-                if len(data) > 18:
-                    int_r_crossing.add(data[18])
-                if len(data) > 21:
-                    int_risk_front.add(data[21])
-                if len(data) > 22:
-                    int_r_behind_free.add(data[22])
+                if len(data) > INT_R_CROSSING_IDX:
+                    int_r_crossing.add(data[INT_R_CROSSING_IDX])
+                if len(data) > INT_RISK_FRONT_IDX:
+                    int_risk_front.add(data[INT_RISK_FRONT_IDX])
                 if len(data) > 11:
                     int_time_gap.add(data[11])
                 if len(data) > 12:
@@ -475,44 +478,32 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
                     int_d_cpa.add(data[13])
                 if len(data) > 14 and data[14] > 0.5:
                     int_cpa_conflict_count += 1
-                if len(data) > 23 and data[23] > 0.5:
-                    int_behind_feasible_count += 1
-                if len(data) > 24 and data[24] > 0.5:
-                    int_target_valid_count += 1
-                if len(data) > 25:
-                    int_target_front.add(data[25])
-                if len(data) > 26:
-                    int_target_lateral.add(data[26])
-                if len(data) > 27:
-                    int_target_ped_clearance.add(data[27])
-                if len(data) > 30:
-                    int_signed_t_ped_to_path.add(data[30])
-                if len(data) > 31 and data[31] > 0.5:
+                if len(data) > INT_SIGNED_T_PED_TO_PATH_IDX:
+                    int_signed_t_ped_to_path.add(data[INT_SIGNED_T_PED_TO_PATH_IDX])
+                if len(data) > INT_PED_BEFORE_PATH_IDX and data[INT_PED_BEFORE_PATH_IDX] > 0.5:
                     int_ped_before_count += 1
-                if len(data) > 32 and data[32] > 0.5:
+                if len(data) > INT_PED_AT_OR_AFTER_PATH_IDX and data[INT_PED_AT_OR_AFTER_PATH_IDX] > 0.5:
                     int_ped_at_or_after_count += 1
-                if len(data) > 33 and data[33] > 0.5:
+                if len(data) > INT_YIELD_REQUIRED_IDX and data[INT_YIELD_REQUIRED_IDX] > 0.5:
                     int_yield_required_count += 1
-                if len(data) > 34 and data[34] > 0.5:
-                    int_pass_behind_ready_count += 1
-                if len(data) > 35 and data[35] > 0.5:
+                if len(data) > INT_ST_CONFLICT_IDX and data[INT_ST_CONFLICT_IDX] > 0.5:
                     int_st_conflict_count += 1
-                if len(data) > 36:
-                    int_st_t_conflict.add(data[36])
-                if len(data) > 37:
-                    int_st_d_conflict.add(data[37])
-                if len(data) > 38:
-                    int_st_safety_radius.add(data[38])
-                if len(data) > 39:
-                    int_st_robot_s.add(data[39])
-                if len(data) > 40:
-                    int_st_ped_s.add(data[40])
-                if len(data) > 41 and data[41] > 0.5:
+                if len(data) > INT_ST_T_CONFLICT_IDX:
+                    int_st_t_conflict.add(data[INT_ST_T_CONFLICT_IDX])
+                if len(data) > INT_ST_D_CONFLICT_IDX:
+                    int_st_d_conflict.add(data[INT_ST_D_CONFLICT_IDX])
+                if len(data) > INT_ST_SAFETY_RADIUS_IDX:
+                    int_st_safety_radius.add(data[INT_ST_SAFETY_RADIUS_IDX])
+                if len(data) > INT_ST_ROBOT_S_IDX:
+                    int_st_robot_s.add(data[INT_ST_ROBOT_S_IDX])
+                if len(data) > INT_ST_PED_S_IDX:
+                    int_st_ped_s.add(data[INT_ST_PED_S_IDX])
+                if len(data) > INT_ST_PATH_OCCUPIED_IDX and data[INT_ST_PATH_OCCUPIED_IDX] > 0.5:
                     int_st_path_occupied_count += 1
-                if len(data) > 42:
-                    int_st_path_t_enter.add(data[42])
-                if len(data) > 43:
-                    int_st_path_t_exit.add(data[43])
+                if len(data) > INT_ST_PATH_T_ENTER_IDX:
+                    int_st_path_t_enter.add(data[INT_ST_PATH_T_ENTER_IDX])
+                if len(data) > INT_ST_PATH_T_EXIT_IDX:
+                    int_st_path_t_exit.add(data[INT_ST_PATH_T_EXIT_IDX])
 
             if topic in (STOP_REASON_TOPIC, STOP_ADVICE_TOPIC):
                 should_stop = current_advice or current_reason != "OK"
@@ -693,9 +684,7 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
     lines.append("interaction_mode_transitions: {}".format(len(interaction_mode_transitions)))
     if interaction_mode_transitions:
         # Count switches away from CONTINUE (actual interaction decisions)
-        pass_behind_switch_count = sum(1 for _, old, new in interaction_mode_transitions if new == "PASS_BEHIND")
         yield_switch_count = sum(1 for _, old, new in interaction_mode_transitions if new == "YIELD")
-        lines.append("pass_behind_entry_count: {}".format(pass_behind_switch_count))
         lines.append("yield_entry_count: {}".format(yield_switch_count))
     lines.append("interaction_scene_dwell:")
     if interaction_scene_dwell:
@@ -715,18 +704,14 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
     lines.append("interaction_risk_scores:")
     lines.append("  " + int_r_crossing.line("R_crossing"))
     lines.append("  " + int_risk_front.line("risk_front"))
-    lines.append("  " + int_r_behind_free.line("R_behind_free"))
     lines.append("  " + int_time_gap.line("time_gap", "s"))
     lines.append("  " + int_signed_t_ped_to_path.line("signed_t_ped_to_path", "s"))
     lines.append("  " + int_t_cpa.line("t_cpa", "s"))
     lines.append("  " + int_d_cpa.line("d_cpa", "m"))
     lines.append("  cpa_conflict_count: {} / {}".format(int_cpa_conflict_count, interaction_debug_count))
-    lines.append("  behind_feasible_count: {} / {}".format(int_behind_feasible_count, interaction_debug_count))
-    lines.append("  target_valid_count: {} / {}".format(int_target_valid_count, interaction_debug_count))
     lines.append("  ped_before_path_count: {} / {}".format(int_ped_before_count, interaction_debug_count))
     lines.append("  ped_at_or_after_path_count: {} / {}".format(int_ped_at_or_after_count, interaction_debug_count))
     lines.append("  yield_required_count: {} / {}".format(int_yield_required_count, interaction_debug_count))
-    lines.append("  pass_behind_ready_count: {} / {}".format(int_pass_behind_ready_count, interaction_debug_count))
     lines.append("  st_conflict_count: {} / {}".format(int_st_conflict_count, interaction_debug_count))
     lines.append("  " + int_st_t_conflict.line("st_t_conflict", "s"))
     lines.append("  " + int_st_d_conflict.line("st_d_conflict", "m"))
@@ -736,11 +721,6 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
     lines.append("  st_path_occupied_count: {} / {}".format(int_st_path_occupied_count, interaction_debug_count))
     lines.append("  " + int_st_path_t_enter.line("st_path_t_enter", "s"))
     lines.append("  " + int_st_path_t_exit.line("st_path_t_exit", "s"))
-    lines.append("")
-    lines.append("interaction_target:")
-    lines.append("  " + int_target_front.line("target_front", "m"))
-    lines.append("  " + int_target_lateral.line("target_lateral", "m"))
-    lines.append("  " + int_target_ped_clearance.line("target_ped_clearance", "m"))
     lines.append("")
     lines.append("interaction_mode_transitions:")
     if not interaction_mode_transitions:

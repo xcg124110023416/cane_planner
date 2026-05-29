@@ -109,10 +109,7 @@ namespace cane_planner
         double mpc_stop_hold_time_ = 0.8;
         double mpc_stop_release_clear_time_ = 0.5;
         bool mpc_interaction_enable_ = false;
-        bool mpc_interaction_enable_pass_behind_ = false;
         bool mpc_interaction_enable_yield_ = false;
-        bool mpc_interaction_enable_social_cost_ = false;
-        bool mpc_interaction_use_spatiotemporal_yield_ = true;
         double mpc_interaction_st_horizon_ = 4.0;
         double mpc_interaction_yield_trigger_time_ = 2.5;
         double mpc_interaction_robot_radius_ = 0.25;
@@ -126,23 +123,8 @@ namespace cane_planner
         double mpc_interaction_cpa_horizon_ = 3.0;
         double mpc_interaction_cpa_dist_ = 0.8;
         bool mpc_interaction_use_cpa_check_ = true;
-        double mpc_interaction_cross_enter_threshold_ = 0.7;
-        double mpc_interaction_cross_exit_threshold_ = 0.3;
-        int mpc_interaction_cross_confirm_frames_ = 3;
-        int mpc_interaction_cross_clear_frames_ = 3;
-        int mpc_interaction_mode_confirm_frames_ = 2;
-        double mpc_interaction_candidate_latch_time_ = 1.0;
         double mpc_interaction_stop_release_clear_time_ = 0.15;
         double mpc_interaction_post_yield_grace_time_ = 0.6;
-        double mpc_interaction_pass_behind_clear_time_ = 0.7;
-        double mpc_interaction_pass_behind_hold_time_ = 0.6;
-        double mpc_interaction_risk_low_ = 0.3;
-        double mpc_interaction_behind_dist_ = 0.8;
-        double mpc_interaction_forward_bias_ = 0.6;
-        double mpc_interaction_target_front_min_ = 0.4;
-        double mpc_interaction_target_front_max_ = 3.5;
-        double mpc_interaction_target_lateral_max_ = 1.8;
-        double mpc_interaction_target_ped_clearance_ = 0.7;
         double mpc_nominal_al_ = 0.40;
         double lfpc_t_sup_ = 0.35;
         bool mpc_stop_state_active_ = false;
@@ -158,7 +140,7 @@ namespace cane_planner
         // MPC 步进状态
         enum MpcSimState { MPC_IDLE, MPC_ACTIVE, MPC_DONE };
         enum InteractionScene { SCENE_NONE = 0, SCENE_CROSSING = 1 };
-        enum InteractionMode { MODE_CONTINUE = 0, MODE_PASS_BEHIND = 1, MODE_YIELD = 2 };
+        enum InteractionMode { MODE_CONTINUE = 0, MODE_YIELD = 2 };
         struct InteractionDebug
         {
             bool candidate_valid = false;
@@ -181,11 +163,7 @@ namespace cane_planner
             int crossing_confirm_count = 0;
             int crossing_clear_count = 0;
             double risk_front = 0.0;
-            double r_behind_free = 0.0;
-            bool behind_feasible = false;
-            bool target_valid = false;
             bool yield_required = false;
-            bool pass_behind_ready = false;
             bool st_conflict = false;
             double st_t_conflict = -1.0;
             double st_d_conflict = -1.0;
@@ -195,26 +173,14 @@ namespace cane_planner
             bool st_path_occupied = false;
             double st_path_t_enter = -1.0;
             double st_path_t_exit = -1.0;
-            double target_front = 0.0;
-            double target_lateral = 0.0;
-            double target_ped_clearance = -1.0;
-            Eigen::Vector2d interaction_target = Eigen::Vector2d::Zero();
             Eigen::Vector2d path_forward = Eigen::Vector2d::Zero();
         };
         MpcSimState mpc_sim_state_;
         InteractionScene mpc_interaction_scene_ = SCENE_NONE;
         InteractionMode mpc_interaction_mode_ = MODE_CONTINUE;
-        InteractionMode mpc_interaction_candidate_mode_ = MODE_CONTINUE;
         InteractionDebug mpc_interaction_debug_;
-        InteractionDebug mpc_interaction_latched_debug_;
-        ros::Time mpc_interaction_latched_stamp_;
-        bool mpc_interaction_latched_valid_ = false;
-        ros::Time mpc_interaction_pass_behind_enter_time_;
         bool mpc_interaction_st_yield_latched_ = false;
         int mpc_interaction_st_latched_obs_idx_ = -1;
-        int mpc_interaction_crossing_confirm_count_ = 0;
-        int mpc_interaction_crossing_clear_count_ = 0;
-        int mpc_interaction_mode_candidate_count_ = 0;
         int mpc_step_count_;             // 总步数计数 (仅用于日志)
         int mpc_stuck_steps_;            // waypoint 未推进的连续步数
         Eigen::Vector2d last_com_pos_;   // 上一帧CoM位置，用于检测是否实际移动
@@ -280,11 +246,6 @@ namespace cane_planner
         bool shouldIgnoreDuplicateGoal(const Eigen::Vector2d& goal, double yaw, const char* source);
         Eigen::Vector2d computeInteractionPathForward(const Eigen::Vector3d& current_com) const;
         double estimateInteractionRobotSpeed() const;
-        double computeCrossingRisk(const InteractionDebug& candidate) const;
-        void updateCrossingSceneFsm(double r_crossing,
-                                    const InteractionDebug& debug);
-        void updateInteractionModeFsm(InteractionMode desired_mode);
-        void updateInteractionModeDebug(InteractionDebug& debug);
         void updateInteractionDebug(const Eigen::Vector3d& current_com,
                                     const std::vector<Eigen::Vector3d>& obs_pos,
                                     const std::vector<Eigen::Vector3d>& obs_vel,

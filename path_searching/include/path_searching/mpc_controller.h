@@ -45,12 +45,6 @@ public:
         double w_risk = 2.0;
         double w_goal = 10.0;
         double w_dapi = 0.0;    // steering rate penalty: |api[n] - api[n-1]|
-        double interaction_w_front_pass = 0.0;
-        bool interaction_enable_behind_corridor = false;
-        double interaction_w_behind_corridor = 0.0;
-        double interaction_corridor_width = 0.8;
-        double interaction_front_buffer = 0.25;
-        double interaction_target_dist_cap = 3.0;
 
         // Hard constraint: risk > threshold → INF cost (dynamic obstacles only)
         bool dynamic_hard_reject_enable = true;
@@ -104,21 +98,6 @@ public:
         bool plan_valid = false;
     };
 
-    struct InteractionContext
-    {
-        bool enabled = false;
-        int scene = 0;
-        int mode = 0;
-        Eigen::Vector2d path_forward = Eigen::Vector2d::UnitX();
-        Eigen::Vector2d path_left = Eigen::Vector2d::UnitY();
-        Eigen::Vector2d robot_pos = Eigen::Vector2d::Zero();
-        Eigen::Vector2d ped_pos = Eigen::Vector2d::Zero();
-        Eigen::Vector2d ped_vel = Eigen::Vector2d::Zero();
-        Eigen::Vector2d crossing_point = Eigen::Vector2d::Zero();
-        Eigen::Vector2d behind_target = Eigen::Vector2d::Zero();
-        bool target_valid = false;
-    };
-
     MpcController();
     ~MpcController();
 
@@ -132,8 +111,6 @@ public:
 
     void setDynamicObstacles(const std::vector<Eigen::Vector3d> &pos,
                              const std::vector<Eigen::Vector3d> &vel);
-    void setInteractionContext(const InteractionContext &ctx);
-    void clearInteractionContext();
 
     // Main API: plan one step, returns [al, aw, api]
     Eigen::Vector3d plan(const LFPC::Ptr &lfpc_base,
@@ -161,7 +138,6 @@ private:
     LFPC::Ptr lfpc_model_;
     CollisionDetection::Ptr collision_;
     DynamicRiskField risk_field_;
-    InteractionContext interaction_ctx_;
 
     // Pre-allocated LFPC pool for rollout
     std::vector<LFPC::Ptr> lfpc_pool_;

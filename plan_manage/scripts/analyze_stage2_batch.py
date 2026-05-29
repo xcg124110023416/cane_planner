@@ -20,6 +20,12 @@ WAYPOINTS_TOPIC = "/mpc/waypoints"
 BEST_TRAJ_TOPIC = "/mpc/best_traj"
 DEBUG_TOPIC = "/mpc/debug_metrics"
 
+INTERACTION_DEBUG_FIELD_COUNT = 35
+INT_SIGNED_T_PED_TO_PATH_IDX = 22
+INT_YIELD_REQUIRED_IDX = 25
+INT_ST_CONFLICT_IDX = 26
+INT_ST_PATH_OCCUPIED_IDX = 32
+
 
 def fmt(value):
     if value is None or not math.isfinite(value):
@@ -110,7 +116,6 @@ def analyze_bag(bag_path, odom_topic, robot_radius):
 
     signed_t_values = []
     yield_required_count = 0
-    pass_ready_count = 0
     st_conflict_count = 0
     st_path_occupied_count = 0
     debug_count = 0
@@ -180,16 +185,17 @@ def analyze_bag(bag_path, odom_topic, robot_radius):
 
             elif topic == INTERACTION_DEBUG_TOPIC:
                 data = list(msg.data)
+                if len(data) != INTERACTION_DEBUG_FIELD_COUNT:
+                    continue
                 debug_count += 1
-                if len(data) > 30 and math.isfinite(data[30]):
-                    signed_t_values.append(data[30])
-                if len(data) > 33 and data[33] > 0.5:
+                if (len(data) > INT_SIGNED_T_PED_TO_PATH_IDX and
+                        math.isfinite(data[INT_SIGNED_T_PED_TO_PATH_IDX])):
+                    signed_t_values.append(data[INT_SIGNED_T_PED_TO_PATH_IDX])
+                if len(data) > INT_YIELD_REQUIRED_IDX and data[INT_YIELD_REQUIRED_IDX] > 0.5:
                     yield_required_count += 1
-                if len(data) > 34 and data[34] > 0.5:
-                    pass_ready_count += 1
-                if len(data) > 35 and data[35] > 0.5:
+                if len(data) > INT_ST_CONFLICT_IDX and data[INT_ST_CONFLICT_IDX] > 0.5:
                     st_conflict_count += 1
-                if len(data) > 41 and data[41] > 0.5:
+                if len(data) > INT_ST_PATH_OCCUPIED_IDX and data[INT_ST_PATH_OCCUPIED_IDX] > 0.5:
                     st_path_occupied_count += 1
 
             elif topic == STOP_ADVICE_TOPIC:
@@ -243,7 +249,6 @@ def analyze_bag(bag_path, odom_topic, robot_radius):
 
     _, continue_dwell = dwell("CONTINUE")
     _, yield_dwell = dwell("YIELD")
-    _, pass_behind_dwell = dwell("PASS_BEHIND")
     crossing_dwell, _ = dwell("crossing")
     none_dwell, _ = dwell("none")
 
@@ -266,18 +271,15 @@ def analyze_bag(bag_path, odom_topic, robot_radius):
         "stop_count": len(stop_events),
         "stop_duration_s": sum(stop_events),
         "yield_entry_count": sum(1 for tr in mode_transitions if tr.endswith("->YIELD")),
-        "pass_behind_entry_count": sum(1 for tr in mode_transitions if tr.endswith("->PASS_BEHIND")),
         "crossing_dwell_s": crossing_dwell,
         "none_dwell_s": none_dwell,
         "continue_dwell_s": continue_dwell,
         "yield_dwell_s": yield_dwell,
-        "pass_behind_dwell_s": pass_behind_dwell,
         "mode_transitions": ";".join(mode_transitions) or "none",
         "scene_transitions": ";".join(scene_transitions) or "none",
         "signed_t_min_s": signed_min,
         "signed_t_max_s": signed_max,
         "yield_required_count": yield_required_count,
-        "pass_ready_count": pass_ready_count,
         "st_conflict_count": st_conflict_count,
         "st_path_occupied_count": st_path_occupied_count,
         "interaction_debug_count": debug_count,
@@ -300,24 +302,22 @@ def write_markdown(rows, out_path):
         "closest_collision_clearance_m",
         "stop_duration_s",
         "yield_entry_count",
-        "pass_behind_entry_count",
         "path_efficiency",
     ]
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("# Stage 2 Batch Summary\n\n")
-        f.write("| group | n | max_dev_mean | clearance_mean | stop_s_mean | yield_entries_mean | pass_behind_entries_mean | efficiency_mean |\n")
-        f.write("|---|---:|---:|---:|---:|---:|---:|---:|\n")
+        f.write("| group | n | max_dev_mean | clearance_mean | stop_s_mean | yield_entries_mean | efficiency_mean |\n")
+        f.write("|---|---:|---:|---:|---:|---:|---:|\n")
         for group in sorted(groups.keys()):
             items = groups[group]
             values = {metric: mean([item[metric] for item in items]) for metric in key_metrics}
-            f.write("| {} | {} | {} | {} | {} | {} | {} | {} |\n".format(
+            f.write("| {} | {} | {} | {} | {} | {} | {} |\n".format(
                 group,
                 len(items),
                 fmt(values["actual_max_deviation_m"]),
                 fmt(values["closest_collision_clearance_m"]),
                 fmt(values["stop_duration_s"]),
                 fmt(values["yield_entry_count"]),
-                fmt(values["pass_behind_entry_count"]),
                 fmt(values["path_efficiency"]),
             ))
         f.write("\n## Runs\n\n")

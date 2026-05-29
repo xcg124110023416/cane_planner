@@ -44,10 +44,7 @@ namespace cane_planner
         nh.param("mpc/stop_hold_time", mpc_stop_hold_time_, 0.8);
         nh.param("mpc/stop_release_clear_time", mpc_stop_release_clear_time_, 0.5);
         nh.param("mpc/interaction_enable", mpc_interaction_enable_, false);
-        nh.param("mpc/interaction_enable_pass_behind", mpc_interaction_enable_pass_behind_, false);
         nh.param("mpc/interaction_enable_yield", mpc_interaction_enable_yield_, false);
-        nh.param("mpc/interaction_enable_social_cost", mpc_interaction_enable_social_cost_, false);
-        nh.param("mpc/interaction_use_spatiotemporal_yield", mpc_interaction_use_spatiotemporal_yield_, true);
         nh.param("mpc/interaction_st_horizon", mpc_interaction_st_horizon_, 4.0);
         nh.param("mpc/interaction_yield_trigger_time", mpc_interaction_yield_trigger_time_, 2.5);
         nh.param("mpc/interaction_robot_radius", mpc_interaction_robot_radius_, 0.25);
@@ -61,23 +58,8 @@ namespace cane_planner
         nh.param("mpc/interaction_cpa_horizon", mpc_interaction_cpa_horizon_, 3.0);
         nh.param("mpc/interaction_cpa_dist", mpc_interaction_cpa_dist_, 0.8);
         nh.param("mpc/interaction_use_cpa_check", mpc_interaction_use_cpa_check_, true);
-        nh.param("mpc/interaction_cross_enter_threshold", mpc_interaction_cross_enter_threshold_, 0.7);
-        nh.param("mpc/interaction_cross_exit_threshold", mpc_interaction_cross_exit_threshold_, 0.3);
-        nh.param("mpc/interaction_cross_confirm_frames", mpc_interaction_cross_confirm_frames_, 3);
-        nh.param("mpc/interaction_cross_clear_frames", mpc_interaction_cross_clear_frames_, 3);
-        nh.param("mpc/interaction_mode_confirm_frames", mpc_interaction_mode_confirm_frames_, 2);
-        nh.param("mpc/interaction_candidate_latch_time", mpc_interaction_candidate_latch_time_, 1.0);
         nh.param("mpc/interaction_stop_release_clear_time", mpc_interaction_stop_release_clear_time_, 0.15);
         nh.param("mpc/interaction_post_yield_grace_time", mpc_interaction_post_yield_grace_time_, 0.6);
-        nh.param("mpc/interaction_pass_behind_clear_time", mpc_interaction_pass_behind_clear_time_, 0.7);
-        nh.param("mpc/interaction_pass_behind_hold_time", mpc_interaction_pass_behind_hold_time_, 0.6);
-        nh.param("mpc/interaction_risk_low", mpc_interaction_risk_low_, 0.3);
-        nh.param("mpc/interaction_behind_dist", mpc_interaction_behind_dist_, 0.8);
-        nh.param("mpc/interaction_forward_bias", mpc_interaction_forward_bias_, 0.6);
-        nh.param("mpc/interaction_target_front_min", mpc_interaction_target_front_min_, 0.4);
-        nh.param("mpc/interaction_target_front_max", mpc_interaction_target_front_max_, 3.5);
-        nh.param("mpc/interaction_target_lateral_max", mpc_interaction_target_lateral_max_, 1.8);
-        nh.param("mpc/interaction_target_ped_clearance", mpc_interaction_target_ped_clearance_, 0.7);
         nh.param("mpc/nominal_al", mpc_nominal_al_, 0.40);
         nh.param("lfpc/t_sup", lfpc_t_sup_, 0.35);
     }
@@ -254,233 +236,12 @@ namespace cane_planner
     {
         switch (mode)
         {
-            case MODE_PASS_BEHIND:
-                return "PASS_BEHIND";
             case MODE_YIELD:
                 return "YIELD";
             case MODE_CONTINUE:
             default:
                 return "CONTINUE";
         }
-    }
-
-    double PlannerManager::computeCrossingRisk(const InteractionDebug& candidate) const
-    {
-        if (!candidate.candidate_valid)
-            return 0.0;
-
-        const double gap_scale = std::max(1e-3, mpc_interaction_time_gap_);
-        const double cpa_scale = std::max(1e-3, mpc_interaction_cpa_dist_);
-        const double gap_risk = std::exp(-std::abs(candidate.time_gap) / gap_scale);
-        const double cpa_risk = candidate.d_cpa >= 0.0 ? std::exp(-candidate.d_cpa / cpa_scale) : 0.0;
-        const double cpa_bonus = candidate.cpa_conflict ? 0.2 : 0.0;
-        return std::max(0.0, std::min(1.0, 0.6 * gap_risk + 0.4 * cpa_risk + cpa_bonus));
-    }
-
-    void PlannerManager::updateCrossingSceneFsm(double r_crossing,
-                                                const InteractionDebug& debug)
-    {
-        if (!mpc_interaction_enable_)
-        {
-            mpc_interaction_scene_ = SCENE_NONE;
-            mpc_interaction_mode_ = MODE_CONTINUE;
-            mpc_interaction_candidate_mode_ = MODE_CONTINUE;
-            mpc_interaction_latched_debug_ = InteractionDebug();
-            mpc_interaction_latched_stamp_ = ros::Time(0);
-            mpc_interaction_latched_valid_ = false;
-            mpc_interaction_pass_behind_enter_time_ = ros::Time(0);
-            mpc_interaction_crossing_confirm_count_ = 0;
-            mpc_interaction_crossing_clear_count_ = 0;
-            mpc_interaction_mode_candidate_count_ = 0;
-            return;
-        }
-
-        if (r_crossing > mpc_interaction_cross_enter_threshold_)
-        {
-            mpc_interaction_crossing_confirm_count_ =
-                std::min(mpc_interaction_crossing_confirm_count_ + 1,
-                         mpc_interaction_cross_confirm_frames_);
-            mpc_interaction_crossing_clear_count_ = 0;
-        }
-        else if (r_crossing < mpc_interaction_cross_exit_threshold_)
-        {
-            mpc_interaction_crossing_clear_count_ =
-                std::min(mpc_interaction_crossing_clear_count_ + 1,
-                         mpc_interaction_cross_clear_frames_);
-            mpc_interaction_crossing_confirm_count_ = 0;
-        }
-
-        if (mpc_interaction_crossing_confirm_count_ >= mpc_interaction_cross_confirm_frames_)
-        {
-            mpc_interaction_scene_ = SCENE_CROSSING;
-        }
-        else if (mpc_interaction_crossing_clear_count_ >= mpc_interaction_cross_clear_frames_)
-        {
-            const double yield_scene_hold_time =
-                std::max(mpc_interaction_post_yield_grace_time_,
-                         mpc_interaction_pass_behind_clear_time_ + 0.2);
-            const bool near_centerline_after_yield =
-                mpc_interaction_scene_ == SCENE_CROSSING &&
-                (mpc_interaction_mode_ == MODE_YIELD ||
-                 mpc_interaction_mode_ == MODE_PASS_BEHIND) &&
-                debug.candidate_valid &&
-                std::isfinite(debug.signed_t_ped_to_path) &&
-                debug.signed_t_ped_to_path <= yield_scene_hold_time &&
-                debug.signed_t_ped_to_path >= -yield_scene_hold_time;
-
-            if (near_centerline_after_yield)
-                return;
-
-            mpc_interaction_scene_ = SCENE_NONE;
-            mpc_interaction_latched_debug_ = InteractionDebug();
-            mpc_interaction_latched_stamp_ = ros::Time(0);
-            mpc_interaction_latched_valid_ = false;
-            mpc_interaction_pass_behind_enter_time_ = ros::Time(0);
-        }
-    }
-
-    void PlannerManager::updateInteractionModeFsm(InteractionMode desired_mode)
-    {
-        const int confirm_frames = std::max(1, mpc_interaction_mode_confirm_frames_);
-
-        if (desired_mode == MODE_CONTINUE)
-        {
-            mpc_interaction_mode_ = MODE_CONTINUE;
-            mpc_interaction_candidate_mode_ = MODE_CONTINUE;
-            mpc_interaction_mode_candidate_count_ = 0;
-            mpc_interaction_pass_behind_enter_time_ = ros::Time(0);
-            return;
-        }
-
-        if (desired_mode == mpc_interaction_mode_)
-        {
-            mpc_interaction_candidate_mode_ = desired_mode;
-            mpc_interaction_mode_candidate_count_ = confirm_frames;
-            return;
-        }
-
-        if (desired_mode != mpc_interaction_candidate_mode_)
-        {
-            mpc_interaction_candidate_mode_ = desired_mode;
-            mpc_interaction_mode_candidate_count_ = 1;
-        }
-        else
-        {
-            mpc_interaction_mode_candidate_count_ =
-                std::min(mpc_interaction_mode_candidate_count_ + 1,
-                         confirm_frames);
-        }
-
-        if (mpc_interaction_mode_candidate_count_ >= confirm_frames)
-        {
-            const InteractionMode previous_mode = mpc_interaction_mode_;
-            mpc_interaction_mode_ = desired_mode;
-            if (mpc_interaction_mode_ == MODE_PASS_BEHIND &&
-                previous_mode != MODE_PASS_BEHIND)
-            {
-                mpc_interaction_pass_behind_enter_time_ = ros::Time::now();
-            }
-        }
-    }
-
-    void PlannerManager::updateInteractionModeDebug(InteractionDebug& debug)
-    {
-        if (!mpc_interaction_enable_ ||
-            mpc_interaction_scene_ != SCENE_CROSSING ||
-            !debug.candidate_valid)
-        {
-            updateInteractionModeFsm(MODE_CONTINUE);
-            return;
-        }
-
-        debug.risk_front =
-            std::exp(-std::max(0.0, debug.t_robot_to_cross) /
-                     std::max(1e-3, mpc_interaction_time_gap_)) *
-            std::exp(-std::max(0.0, debug.front) /
-                     std::max(1e-3, mpc_interaction_front_max_));
-
-        const Eigen::Vector2d ped_vel_dir(debug.v_front, debug.v_lateral);
-        const double ped_speed = ped_vel_dir.norm();
-        if (ped_speed < 1e-3)
-            return;
-
-        const Eigen::Vector2d e_h = ped_vel_dir / ped_speed;
-        const double target_time = std::max(0.0, debug.signed_t_ped_to_path);
-        const Eigen::Vector2d predicted_ped(debug.front + debug.v_front * target_time,
-                                            debug.lateral + debug.v_lateral * target_time);
-        const Eigen::Vector2d raw_target =
-            predicted_ped - e_h * mpc_interaction_behind_dist_;
-        const Eigen::Vector2d biased_target(raw_target.x() + mpc_interaction_forward_bias_,
-                                            raw_target.y());
-
-        debug.interaction_target = biased_target;
-        debug.target_front = biased_target.x();
-        debug.target_lateral = biased_target.y();
-        debug.target_ped_clearance = (biased_target - predicted_ped).norm();
-
-        debug.target_valid =
-            debug.target_front >= mpc_interaction_target_front_min_ &&
-            debug.target_front <= mpc_interaction_target_front_max_ &&
-            std::abs(debug.target_lateral) <= mpc_interaction_target_lateral_max_ &&
-            debug.target_ped_clearance >= mpc_interaction_target_ped_clearance_;
-
-        debug.behind_feasible = debug.target_valid;
-        debug.r_behind_free = debug.behind_feasible ? 1.0 : 0.0;
-        debug.yield_required =
-            debug.ped_before_path &&
-            debug.r_crossing >= mpc_interaction_risk_low_;
-        const bool ped_cleared_for_pass_behind =
-            debug.ped_at_or_after_path &&
-            std::isfinite(debug.signed_t_ped_to_path) &&
-            debug.signed_t_ped_to_path <=
-                -std::max(0.0, mpc_interaction_pass_behind_clear_time_);
-        debug.pass_behind_ready =
-            ped_cleared_for_pass_behind &&
-            debug.behind_feasible;
-        const bool post_yield_wait_to_centerline =
-            mpc_interaction_mode_ == MODE_YIELD &&
-            debug.ped_before_path &&
-            std::isfinite(debug.signed_t_ped_to_path) &&
-            debug.signed_t_ped_to_path <= mpc_interaction_post_yield_grace_time_;
-        const bool post_yield_wait_for_clearance =
-            mpc_interaction_mode_ == MODE_YIELD &&
-            debug.ped_at_or_after_path &&
-            !ped_cleared_for_pass_behind &&
-            std::isfinite(debug.signed_t_ped_to_path);
-
-        InteractionMode desired_mode = MODE_CONTINUE;
-        const bool allow_pass_behind =
-            mpc_interaction_enable_pass_behind_ &&
-            debug.pass_behind_ready &&
-            (mpc_interaction_mode_ == MODE_YIELD ||
-             mpc_interaction_mode_ == MODE_PASS_BEHIND ||
-             debug.r_crossing >= mpc_interaction_risk_low_);
-        if (allow_pass_behind)
-        {
-            desired_mode = MODE_PASS_BEHIND;
-        }
-        else if (mpc_interaction_enable_yield_ && post_yield_wait_to_centerline)
-        {
-            desired_mode = MODE_YIELD;
-        }
-        else if (mpc_interaction_enable_yield_ && post_yield_wait_for_clearance)
-        {
-            desired_mode = MODE_YIELD;
-        }
-        else if (debug.r_crossing < mpc_interaction_risk_low_)
-        {
-            desired_mode = MODE_CONTINUE;
-        }
-        else if (mpc_interaction_enable_yield_ && debug.yield_required)
-        {
-            desired_mode = MODE_YIELD;
-        }
-        else if (mpc_interaction_enable_yield_)
-        {
-            desired_mode = MODE_YIELD;
-        }
-
-        updateInteractionModeFsm(desired_mode);
     }
 
     void PlannerManager::updateInteractionDebug(const Eigen::Vector3d& current_com,
@@ -493,7 +254,9 @@ namespace cane_planner
         if (!mpc_interaction_enable_)
         {
             mpc_interaction_scene_ = SCENE_NONE;
-            updateInteractionModeFsm(MODE_CONTINUE);
+            mpc_interaction_mode_ = MODE_CONTINUE;
+            mpc_interaction_st_yield_latched_ = false;
+            mpc_interaction_st_latched_obs_idx_ = -1;
             return;
         }
 
@@ -506,13 +269,10 @@ namespace cane_planner
         mpc_interaction_debug_.path_forward = path_forward;
         mpc_interaction_debug_.robot_speed_used = robot_speed;
 
-        double best_score = std::numeric_limits<double>::infinity();
-        InteractionDebug best_debug = mpc_interaction_debug_;
         double best_st_score = std::numeric_limits<double>::infinity();
         InteractionDebug best_st_debug = mpc_interaction_debug_;
         InteractionDebug latched_st_debug = mpc_interaction_debug_;
         bool has_latched_st_debug = false;
-        const ros::Time now = ros::Time::now();
 
         for (size_t oi = 0; oi < obs_pos.size(); ++oi)
         {
@@ -715,46 +475,26 @@ namespace cane_planner
                 best_st_debug = candidate;
             }
 
-            const double score = std::abs(candidate.time_gap) +
-                                 (std::isfinite(candidate.d_cpa) ? 0.1 * candidate.d_cpa : 0.0);
-            if (candidate.candidate_valid && score < best_score)
-            {
-                best_score = score;
-                best_debug = candidate;
-            }
         }
 
-        if (mpc_interaction_use_spatiotemporal_yield_)
-        {
-            const bool has_st_candidate =
-                std::isfinite(best_st_score) &&
-                best_st_debug.obs_idx >= 0;
-            InteractionDebug active_st_debug = mpc_interaction_debug_;
-            bool has_active_st_debug = false;
+        const bool has_st_candidate =
+            std::isfinite(best_st_score) &&
+            best_st_debug.obs_idx >= 0;
+        InteractionDebug active_st_debug = mpc_interaction_debug_;
+        bool has_active_st_debug = false;
 
-            if (has_st_candidate && best_st_debug.st_conflict)
+        if (has_st_candidate && best_st_debug.st_conflict)
+        {
+            mpc_interaction_st_yield_latched_ = true;
+            mpc_interaction_st_latched_obs_idx_ = best_st_debug.obs_idx;
+            active_st_debug = best_st_debug;
+            has_active_st_debug = true;
+        }
+        else if (mpc_interaction_st_yield_latched_)
+        {
+            if (has_latched_st_debug && latched_st_debug.st_path_occupied)
             {
-                mpc_interaction_st_yield_latched_ = true;
-                mpc_interaction_st_latched_obs_idx_ = best_st_debug.obs_idx;
-                active_st_debug = best_st_debug;
-                has_active_st_debug = true;
-            }
-            else if (mpc_interaction_st_yield_latched_)
-            {
-                if (has_latched_st_debug && latched_st_debug.st_path_occupied)
-                {
-                    active_st_debug = latched_st_debug;
-                    has_active_st_debug = true;
-                }
-                else
-                {
-                    mpc_interaction_st_yield_latched_ = false;
-                    mpc_interaction_st_latched_obs_idx_ = -1;
-                }
-            }
-            else if (has_st_candidate)
-            {
-                active_st_debug = best_st_debug;
+                active_st_debug = latched_st_debug;
                 has_active_st_debug = true;
             }
             else
@@ -762,127 +502,42 @@ namespace cane_planner
                 mpc_interaction_st_yield_latched_ = false;
                 mpc_interaction_st_latched_obs_idx_ = -1;
             }
-
-            if (has_active_st_debug)
-            {
-                active_st_debug.st_conflict =
-                    active_st_debug.st_conflict || mpc_interaction_st_yield_latched_;
-                active_st_debug.candidate_valid = active_st_debug.st_conflict;
-                active_st_debug.r_crossing =
-                    active_st_debug.st_conflict ?
-                    std::max(0.0, std::min(1.0,
-                        (active_st_debug.st_safety_radius -
-                         active_st_debug.st_d_conflict) /
-                        std::max(1e-3, active_st_debug.st_safety_radius))) :
-                    0.0;
-                mpc_interaction_debug_ = active_st_debug;
-            }
-
-            const bool st_yield_active =
-                has_active_st_debug &&
-                active_st_debug.st_conflict &&
-                mpc_interaction_enable_yield_;
-            mpc_interaction_scene_ = st_yield_active ? SCENE_CROSSING : SCENE_NONE;
-            mpc_interaction_mode_ = st_yield_active ? MODE_YIELD : MODE_CONTINUE;
-            mpc_interaction_candidate_mode_ = mpc_interaction_mode_;
-            mpc_interaction_mode_candidate_count_ = st_yield_active ? 1 : 0;
-            mpc_interaction_crossing_confirm_count_ = st_yield_active ? 1 : 0;
-            mpc_interaction_crossing_clear_count_ = st_yield_active ? 0 : 1;
-            mpc_interaction_latched_debug_ = InteractionDebug();
-            mpc_interaction_latched_stamp_ = ros::Time(0);
-            mpc_interaction_latched_valid_ = false;
-            mpc_interaction_pass_behind_enter_time_ = ros::Time(0);
-            mpc_interaction_debug_.crossing_confirm_count =
-                mpc_interaction_crossing_confirm_count_;
-            mpc_interaction_debug_.crossing_clear_count =
-                mpc_interaction_crossing_clear_count_;
-            mpc_interaction_debug_.yield_required = st_yield_active;
-            mpc_interaction_debug_.pass_behind_ready = false;
-            return;
         }
-
-        if (best_debug.candidate_valid)
+        else if (has_st_candidate)
         {
-            mpc_interaction_latched_debug_ = best_debug;
-            mpc_interaction_latched_stamp_ = now;
-            mpc_interaction_latched_valid_ = true;
+            active_st_debug = best_st_debug;
+            has_active_st_debug = true;
         }
-        else if (mpc_interaction_scene_ == SCENE_CROSSING &&
-                 mpc_interaction_latched_valid_ &&
-                 !mpc_interaction_latched_stamp_.isZero())
+        else
         {
-            const double dt = (now - mpc_interaction_latched_stamp_).toSec();
-            const bool pass_behind_hold_active =
-                mpc_interaction_mode_ == MODE_PASS_BEHIND &&
-                !mpc_interaction_pass_behind_enter_time_.isZero() &&
-                (now - mpc_interaction_pass_behind_enter_time_).toSec() >= 0.0 &&
-                (now - mpc_interaction_pass_behind_enter_time_).toSec() <=
-                    mpc_interaction_pass_behind_hold_time_;
-            const double allowed_latch_time =
-                mpc_interaction_candidate_latch_time_ +
-                (pass_behind_hold_active ?
-                 std::max(0.0, mpc_interaction_pass_behind_hold_time_) : 0.0);
-            if (dt >= 0.0 && dt <= allowed_latch_time)
-            {
-                best_debug = mpc_interaction_latched_debug_;
-                best_debug.front += best_debug.v_front * dt;
-                best_debug.lateral += best_debug.v_lateral * dt;
-                const double abs_v_lateral = std::abs(best_debug.v_lateral);
-                best_debug.t_ped_to_path =
-                    std::abs(best_debug.lateral) / std::max(1e-3, abs_v_lateral);
-                if (abs_v_lateral > 1e-3)
-                {
-                    best_debug.signed_t_ped_to_path =
-                        -best_debug.lateral / best_debug.v_lateral;
-                    best_debug.ped_before_path = best_debug.signed_t_ped_to_path > 0.0;
-                    best_debug.ped_at_or_after_path = best_debug.signed_t_ped_to_path <= 0.0;
-                }
-                best_debug.t_robot_to_cross =
-                    best_debug.front / std::max(mpc_interaction_min_robot_speed_,
-                                                best_debug.robot_speed_used);
-                const double signed_ped_time =
-                    abs_v_lateral > 1e-3 ? best_debug.signed_t_ped_to_path :
-                    best_debug.t_ped_to_path;
-                best_debug.time_gap = best_debug.t_robot_to_cross - signed_ped_time;
-                best_debug.t_cpa = -1.0;
-                best_debug.d_cpa = -1.0;
-                best_debug.cpa_conflict = false;
-                const Eigen::Vector2d rel(best_debug.front, best_debug.lateral);
-                const Eigen::Vector2d obs_v(best_debug.v_front, best_debug.v_lateral);
-                const Eigen::Vector2d robot_v(best_debug.robot_speed_used, 0.0);
-                const Eigen::Vector2d v_rel = obs_v - robot_v;
-                const double v_rel_sq = v_rel.squaredNorm();
-                if (v_rel_sq > 1e-6)
-                {
-                    best_debug.t_cpa = -rel.dot(v_rel) / v_rel_sq;
-                    const Eigen::Vector2d cpa_rel = rel + v_rel * best_debug.t_cpa;
-                    best_debug.d_cpa = cpa_rel.norm();
-                    best_debug.cpa_conflict =
-                        best_debug.t_cpa > 0.0 &&
-                        best_debug.t_cpa < mpc_interaction_cpa_horizon_ &&
-                        best_debug.d_cpa < mpc_interaction_cpa_dist_;
-                }
-                best_debug.candidate_valid = true;
-            }
-            else
-            {
-                mpc_interaction_latched_debug_ = InteractionDebug();
-                mpc_interaction_latched_stamp_ = ros::Time(0);
-                mpc_interaction_latched_valid_ = false;
-            }
+            mpc_interaction_st_yield_latched_ = false;
+            mpc_interaction_st_latched_obs_idx_ = -1;
         }
 
-        const double r_crossing = computeCrossingRisk(best_debug);
-        updateCrossingSceneFsm(r_crossing, best_debug);
-
-        if (best_debug.candidate_valid)
+        if (has_active_st_debug)
         {
-            mpc_interaction_debug_ = best_debug;
+            active_st_debug.st_conflict =
+                active_st_debug.st_conflict || mpc_interaction_st_yield_latched_;
+            active_st_debug.candidate_valid = active_st_debug.st_conflict;
+            active_st_debug.r_crossing =
+                active_st_debug.st_conflict ?
+                std::max(0.0, std::min(1.0,
+                    (active_st_debug.st_safety_radius -
+                     active_st_debug.st_d_conflict) /
+                    std::max(1e-3, active_st_debug.st_safety_radius))) :
+                0.0;
+            mpc_interaction_debug_ = active_st_debug;
         }
-        mpc_interaction_debug_.r_crossing = r_crossing;
-        mpc_interaction_debug_.crossing_confirm_count = mpc_interaction_crossing_confirm_count_;
-        mpc_interaction_debug_.crossing_clear_count = mpc_interaction_crossing_clear_count_;
-        updateInteractionModeDebug(mpc_interaction_debug_);
+
+        const bool st_yield_active =
+            has_active_st_debug &&
+            active_st_debug.st_conflict &&
+            mpc_interaction_enable_yield_;
+        mpc_interaction_scene_ = st_yield_active ? SCENE_CROSSING : SCENE_NONE;
+        mpc_interaction_mode_ = st_yield_active ? MODE_YIELD : MODE_CONTINUE;
+        mpc_interaction_debug_.crossing_confirm_count = st_yield_active ? 1 : 0;
+        mpc_interaction_debug_.crossing_clear_count = st_yield_active ? 0 : 1;
+        mpc_interaction_debug_.yield_required = st_yield_active;
     }
 
     void PlannerManager::publishInteractionState()
@@ -896,7 +551,7 @@ namespace cane_planner
         mpc_interaction_mode_pub_.publish(mode_msg);
 
         std_msgs::Float64MultiArray debug_msg;
-        debug_msg.data.reserve(44);
+        debug_msg.data.reserve(35);
         debug_msg.data.push_back(mpc_interaction_enable_ ? 1.0 : 0.0);
         debug_msg.data.push_back(static_cast<double>(mpc_interaction_scene_));
         debug_msg.data.push_back(static_cast<double>(mpc_interaction_mode_));
@@ -919,19 +574,10 @@ namespace cane_planner
         debug_msg.data.push_back(static_cast<double>(mpc_interaction_debug_.crossing_confirm_count));
         debug_msg.data.push_back(static_cast<double>(mpc_interaction_debug_.crossing_clear_count));
         debug_msg.data.push_back(mpc_interaction_debug_.risk_front);
-        debug_msg.data.push_back(mpc_interaction_debug_.r_behind_free);
-        debug_msg.data.push_back(mpc_interaction_debug_.behind_feasible ? 1.0 : 0.0);
-        debug_msg.data.push_back(mpc_interaction_debug_.target_valid ? 1.0 : 0.0);
-        debug_msg.data.push_back(mpc_interaction_debug_.target_front);
-        debug_msg.data.push_back(mpc_interaction_debug_.target_lateral);
-        debug_msg.data.push_back(mpc_interaction_debug_.target_ped_clearance);
-        debug_msg.data.push_back(mpc_interaction_debug_.interaction_target.x());
-        debug_msg.data.push_back(mpc_interaction_debug_.interaction_target.y());
         debug_msg.data.push_back(mpc_interaction_debug_.signed_t_ped_to_path);
         debug_msg.data.push_back(mpc_interaction_debug_.ped_before_path ? 1.0 : 0.0);
         debug_msg.data.push_back(mpc_interaction_debug_.ped_at_or_after_path ? 1.0 : 0.0);
         debug_msg.data.push_back(mpc_interaction_debug_.yield_required ? 1.0 : 0.0);
-        debug_msg.data.push_back(mpc_interaction_debug_.pass_behind_ready ? 1.0 : 0.0);
         debug_msg.data.push_back(mpc_interaction_debug_.st_conflict ? 1.0 : 0.0);
         debug_msg.data.push_back(mpc_interaction_debug_.st_t_conflict);
         debug_msg.data.push_back(mpc_interaction_debug_.st_d_conflict);
@@ -1711,14 +1357,9 @@ namespace cane_planner
         mpc_latched_stop_reason_ = "OK";
         mpc_interaction_scene_ = SCENE_NONE;
         mpc_interaction_mode_ = MODE_CONTINUE;
-        mpc_interaction_candidate_mode_ = MODE_CONTINUE;
         mpc_interaction_debug_ = InteractionDebug();
-        mpc_interaction_latched_debug_ = InteractionDebug();
-        mpc_interaction_latched_stamp_ = ros::Time(0);
-        mpc_interaction_latched_valid_ = false;
-        mpc_interaction_crossing_confirm_count_ = 0;
-        mpc_interaction_crossing_clear_count_ = 0;
-        mpc_interaction_mode_candidate_count_ = 0;
+        mpc_interaction_st_yield_latched_ = false;
+        mpc_interaction_st_latched_obs_idx_ = -1;
         last_theta_ = start_state_(2);
         last_com_pos_ = com_init_pos.head(2);
 
@@ -1902,60 +1543,6 @@ namespace cane_planner
         updateInteractionDebug(current_com, obs_pos, obs_vel, obs_size);
         publishInteractionState();
 
-        if (mpc_interaction_enable_ &&
-            mpc_interaction_enable_social_cost_ &&
-            mpc_interaction_scene_ == SCENE_CROSSING &&
-            mpc_interaction_mode_ == MODE_PASS_BEHIND &&
-            mpc_interaction_debug_.candidate_valid &&
-            mpc_interaction_debug_.pass_behind_ready)
-        {
-            MpcController::InteractionContext interaction_ctx;
-            const Eigen::Vector2d robot_pos(current_com(0), current_com(1));
-            const Eigen::Vector2d path_forward =
-                mpc_interaction_debug_.path_forward.norm() > 1e-3 ?
-                mpc_interaction_debug_.path_forward.normalized() :
-                computeInteractionPathForward(current_com);
-            const Eigen::Vector2d path_left(-path_forward.y(), path_forward.x());
-            const double target_time =
-                std::max(0.0, mpc_interaction_debug_.signed_t_ped_to_path);
-            const Eigen::Vector2d ped_path(
-                mpc_interaction_debug_.front,
-                mpc_interaction_debug_.lateral);
-            const Eigen::Vector2d ped_vel_path(
-                mpc_interaction_debug_.v_front,
-                mpc_interaction_debug_.v_lateral);
-            const Eigen::Vector2d crossing_path =
-                ped_path + ped_vel_path * target_time;
-
-            interaction_ctx.enabled = true;
-            interaction_ctx.scene = static_cast<int>(mpc_interaction_scene_);
-            interaction_ctx.mode = static_cast<int>(mpc_interaction_mode_);
-            interaction_ctx.path_forward = path_forward;
-            interaction_ctx.path_left = path_left;
-            interaction_ctx.robot_pos = robot_pos;
-            interaction_ctx.ped_pos =
-                robot_pos +
-                path_forward * mpc_interaction_debug_.front +
-                path_left * mpc_interaction_debug_.lateral;
-            interaction_ctx.ped_vel =
-                path_forward * mpc_interaction_debug_.v_front +
-                path_left * mpc_interaction_debug_.v_lateral;
-            interaction_ctx.crossing_point =
-                robot_pos +
-                path_forward * crossing_path.x() +
-                path_left * crossing_path.y();
-            interaction_ctx.behind_target =
-                robot_pos +
-                path_forward * mpc_interaction_debug_.target_front +
-                path_left * mpc_interaction_debug_.target_lateral;
-            interaction_ctx.target_valid = mpc_interaction_debug_.target_valid;
-            mpc_controller_->setInteractionContext(interaction_ctx);
-        }
-        else
-        {
-            mpc_controller_->clearInteractionContext();
-        }
-
         Eigen::Vector3d control = mpc_controller_->plan(
             lfpc_model_, mpc_sim_goal_, obs_pos, obs_vel, obs_size);
         if (mpc_debug_enable_)
@@ -1982,27 +1569,18 @@ namespace cane_planner
             mpc_interaction_enable_ &&
             mpc_interaction_enable_yield_ &&
             mpc_interaction_mode_ == MODE_YIELD;
-        const bool st_yield_stop_active =
-            mpc_interaction_enable_ &&
-            mpc_interaction_enable_yield_ &&
-            mpc_interaction_use_spatiotemporal_yield_ &&
-            mpc_interaction_debug_.yield_required;
         const bool interaction_yield_stop_active =
             mpc_interaction_enable_ &&
             mpc_interaction_enable_yield_ &&
-            (st_yield_stop_active ||
-             (!mpc_interaction_use_spatiotemporal_yield_ &&
-              mpc_interaction_scene_ == SCENE_CROSSING &&
-              (interaction_yield_active || mpc_interaction_debug_.yield_required)));
+            mpc_interaction_scene_ == SCENE_CROSSING &&
+            (interaction_yield_active || mpc_interaction_debug_.yield_required);
 
         bool raw_stop_advice = false;
         std::string raw_stop_reason = "OK";
         if (mpc_stop_advice_enable_ && interaction_yield_stop_active)
         {
             raw_stop_advice = true;
-            raw_stop_reason = mpc_interaction_use_spatiotemporal_yield_ ?
-                "INTERACTION_YIELD_CONFLICT" :
-                "INTERACTION_YIELD_CROSSING";
+            raw_stop_reason = "INTERACTION_YIELD_CONFLICT";
         }
 
         bool stop_advice = raw_stop_advice;
@@ -2041,9 +1619,6 @@ namespace cane_planner
                 }
 
                 const double stop_release_clear_time =
-                    (mpc_interaction_enable_ &&
-                     mpc_interaction_mode_ == MODE_PASS_BEHIND) ?
-                    0.0 :
                     mpc_interaction_enable_ ?
                     std::max(0.0, mpc_interaction_stop_release_clear_time_) :
                     mpc_stop_release_clear_time_;
