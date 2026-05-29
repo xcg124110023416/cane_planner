@@ -58,6 +58,11 @@
     <arg name="mpc_interaction_enable_pass_behind" default="true"/>
     <arg name="mpc_interaction_enable_yield" default="true"/>
     <arg name="mpc_interaction_enable_social_cost" default="false"/>
+    <arg name="mpc_interaction_use_spatiotemporal_yield" default="true"/>
+    <arg name="mpc_interaction_st_horizon" default="4.0"/>
+    <arg name="mpc_interaction_yield_trigger_time" default="2.5"/>
+    <arg name="mpc_interaction_robot_radius" default="0.25"/>
+    <arg name="mpc_interaction_yield_safety_margin" default="0.20"/>
     <arg name="mpc_interaction_w_front_pass" default="0.0"/>
     <arg name="mpc_interaction_enable_behind_corridor" default="false"/>
     <arg name="mpc_interaction_w_behind_corridor" default="0.0"/>
@@ -299,6 +304,11 @@
         <param name="mpc/interaction_enable_pass_behind" value="$(arg mpc_interaction_enable_pass_behind)" type="bool"/>
         <param name="mpc/interaction_enable_yield" value="$(arg mpc_interaction_enable_yield)" type="bool"/>
         <param name="mpc/interaction_enable_social_cost" value="$(arg mpc_interaction_enable_social_cost)" type="bool"/>
+        <param name="mpc/interaction_use_spatiotemporal_yield" value="$(arg mpc_interaction_use_spatiotemporal_yield)" type="bool"/>
+        <param name="mpc/interaction_st_horizon" value="$(arg mpc_interaction_st_horizon)" type="double"/>
+        <param name="mpc/interaction_yield_trigger_time" value="$(arg mpc_interaction_yield_trigger_time)" type="double"/>
+        <param name="mpc/interaction_robot_radius" value="$(arg mpc_interaction_robot_radius)" type="double"/>
+        <param name="mpc/interaction_yield_safety_margin" value="$(arg mpc_interaction_yield_safety_margin)" type="double"/>
         <param name="mpc/interaction_w_front_pass" value="$(arg mpc_interaction_w_front_pass)" type="double"/>
         <param name="mpc/interaction_enable_behind_corridor" value="$(arg mpc_interaction_enable_behind_corridor)" type="bool"/>
         <param name="mpc/interaction_w_behind_corridor" value="$(arg mpc_interaction_w_behind_corridor)" type="double"/>

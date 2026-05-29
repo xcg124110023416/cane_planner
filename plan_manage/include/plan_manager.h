@@ -112,6 +112,11 @@ namespace cane_planner
         bool mpc_interaction_enable_pass_behind_ = false;
         bool mpc_interaction_enable_yield_ = false;
         bool mpc_interaction_enable_social_cost_ = false;
+        bool mpc_interaction_use_spatiotemporal_yield_ = true;
+        double mpc_interaction_st_horizon_ = 4.0;
+        double mpc_interaction_yield_trigger_time_ = 2.5;
+        double mpc_interaction_robot_radius_ = 0.25;
+        double mpc_interaction_yield_safety_margin_ = 0.20;
         double mpc_interaction_front_min_ = 0.3;
         double mpc_interaction_front_max_ = 4.0;
         double mpc_interaction_corridor_width_ = 0.7;
@@ -181,6 +186,15 @@ namespace cane_planner
             bool target_valid = false;
             bool yield_required = false;
             bool pass_behind_ready = false;
+            bool st_conflict = false;
+            double st_t_conflict = -1.0;
+            double st_d_conflict = -1.0;
+            double st_safety_radius = 0.0;
+            double st_robot_s = 0.0;
+            double st_ped_s = 0.0;
+            bool st_path_occupied = false;
+            double st_path_t_enter = -1.0;
+            double st_path_t_exit = -1.0;
             double target_front = 0.0;
             double target_lateral = 0.0;
             double target_ped_clearance = -1.0;
@@ -196,6 +210,8 @@ namespace cane_planner
         ros::Time mpc_interaction_latched_stamp_;
         bool mpc_interaction_latched_valid_ = false;
         ros::Time mpc_interaction_pass_behind_enter_time_;
+        bool mpc_interaction_st_yield_latched_ = false;
+        int mpc_interaction_st_latched_obs_idx_ = -1;
         int mpc_interaction_crossing_confirm_count_ = 0;
         int mpc_interaction_crossing_clear_count_ = 0;
         int mpc_interaction_mode_candidate_count_ = 0;
@@ -271,7 +287,8 @@ namespace cane_planner
         void updateInteractionModeDebug(InteractionDebug& debug);
         void updateInteractionDebug(const Eigen::Vector3d& current_com,
                                     const std::vector<Eigen::Vector3d>& obs_pos,
-                                    const std::vector<Eigen::Vector3d>& obs_vel);
+                                    const std::vector<Eigen::Vector3d>& obs_vel,
+                                    const std::vector<Eigen::Vector3d>& obs_size);
         void publishInteractionState();
         const char* interactionSceneName(InteractionScene scene) const;
         const char* interactionModeName(InteractionMode mode) const;

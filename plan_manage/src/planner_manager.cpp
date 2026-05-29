@@ -47,6 +47,11 @@ namespace cane_planner
         nh.param("mpc/interaction_enable_pass_behind", mpc_interaction_enable_pass_behind_, false);
         nh.param("mpc/interaction_enable_yield", mpc_interaction_enable_yield_, false);
         nh.param("mpc/interaction_enable_social_cost", mpc_interaction_enable_social_cost_, false);
+        nh.param("mpc/interaction_use_spatiotemporal_yield", mpc_interaction_use_spatiotemporal_yield_, true);
+        nh.param("mpc/interaction_st_horizon", mpc_interaction_st_horizon_, 4.0);
+        nh.param("mpc/interaction_yield_trigger_time", mpc_interaction_yield_trigger_time_, 2.5);
+        nh.param("mpc/interaction_robot_radius", mpc_interaction_robot_radius_, 0.25);
+        nh.param("mpc/interaction_yield_safety_margin", mpc_interaction_yield_safety_margin_, 0.20);
         nh.param("mpc/interaction_front_min", mpc_interaction_front_min_, 0.3);
         nh.param("mpc/interaction_front_max", mpc_interaction_front_max_, 4.0);
         nh.param("mpc/interaction_corridor_width", mpc_interaction_corridor_width_, 0.7);
@@ -480,7 +485,8 @@ namespace cane_planner
 
     void PlannerManager::updateInteractionDebug(const Eigen::Vector3d& current_com,
                                                 const std::vector<Eigen::Vector3d>& obs_pos,
-                                                const std::vector<Eigen::Vector3d>& obs_vel)
+                                                const std::vector<Eigen::Vector3d>& obs_vel,
+                                                const std::vector<Eigen::Vector3d>& obs_size)
     {
         mpc_interaction_debug_ = InteractionDebug();
 
@@ -502,6 +508,10 @@ namespace cane_planner
 
         double best_score = std::numeric_limits<double>::infinity();
         InteractionDebug best_debug = mpc_interaction_debug_;
+        double best_st_score = std::numeric_limits<double>::infinity();
+        InteractionDebug best_st_debug = mpc_interaction_debug_;
+        InteractionDebug latched_st_debug = mpc_interaction_debug_;
+        bool has_latched_st_debug = false;
         const ros::Time now = ros::Time::now();
 
         for (size_t oi = 0; oi < obs_pos.size(); ++oi)
@@ -549,6 +559,111 @@ namespace cane_planner
                     candidate.d_cpa < mpc_interaction_cpa_dist_;
             }
 
+            const double ped_radius =
+                oi < obs_size.size() ?
+                0.5 * std::max(std::abs(obs_size[oi](0)),
+                                std::abs(obs_size[oi](1))) :
+                0.25;
+            candidate.st_safety_radius =
+                std::max(0.0, mpc_interaction_robot_radius_) +
+                std::max(0.0, ped_radius) +
+                std::max(0.0, mpc_interaction_yield_safety_margin_);
+            const double st_horizon =
+                std::max(0.0, mpc_interaction_st_horizon_);
+            const Eigen::Vector2d rel_path(candidate.front, candidate.lateral);
+            const Eigen::Vector2d st_rel_vel(candidate.v_front - robot_speed,
+                                             candidate.v_lateral);
+            const double st_rel_vel_sq = st_rel_vel.squaredNorm();
+            double st_t = 0.0;
+            if (st_rel_vel_sq > 1e-6)
+            {
+                st_t = -rel_path.dot(st_rel_vel) / st_rel_vel_sq;
+                st_t = std::max(0.0, std::min(st_horizon, st_t));
+            }
+            const double ped_front_at_t = candidate.front + candidate.v_front * st_t;
+            const double ped_lateral_at_t = candidate.lateral + candidate.v_lateral * st_t;
+            const double robot_front_at_t = robot_speed * st_t;
+            const double st_dx = ped_front_at_t - robot_front_at_t;
+            candidate.st_t_conflict = st_t;
+            candidate.st_d_conflict = std::sqrt(st_dx * st_dx +
+                                                ped_lateral_at_t * ped_lateral_at_t);
+            candidate.st_robot_s = robot_front_at_t;
+            candidate.st_ped_s = ped_front_at_t;
+            const bool st_in_horizon = st_horizon > 1e-3;
+            bool st_path_interval_valid = false;
+            double st_path_t_enter = -1.0;
+            double st_path_t_exit = -1.0;
+            if (st_in_horizon)
+            {
+                const double tube_radius = candidate.st_safety_radius;
+                if (std::abs(candidate.v_lateral) < 1e-6)
+                {
+                    if (std::abs(candidate.lateral) <= tube_radius)
+                    {
+                        st_path_t_enter = 0.0;
+                        st_path_t_exit = st_horizon;
+                        st_path_interval_valid = true;
+                    }
+                }
+                else
+                {
+                    double t1 = (-tube_radius - candidate.lateral) /
+                                candidate.v_lateral;
+                    double t2 = (tube_radius - candidate.lateral) /
+                                candidate.v_lateral;
+                    if (t1 > t2)
+                        std::swap(t1, t2);
+                    st_path_t_enter = std::max(0.0, t1);
+                    st_path_t_exit = std::min(st_horizon, t2);
+                    st_path_interval_valid = st_path_t_enter <= st_path_t_exit;
+                }
+
+                if (st_path_interval_valid)
+                {
+                    const double front_enter =
+                        candidate.front + candidate.v_front * st_path_t_enter;
+                    const double front_exit =
+                        candidate.front + candidate.v_front * st_path_t_exit;
+                    const double min_front =
+                        std::min(front_enter, front_exit);
+                    const double max_front =
+                        std::max(front_enter, front_exit);
+                    const double path_span =
+                        robot_speed * st_horizon + tube_radius;
+                    const bool path_span_relevant =
+                        max_front >= -tube_radius &&
+                        min_front <= path_span;
+                    if (!path_span_relevant)
+                        st_path_interval_valid = false;
+                }
+            }
+            candidate.st_path_occupied =
+                st_path_interval_valid &&
+                obs_v.norm() >= mpc_interaction_cross_speed_;
+            candidate.st_path_t_enter =
+                candidate.st_path_occupied ? st_path_t_enter : -1.0;
+            candidate.st_path_t_exit =
+                candidate.st_path_occupied ? st_path_t_exit : -1.0;
+            const bool st_robot_on_path =
+                robot_front_at_t >= -candidate.st_safety_radius &&
+                robot_front_at_t <= robot_speed * st_horizon + candidate.st_safety_radius;
+            const bool st_ped_near_path_span =
+                ped_front_at_t >= -candidate.st_safety_radius &&
+                ped_front_at_t <= robot_speed * st_horizon + candidate.st_safety_radius;
+            const bool st_moving_ped =
+                obs_v.norm() >= mpc_interaction_cross_speed_;
+            const bool st_trigger_time_relevant =
+                candidate.st_t_conflict <=
+                std::max(0.0, mpc_interaction_yield_trigger_time_);
+            const bool raw_st_conflict =
+                st_in_horizon &&
+                st_robot_on_path &&
+                st_ped_near_path_span &&
+                st_moving_ped &&
+                candidate.st_path_occupied &&
+                st_trigger_time_relevant &&
+                candidate.st_d_conflict <= candidate.st_safety_radius;
+
             const bool in_front_range =
                 candidate.front >= mpc_interaction_front_min_ &&
                 candidate.front <= mpc_interaction_front_max_;
@@ -573,6 +688,33 @@ namespace cane_planner
                 in_front_range && lateral_relevant && will_cross_path &&
                 has_crossing_speed && moving_toward_path && timing_relevant;
 
+            const bool crossing_type_candidate =
+                has_crossing_speed &&
+                moving_toward_path;
+            const bool st_yield_entry_candidate =
+                crossing_type_candidate &&
+                candidate.ped_before_path &&
+                candidate.st_path_occupied;
+            candidate.st_conflict =
+                raw_st_conflict && st_yield_entry_candidate;
+            candidate.yield_required = candidate.st_conflict;
+
+            if (mpc_interaction_st_yield_latched_ &&
+                candidate.obs_idx == mpc_interaction_st_latched_obs_idx_)
+            {
+                has_latched_st_debug = true;
+                latched_st_debug = candidate;
+            }
+
+            const double st_score =
+                candidate.st_d_conflict +
+                0.05 * candidate.st_t_conflict;
+            if (st_yield_entry_candidate && st_score < best_st_score)
+            {
+                best_st_score = st_score;
+                best_st_debug = candidate;
+            }
+
             const double score = std::abs(candidate.time_gap) +
                                  (std::isfinite(candidate.d_cpa) ? 0.1 * candidate.d_cpa : 0.0);
             if (candidate.candidate_valid && score < best_score)
@@ -580,6 +722,83 @@ namespace cane_planner
                 best_score = score;
                 best_debug = candidate;
             }
+        }
+
+        if (mpc_interaction_use_spatiotemporal_yield_)
+        {
+            const bool has_st_candidate =
+                std::isfinite(best_st_score) &&
+                best_st_debug.obs_idx >= 0;
+            InteractionDebug active_st_debug = mpc_interaction_debug_;
+            bool has_active_st_debug = false;
+
+            if (has_st_candidate && best_st_debug.st_conflict)
+            {
+                mpc_interaction_st_yield_latched_ = true;
+                mpc_interaction_st_latched_obs_idx_ = best_st_debug.obs_idx;
+                active_st_debug = best_st_debug;
+                has_active_st_debug = true;
+            }
+            else if (mpc_interaction_st_yield_latched_)
+            {
+                if (has_latched_st_debug && latched_st_debug.st_path_occupied)
+                {
+                    active_st_debug = latched_st_debug;
+                    has_active_st_debug = true;
+                }
+                else
+                {
+                    mpc_interaction_st_yield_latched_ = false;
+                    mpc_interaction_st_latched_obs_idx_ = -1;
+                }
+            }
+            else if (has_st_candidate)
+            {
+                active_st_debug = best_st_debug;
+                has_active_st_debug = true;
+            }
+            else
+            {
+                mpc_interaction_st_yield_latched_ = false;
+                mpc_interaction_st_latched_obs_idx_ = -1;
+            }
+
+            if (has_active_st_debug)
+            {
+                active_st_debug.st_conflict =
+                    active_st_debug.st_conflict || mpc_interaction_st_yield_latched_;
+                active_st_debug.candidate_valid = active_st_debug.st_conflict;
+                active_st_debug.r_crossing =
+                    active_st_debug.st_conflict ?
+                    std::max(0.0, std::min(1.0,
+                        (active_st_debug.st_safety_radius -
+                         active_st_debug.st_d_conflict) /
+                        std::max(1e-3, active_st_debug.st_safety_radius))) :
+                    0.0;
+                mpc_interaction_debug_ = active_st_debug;
+            }
+
+            const bool st_yield_active =
+                has_active_st_debug &&
+                active_st_debug.st_conflict &&
+                mpc_interaction_enable_yield_;
+            mpc_interaction_scene_ = st_yield_active ? SCENE_CROSSING : SCENE_NONE;
+            mpc_interaction_mode_ = st_yield_active ? MODE_YIELD : MODE_CONTINUE;
+            mpc_interaction_candidate_mode_ = mpc_interaction_mode_;
+            mpc_interaction_mode_candidate_count_ = st_yield_active ? 1 : 0;
+            mpc_interaction_crossing_confirm_count_ = st_yield_active ? 1 : 0;
+            mpc_interaction_crossing_clear_count_ = st_yield_active ? 0 : 1;
+            mpc_interaction_latched_debug_ = InteractionDebug();
+            mpc_interaction_latched_stamp_ = ros::Time(0);
+            mpc_interaction_latched_valid_ = false;
+            mpc_interaction_pass_behind_enter_time_ = ros::Time(0);
+            mpc_interaction_debug_.crossing_confirm_count =
+                mpc_interaction_crossing_confirm_count_;
+            mpc_interaction_debug_.crossing_clear_count =
+                mpc_interaction_crossing_clear_count_;
+            mpc_interaction_debug_.yield_required = st_yield_active;
+            mpc_interaction_debug_.pass_behind_ready = false;
+            return;
         }
 
         if (best_debug.candidate_valid)
@@ -677,7 +896,7 @@ namespace cane_planner
         mpc_interaction_mode_pub_.publish(mode_msg);
 
         std_msgs::Float64MultiArray debug_msg;
-        debug_msg.data.reserve(35);
+        debug_msg.data.reserve(44);
         debug_msg.data.push_back(mpc_interaction_enable_ ? 1.0 : 0.0);
         debug_msg.data.push_back(static_cast<double>(mpc_interaction_scene_));
         debug_msg.data.push_back(static_cast<double>(mpc_interaction_mode_));
@@ -713,6 +932,15 @@ namespace cane_planner
         debug_msg.data.push_back(mpc_interaction_debug_.ped_at_or_after_path ? 1.0 : 0.0);
         debug_msg.data.push_back(mpc_interaction_debug_.yield_required ? 1.0 : 0.0);
         debug_msg.data.push_back(mpc_interaction_debug_.pass_behind_ready ? 1.0 : 0.0);
+        debug_msg.data.push_back(mpc_interaction_debug_.st_conflict ? 1.0 : 0.0);
+        debug_msg.data.push_back(mpc_interaction_debug_.st_t_conflict);
+        debug_msg.data.push_back(mpc_interaction_debug_.st_d_conflict);
+        debug_msg.data.push_back(mpc_interaction_debug_.st_safety_radius);
+        debug_msg.data.push_back(mpc_interaction_debug_.st_robot_s);
+        debug_msg.data.push_back(mpc_interaction_debug_.st_ped_s);
+        debug_msg.data.push_back(mpc_interaction_debug_.st_path_occupied ? 1.0 : 0.0);
+        debug_msg.data.push_back(mpc_interaction_debug_.st_path_t_enter);
+        debug_msg.data.push_back(mpc_interaction_debug_.st_path_t_exit);
         mpc_interaction_debug_pub_.publish(debug_msg);
     }
 
@@ -1671,7 +1899,7 @@ namespace cane_planner
         }
 
         // MPC规划一步
-        updateInteractionDebug(current_com, obs_pos, obs_vel);
+        updateInteractionDebug(current_com, obs_pos, obs_vel, obs_size);
         publishInteractionState();
 
         if (mpc_interaction_enable_ &&
@@ -1754,18 +1982,27 @@ namespace cane_planner
             mpc_interaction_enable_ &&
             mpc_interaction_enable_yield_ &&
             mpc_interaction_mode_ == MODE_YIELD;
+        const bool st_yield_stop_active =
+            mpc_interaction_enable_ &&
+            mpc_interaction_enable_yield_ &&
+            mpc_interaction_use_spatiotemporal_yield_ &&
+            mpc_interaction_debug_.yield_required;
         const bool interaction_yield_stop_active =
             mpc_interaction_enable_ &&
             mpc_interaction_enable_yield_ &&
-            mpc_interaction_scene_ == SCENE_CROSSING &&
-            (interaction_yield_active || mpc_interaction_debug_.yield_required);
+            (st_yield_stop_active ||
+             (!mpc_interaction_use_spatiotemporal_yield_ &&
+              mpc_interaction_scene_ == SCENE_CROSSING &&
+              (interaction_yield_active || mpc_interaction_debug_.yield_required)));
 
         bool raw_stop_advice = false;
         std::string raw_stop_reason = "OK";
         if (mpc_stop_advice_enable_ && interaction_yield_stop_active)
         {
             raw_stop_advice = true;
-            raw_stop_reason = "INTERACTION_YIELD_CROSSING";
+            raw_stop_reason = mpc_interaction_use_spatiotemporal_yield_ ?
+                "INTERACTION_YIELD_CONFLICT" :
+                "INTERACTION_YIELD_CROSSING";
         }
 
         bool stop_advice = raw_stop_advice;

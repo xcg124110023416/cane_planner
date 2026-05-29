@@ -210,6 +210,13 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
     int_target_front = RunningStats()
     int_target_lateral = RunningStats()
     int_target_ped_clearance = RunningStats()
+    int_st_t_conflict = RunningStats()
+    int_st_d_conflict = RunningStats()
+    int_st_safety_radius = RunningStats()
+    int_st_robot_s = RunningStats()
+    int_st_ped_s = RunningStats()
+    int_st_path_t_enter = RunningStats()
+    int_st_path_t_exit = RunningStats()
     int_target_valid_count = 0
     int_behind_feasible_count = 0
     int_cpa_conflict_count = 0
@@ -217,6 +224,8 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
     int_ped_at_or_after_count = 0
     int_yield_required_count = 0
     int_pass_behind_ready_count = 0
+    int_st_conflict_count = 0
+    int_st_path_occupied_count = 0
 
     first_time = None
     last_time = None
@@ -486,6 +495,24 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
                     int_yield_required_count += 1
                 if len(data) > 34 and data[34] > 0.5:
                     int_pass_behind_ready_count += 1
+                if len(data) > 35 and data[35] > 0.5:
+                    int_st_conflict_count += 1
+                if len(data) > 36:
+                    int_st_t_conflict.add(data[36])
+                if len(data) > 37:
+                    int_st_d_conflict.add(data[37])
+                if len(data) > 38:
+                    int_st_safety_radius.add(data[38])
+                if len(data) > 39:
+                    int_st_robot_s.add(data[39])
+                if len(data) > 40:
+                    int_st_ped_s.add(data[40])
+                if len(data) > 41 and data[41] > 0.5:
+                    int_st_path_occupied_count += 1
+                if len(data) > 42:
+                    int_st_path_t_enter.add(data[42])
+                if len(data) > 43:
+                    int_st_path_t_exit.add(data[43])
 
             if topic in (STOP_REASON_TOPIC, STOP_ADVICE_TOPIC):
                 should_stop = current_advice or current_reason != "OK"
@@ -700,6 +727,15 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
     lines.append("  ped_at_or_after_path_count: {} / {}".format(int_ped_at_or_after_count, interaction_debug_count))
     lines.append("  yield_required_count: {} / {}".format(int_yield_required_count, interaction_debug_count))
     lines.append("  pass_behind_ready_count: {} / {}".format(int_pass_behind_ready_count, interaction_debug_count))
+    lines.append("  st_conflict_count: {} / {}".format(int_st_conflict_count, interaction_debug_count))
+    lines.append("  " + int_st_t_conflict.line("st_t_conflict", "s"))
+    lines.append("  " + int_st_d_conflict.line("st_d_conflict", "m"))
+    lines.append("  " + int_st_safety_radius.line("st_safety_radius", "m"))
+    lines.append("  " + int_st_robot_s.line("st_robot_s", "m"))
+    lines.append("  " + int_st_ped_s.line("st_ped_s", "m"))
+    lines.append("  st_path_occupied_count: {} / {}".format(int_st_path_occupied_count, interaction_debug_count))
+    lines.append("  " + int_st_path_t_enter.line("st_path_t_enter", "s"))
+    lines.append("  " + int_st_path_t_exit.line("st_path_t_exit", "s"))
     lines.append("")
     lines.append("interaction_target:")
     lines.append("  " + int_target_front.line("target_front", "m"))

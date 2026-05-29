@@ -1,4 +1,4 @@
-# Stage 2 Implementation Plan: Scene-conditioned Social-cost DRF-MPPI
+# Stage 2 Implementation Plan: Spatiotemporal Yield Supervisor over DRF-MPPI
 
 > **For agentic workers:** Implement task-by-task with review checkpoints. Do not commit automatically; this project prefers manual commit decisions after validation.
 
@@ -7,10 +7,10 @@
 Build the E group:
 
 ```text
-E = DRF-MPPI + lightweight interaction decision layer + scene/mode-conditioned social cost
+E = DRF-MPPI + spatiotemporal conflict yield supervisor
 ```
 
-The interaction layer must not directly command the cane to turn or stop. It should identify the interaction scene, select and maintain an interaction mode, then modulate MPPI inputs through scene/mode-conditioned social-cost parameters, optional local target bias, and optional yield prompt.
+The interaction layer should not steer the cane or redirect the MPC goal. It predicts whether the robot's nominal future path occupancy and the pedestrian's future occupancy overlap in time; if they do, it publishes `/mpc/stop_advice=true` so the guide cane yields before DRF-MPPI chooses a rushing or side-passing trajectory.
 
 Current minimal mode set:
 
@@ -28,6 +28,8 @@ Current implementation and experiments focus on `crossing`; `static` and `oncomi
 
 Do not add `PASS_AHEAD` or `PASS_SIDE` in the current Stage 2 implementation.
 
+Current mainline note: the scene/mode FSM and PASS_BEHIND context are retained for compatibility and debugging, but the default Stage 2 stop decision is now the spatiotemporal conflict supervisor. PASS_BEHIND social cost remains experimental and disabled by default.
+
 ## Current Progress Checklist
 
 Snapshot date: 2026-05-28.
@@ -41,6 +43,7 @@ Completed and build-verified:
 - [x] Gap 4 foundation: added `InteractionContext` and PASS_BEHIND-only social-cost hook without goal redirect.
 - [x] Gap 4d: `crossing -> none` exits naturally while still allowing `ped_at_or_after_path` to be observed.
 - [x] Gap 4e: `PASS_BEHIND` releases interaction stop and is held briefly enough for MPPI to receive the mode.
+- [x] Stage 2 refocus: added a spatiotemporal conflict yield supervisor that compares robot nominal path occupancy with pedestrian predicted occupancy and publishes `INTERACTION_YIELD_CONFLICT`.
 
 Gap 4 findings:
 

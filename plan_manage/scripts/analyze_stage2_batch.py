@@ -111,6 +111,8 @@ def analyze_bag(bag_path, odom_topic, robot_radius):
     signed_t_values = []
     yield_required_count = 0
     pass_ready_count = 0
+    st_conflict_count = 0
+    st_path_occupied_count = 0
     debug_count = 0
 
     with rosbag.Bag(bag_path, "r") as bag:
@@ -185,6 +187,10 @@ def analyze_bag(bag_path, odom_topic, robot_radius):
                     yield_required_count += 1
                 if len(data) > 34 and data[34] > 0.5:
                     pass_ready_count += 1
+                if len(data) > 35 and data[35] > 0.5:
+                    st_conflict_count += 1
+                if len(data) > 41 and data[41] > 0.5:
+                    st_path_occupied_count += 1
 
             elif topic == STOP_ADVICE_TOPIC:
                 current_stop_advice = bool(msg.data)
@@ -272,6 +278,8 @@ def analyze_bag(bag_path, odom_topic, robot_radius):
         "signed_t_max_s": signed_max,
         "yield_required_count": yield_required_count,
         "pass_ready_count": pass_ready_count,
+        "st_conflict_count": st_conflict_count,
+        "st_path_occupied_count": st_path_occupied_count,
         "interaction_debug_count": debug_count,
         "stop_reasons": ";".join("{}={}".format(k, v) for k, v in sorted(stop_reason_counts.items())) or "none",
     }

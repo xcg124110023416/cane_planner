@@ -52,16 +52,16 @@ cd /home/xcg/ws && source /opt/ros/noetic/setup.bash && source devel/setup.bash 
 cd /home/xcg/ws && source /opt/ros/noetic/setup.bash && source devel/setup.bash && mkdir -p /home/xcg/ws/records/stage2_retest_E0b && rosbag record --duration=45 -O /home/xcg/ws/records/stage2_retest_E0b/E0b_run01.bag /clock /sim_odom /simulation_generator/odom /onboard_detector/dynamic_obstacles_info /mpc/interaction_scene /mpc/interaction_mode /mpc/interaction_debug /mpc/debug_metrics /mpc/stop_advice /mpc/stop_reason /mpc/path /mpc/best_traj /mpc/current_waypoint /mpc/waypoints /cmd_vel_footprint
 ```
 
-## E1: YIELD-first Stage 2
+## E1: Spatiotemporal Yield Stage 2
 
-含义：当前 Stage 2 主线。启用 crossing interaction，行人未过路径中心线且存在抢行风险时先 YIELD；行人清除后通常回到 CONTINUE。当前默认不启用 PASS_BEHIND social cost，避免重新引入大绕后问题。
+含义：当前 Stage 2 主线。启用时空冲突让行监督层，用机器人未来路径占用和行人预测占用的时间重叠决定是否 YIELD；冲突解除后通常回到 CONTINUE。当前默认不启用 PASS_BEHIND social cost，避免重新引入大绕后问题。
 
 这组保留 interaction stop advice/enforce，因为 YIELD 的输出就是 `/mpc/stop_advice=true`。但仍关闭 CPA，避免把 Stage 2 效果和额外时间冲突代价混在一起。
 
 启动仿真：
 
 ```bash
-cd /home/xcg/ws && source /opt/ros/noetic/setup.bash && source devel/setup.bash && roslaunch plan_manage sim_kin_replan.launch planner:=3 use_pedestrians:=true pedestrian_scenario:=crossing mpc_w_risk:=2.0 mpc_risk_sigma_y:=0.38 mpc_enable_cpa:=false mpc_enable_stop_advice:=true mpc_enable_stop_enforce:=true mpc_enable_interaction:=true mpc_interaction_enable_yield:=true mpc_interaction_enable_pass_behind:=true mpc_interaction_enable_social_cost:=false mpc_interaction_enable_behind_corridor:=false mpc_interaction_w_front_pass:=0.0 mpc_interaction_w_behind_corridor:=0.0
+cd /home/xcg/ws && source /opt/ros/noetic/setup.bash && source devel/setup.bash && roslaunch plan_manage sim_kin_replan.launch planner:=3 use_pedestrians:=true pedestrian_scenario:=crossing mpc_w_risk:=2.0 mpc_risk_sigma_y:=0.38 mpc_enable_cpa:=false mpc_enable_stop_advice:=true mpc_enable_stop_enforce:=true mpc_enable_interaction:=true mpc_interaction_enable_yield:=true mpc_interaction_use_spatiotemporal_yield:=true mpc_interaction_st_horizon:=4.0 mpc_interaction_yield_trigger_time:=2.5 mpc_interaction_robot_radius:=0.25 mpc_interaction_yield_safety_margin:=0.20 mpc_interaction_enable_pass_behind:=true mpc_interaction_enable_social_cost:=false mpc_interaction_enable_behind_corridor:=false mpc_interaction_w_front_pass:=0.0 mpc_interaction_w_behind_corridor:=0.0
 ```
 
 录包：
@@ -107,5 +107,5 @@ cd /home/xcg/ws && source /opt/ros/noetic/setup.bash && source devel/setup.bash 
 ## Expected Differences
 
 - `C`: DRF-only。通常不会发布 Stage 2 interaction mode transition，可能出现较大绕行。
-- `E0b`: 发布 interaction scene/debug，但不应该触发 `INTERACTION_YIELD_CROSSING` stop。
-- `E1`: 期望出现 `CONTINUE -> YIELD -> CONTINUE`，`stop_reason` 为 `INTERACTION_YIELD_CROSSING`，当前主线不依赖 PASS_BEHIND social cost。
+- `E0b`: 发布 interaction scene/debug，但不应该触发 interaction stop。
+- `E1`: 期望出现 `CONTINUE -> YIELD -> CONTINUE`，`stop_reason` 为 `INTERACTION_YIELD_CONFLICT`，当前主线不依赖 PASS_BEHIND social cost。
