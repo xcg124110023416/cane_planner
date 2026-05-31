@@ -5,13 +5,15 @@ set(CMAKE_BUILD_TYPE "Release")
 set(CMAKE_CXX_FLAGS "-std=c++14")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
 
+# 1. 查找依赖
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 find_package(OpenCV REQUIRED)
 
+# 修复了这里的不可见字符，确保每一行都是标准干净的文本
 find_package(catkin REQUIRED COMPONENTS
-	roscpp
-	std_msgs
+  roscpp
+  std_msgs
   sensor_msgs
   tf
   onboard_detector
@@ -23,15 +25,17 @@ find_package(catkin REQUIRED COMPONENTS
   bspline_opt
 )
 
-catkin_package(
- INCLUDE_DIRS include
- LIBRARIES plan_manage
- CATIKIN_DEPENDS plan_env path_searching bspline bspline_opt
-#  CATKIN_DEPENDS other_catkin_pkg
-#  DEPENDS system_lib
+# 2. 传递 PCL 的编译器宏定义（可选，防患未然）
+add_definitions(${PCL_DEFINITIONS})
 
+# 3. Catkin 包配置
+# 移除了不存在的 LIBRARIES 导出，修复了 CATIKIN_DEPENDS 拼写错误
+catkin_package(
+  INCLUDE_DIRS include
+  CATKIN_DEPENDS roscpp std_msgs sensor_msgs tf onboard_detector geometry_msgs gazebo_msgs plan_env path_searching bspline bspline_opt
 )
 
+# 4. 环境变量钩子
 catkin_add_env_hooks(99.disable_ros1_eol_warnings
   SHELLS bash
   DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/env-hooks)
@@ -40,37 +44,46 @@ catkin_add_env_hooks(99.disable_ros1_eol_warnings
 ## Build ##
 ###########
 
-## Specify additional locations of header files
-## Your package locations should be listed before other locations
+# 头文件路径包含
 include_directories(
   include
-  SYSTEM
   ${catkin_INCLUDE_DIRS}
-  ${CATKIN_DEVEL_PREFIX}/include  # 确保包含生成的消息头文件
-  ${PROJECT_SOURCE_DIR}/include
   ${EIGEN3_INCLUDE_DIR}
   ${PCL_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
 )
 
-# replan FSM
+# 定义可执行文件
 add_executable(kin_replan_node
-		src/kin_replan_node.cpp
-    src/planner_manager.cpp
+  src/kin_replan_node.cpp
+  src/planner_manager.cpp
 )
-add_dependencies(kin_replan_node ${catkin_EXPORTED_TARGETS} onboard_detector_generate_messages_cpp)
+
+# 依赖确保（消息生成顺序）
+add_dependencies(kin_replan_node 
+  ${catkin_EXPORTED_TARGETS} 
+)
+
+# 目标链接库
+# 补全了 OpenCV 和 Eigen3 的库链接，防止链接期报错
 target_link_libraries(kin_replan_node
   ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}
-  )
+  ${OpenCV_LIBRARIES}
+  Eigen3::Eigen
+)
 
-# sim: removed — use kin_replan_node for both simulation and real
+#############
+## Install ##
+#############
 
-# Python scripts
-install(DIRECTORY launch urdf worlds scripts
+# 安装 资源/配置 文件夹
+install(DIRECTORY launch urdf worlds scripts config maps models plugins
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
-  PATTERN "*.py" EXCLUDE)
+  PATTERN "*.py" EXCLUDE
+)
 
+# 安装 Python 脚本并赋予执行权限
 catkin_install_python(PROGRAMS
   scripts/pedestrian_sim.py
   scripts/cmd_vel_to_state.py
