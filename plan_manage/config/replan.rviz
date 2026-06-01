@@ -29,7 +29,7 @@ Panels:
     SyncMode: 0
     SyncSource: local_inflated_obstacles
 Preferences:
-  PromptSaveOnExit: true
+  PromptSaveOnExit: false
 Toolbars:
   toolButtonStyle: 2
 Visualization Manager:
@@ -327,8 +327,8 @@ Visualization Manager:
           Position Transformer: XYZ
           Queue Size: 10
           Selectable: true
-          Size (Pixels): 1
-          Size (m): 0.029999999329447746
+          Size (Pixels): 2
+          Size (m): 0.05999999865889549
           Style: Flat Squares
           Topic: /corrected_current_pcd
           Unreliable: false
@@ -411,6 +411,40 @@ Visualization Manager:
         Expand Link Details: false
         Expand Tree: false
         Link Tree Style: Links in Alphabetic Order
+        base_footprint:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        cane_pole:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        handle:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        imu_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        steering_wheel:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        velodyne:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
       Name: RobotModel
       Robot Description: robot_description
       TF Prefix: ""
@@ -424,30 +458,53 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: false
+        base_footprint:
+          Value: true
         base_link:
           Value: true
         body:
           Value: true
-        cane_base:
+        camera_init:
           Value: true
-        map:
+        cane_pole:
+          Value: true
+        handle:
+          Value: true
+        imu_link:
+          Value: true
+        odom:
+          Value: true
+        robot:
+          Value: true
+        steering_wheel:
+          Value: true
+        velodyne:
           Value: true
         world:
           Value: true
       Marker Alpha: 1
-      Marker Scale: 5
+      Marker Scale: 0.6000000238418579
       Name: TF
-      Show Arrows: true
-      Show Axes: true
-      Show Names: true
+      Show Arrows: false
+      Show Axes: false
+      Show Names: false
       Tree:
-        base_link:
-          {}
-        map:
-          body:
-            {}
         world:
-          cane_base:
+          camera_init:
+            body:
+              {}
+          odom:
+            base_footprint:
+              base_link:
+                cane_pole:
+                  handle:
+                    velodyne:
+                      {}
+                imu_link:
+                  {}
+                steering_wheel:
+                  {}
+          robot:
             {}
       Update Interval: 0
       Value: true
@@ -456,7 +513,7 @@ Visualization Manager:
       Marker Topic: /onboard_detector/dynamic_bboxes
       Name: Gazebo_dynamic_clear_bboxes
       Namespaces:
-        {}
+        gazebo_pedestrian_truth_dynamic_bboxes: true
       Queue Size: 100
       Value: true
     - Class: rviz/MarkerArray
@@ -464,7 +521,7 @@ Visualization Manager:
       Marker Topic: /mpc/dynamic_obstacle_bodies
       Name: MPC_dynamic_obstacle_bodies
       Namespaces:
-        {}
+        mpc_dynamic_obstacle_bodies: true
       Queue Size: 10
       Value: true
     - Class: rviz/MarkerArray
@@ -472,14 +529,15 @@ Visualization Manager:
       Marker Topic: /gazebo_pedestrian_truth/visualization
       Name: Gazebo_pedestrian_truth
       Namespaces:
-        {}
+        gazebo_pedestrian_truth: true
+        gazebo_pedestrian_truth_velocity: true
       Queue Size: 10
       Value: true
     - Alpha: 1
       Buffer Length: 1
       Class: rviz/Path
       Color: 32; 74; 135
-      Enabled: true
+      Enabled: false
       Head Diameter: 0.30000001192092896
       Head Length: 0.20000000298023224
       Length: 0.30000001192092896
@@ -498,18 +556,18 @@ Visualization Manager:
       Shaft Length: 0.10000000149011612
       Topic: /kin_astar/path
       Unreliable: false
-      Value: true
+      Value: false
     - Alpha: 1
       Buffer Length: 1
       Class: rviz/Path
-      Color: 170; 255; 127
+      Color: 115; 210; 22
       Enabled: true
       Head Diameter: 0.30000001192092896
       Head Length: 0.20000000298023224
       Length: 0.30000001192092896
       Line Style: Billboards
-      Line Width: 0.05000000074505806
-      Name: Astat_path
+      Line Width: 0.07000000029802322
+      Name: Astar_global_path
       Offset:
         X: 0
         Y: 0
@@ -551,7 +609,7 @@ Visualization Manager:
       Buffer Length: 1
       Class: rviz/Path
       Color: 52; 101; 164
-      Enabled: false
+      Enabled: true
       Head Diameter: 0.30000001192092896
       Head Length: 0.20000000298023224
       Length: 0.30000001192092896
@@ -570,12 +628,12 @@ Visualization Manager:
       Shaft Length: 0.10000000149011612
       Topic: /ori_path
       Unreliable: false
-      Value: false
+      Value: true
     - Alpha: 1
       Buffer Length: 1
       Class: rviz/Path
       Color: 0; 255; 0
-      Enabled: false
+      Enabled: true
       Head Diameter: 0.30000001192092896
       Head Length: 0.20000000298023224
       Length: 0.30000001192092896
@@ -594,15 +652,15 @@ Visualization Manager:
       Shaft Length: 0.10000000149011612
       Topic: /corrected_path
       Unreliable: false
-      Value: false
+      Value: true
     - Class: rviz/Marker
-      Enabled: false
+      Enabled: true
       Marker Topic: /map_match
       Name: localization_map_match
       Namespaces:
-        {}
+        "": true
       Queue Size: 100
-      Value: false
+      Value: true
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /mpc/best_traj
@@ -620,13 +678,13 @@ Visualization Manager:
       Queue Size: 10
       Value: true
     - Class: rviz/Marker
-      Enabled: false
+      Enabled: true
       Marker Topic: /mpc/waypoints
       Name: MPC_waypoints
       Namespaces:
         {}
       Queue Size: 10
-      Value: false
+      Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -637,9 +695,9 @@ Visualization Manager:
       Channel Name: intensity
       Class: rviz/PointCloud2
       Color: 255; 0; 0
-      Color Transformer: Intensity
+      Color Transformer: FlatColor
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Invert Rainbow: true
       Max Color: 255; 255; 255
       Min Color: 0; 0; 0
@@ -654,7 +712,7 @@ Visualization Manager:
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
-      Value: true
+      Value: false
     - Alpha: 0.6000000238418579
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -665,9 +723,9 @@ Visualization Manager:
       Channel Name: intensity
       Class: rviz/PointCloud2
       Color: 0; 255; 0
-      Color Transformer: Intensity
+      Color Transformer: FlatColor
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Min Color: 0; 0; 0
@@ -682,7 +740,7 @@ Visualization Manager:
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: false
-      Value: true
+      Value: false
     - Angle Tolerance: 0.10000000149011612
       Class: rviz/Odometry
       Covariance:
@@ -825,7 +883,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/XYOrbit
-      Distance: 56.5369873046875
+      Distance: 32.86610412597656
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -833,17 +891,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.800000011920929
       Focal Point:
-        X: -4.876392364501953
-        Y: -1.6224031448364258
+        X: 2.5705957412719727
+        Y: -0.18904757499694824
         Z: 5.538937330129556e-06
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.4597970247268677
+      Pitch: 0.6647976636886597
       Target Frame: <Fixed Frame>
-      Yaw: 3.1417129039764404
+      Yaw: 3.151590585708618
     Saved: ~
 Window Geometry:
   Displays:
@@ -851,7 +909,7 @@ Window Geometry:
   Height: 1347
   Hide Left Dock: false
   Hide Right Dock: true
-  QMainWindow State: 000000ff00000000fd0000000400000000000001f700000489fc0200000009fb0000001200530065006c0065006300740069006f006e00000001e10000009b0000005c00fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000b0fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000003b00000489000000c700fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261fb0000000a0049006d0061006700650000000295000001020000000000000000000000010000015f0000033afc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073000000003d0000033a000000a000fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e10000019700000003000004f40000005efc0100000002fb0000000800540069006d00650100000000000004f40000030700fffffffb0000000800540069006d00650100000000000004500000000000000000000002f70000048900000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd0000000400000000000001cd00000489fc0200000009fb0000001200530065006c0065006300740069006f006e00000001e10000009b0000005c00fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000b0fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000003b00000489000000c700fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261fb0000000a0049006d0061006700650000000295000001020000000000000000000000010000015f0000033afc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073000000003d0000033a000000a000fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e10000019700000003000004f40000005efc0100000002fb0000000800540069006d00650100000000000004f40000030700fffffffb0000000800540069006d00650100000000000004500000000000000000000003210000048900000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Selection:
     collapsed: false
   Time:
