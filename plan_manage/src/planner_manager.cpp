@@ -102,7 +102,7 @@ namespace cane_planner
         kin_finder_->setCollision(collision_);
         kin_finder_->setModel(lfpc_model_);
         kin_finder_->init();
-        // init MPC controller (planner=3)
+        // init MPC controllers (planner=3: LFPC/LIPM MPPI, planner=4: kinematic MPPI)
         if (planner_ == 3)
         {
             ROS_WARN(" MPC controller start");
@@ -111,6 +111,14 @@ namespace cane_planner
             mpc_controller_->setModel(lfpc_model_);
             mpc_controller_->setCollision(collision_);
             mpc_controller_->init();
+        }
+        else if (planner_ == 4)
+        {
+            ROS_WARN(" Kinematic MPPI controller start");
+            kinematic_mppi_controller_.reset(new KinematicMppiController);
+            kinematic_mppi_controller_->setParam(nh);
+            kinematic_mppi_controller_->setCollision(collision_);
+            kinematic_mppi_controller_->init();
         }
         //init bspline
         ROS_WARN(" Bspline start");
@@ -849,7 +857,8 @@ namespace cane_planner
                 ROS_WARN("wait for goal.");
         }
         // Risk field visualization (always on for planner=3, regardless of FSM state)
-        if (planner_ == 3 && mpc_controller_)
+        if ((planner_ == 3 && mpc_controller_) ||
+            (planner_ == 4 && kinematic_mppi_controller_))
         {
             std::vector<Eigen::Vector3d> obs_pos, obs_vel;
             {
@@ -901,7 +910,7 @@ namespace cane_planner
                     else
                         changeFSMExecState(REPLAN_TRAJ);
                 }
-                else if (planner_ == 3)
+                else if (planner_ == 3 || planner_ == 4)
                 {
                     // A* 全局规划 → 生成 waypoints，MPC 局部追踪
                     bool astar_ok = callAstarPlan();
@@ -975,7 +984,7 @@ namespace cane_planner
                     else
                         changeFSMExecState(REPLAN_TRAJ);
                 }
-                else if (planner_ == 3)
+                else if (planner_ == 3 || planner_ == 4)
                 {
                     // 重规划：从当前位置重新跑 A* + 生成 waypoints
                     if (!callAstarPlan())
@@ -1010,7 +1019,7 @@ namespace cane_planner
                 //     // publishKinodynamicAstarPath();  //发布路径
                 // }
                 // 仿真模式下沿路径推进odom (planner=3由MPC_STEP自行处理)
-                if (simulation_ && planner_ != 3)
+                if (simulation_ && planner_ != 3 && planner_ != 4)
                     stepSimMotion();
 
                 Eigen::Vector2d odom_pt(odom_pos_(0), odom_pos_(1));
@@ -1322,7 +1331,10 @@ namespace cane_planner
     void PlannerManager::mpcSimInit()
     {
         // 重置MPC warm-start
-        mpc_controller_->reset();
+        if (planner_ == 3 && mpc_controller_)
+            mpc_controller_->reset();
+        else if (planner_ == 4 && kinematic_mppi_controller_)
+            kinematic_mppi_controller_->reset();
 
         // 从里程计设置起点 (startCallback 已写入 start_state_)
         start_pt_(0) = odom_pos_(0);
@@ -1333,7 +1345,8 @@ namespace cane_planner
         // 初始化LFPC状态
         Eigen::Vector3d init_v_state(0.0, 0.0, start_state_(2)); // vx, vy, theta
         Eigen::Vector3d com_init_pos(odom_pos_(0), odom_pos_(1), 0.0);
-        lfpc_model_->reset(init_v_state, com_init_pos, LEFT_LEG, 0);
+        if (planner_ == 3)
+            lfpc_model_->reset(init_v_state, com_init_pos, LEFT_LEG, 0);
 
         // 缓存目标：优先使用全局 waypoint，A* 失败则直接面向终点
         global_wp_idx_ = 0;
@@ -1465,6 +1478,9 @@ namespace cane_planner
 
     bool PlannerManager::mpcSimStep()
     {
+        if (planner_ == 4)
+            return kinematicMppiSimStep();
+
         // 从缓存获取动态障碍物
         std::vector<Eigen::Vector3d> obs_pos, obs_vel, obs_size;
         {
@@ -1780,11 +1796,181 @@ namespace cane_planner
         return false;  // 继续
     }
 
+    bool PlannerManager::kinematicMppiSimStep()
+    {
+        std::vector<Eigen::Vector3d> obs_pos, obs_vel, obs_size;
+        {
+            std::lock_guard<std::mutex> lock(dynObsMutex_);
+            obs_pos = dynObsPos_;
+            obs_vel = dynObsVel_;
+            obs_size = dynObsSize_;
+        }
+
+        Eigen::Vector3d current_pose(odom_pos_(0), odom_pos_(1), start_state_(2));
+        mpc_com_path_.push_back(current_pose);
+        mpc_feet_path_.push_back(current_pose);
+        reanchorWaypoint(current_pose.head(2));
+
+        if ((current_pose.head(2) - end_pt_).norm() < global_wp_arrival_radius_)
+        {
+            mpc_reached_goal_ = true;
+            ROS_WARN("[Kinematic MPPI] Reached final goal at (%.2f, %.2f), %d steps",
+                     current_pose(0), current_pose(1), mpc_step_count_);
+            if (gazebo_sim_)
+            {
+                geometry_msgs::Twist cmd;
+                cmd_vel_pub_.publish(cmd);
+            }
+            return true;
+        }
+
+        const double moved = (current_pose.head(2) - last_com_pos_).norm();
+        const double progress_eps = gazebo_sim_ ? 0.01 : 0.02;
+        if (moved > progress_eps)
+            mpc_stuck_steps_ = 0;
+        else
+            mpc_stuck_steps_++;
+        last_com_pos_ = current_pose.head(2);
+
+        if (mpc_stuck_steps_ > STUCK_THRESHOLD)
+        {
+            ROS_WARN("[Kinematic MPPI] Stuck for %d steps, triggering replan", STUCK_THRESHOLD);
+            mpc_reached_goal_ = false;
+            if (gazebo_sim_) { geometry_msgs::Twist cmd; cmd_vel_pub_.publish(cmd); }
+            return true;
+        }
+
+        updateInteractionDebug(current_pose, obs_pos, obs_vel, obs_size);
+        publishInteractionState();
+
+        Eigen::Vector2d control = kinematic_mppi_controller_->plan(
+            current_pose, mpc_sim_goal_, obs_pos, obs_vel, obs_size);
+        const auto dbg = kinematic_mppi_controller_->getDebugMetrics();
+        if (mpc_debug_enable_)
+        {
+            std_msgs::Float64MultiArray metrics;
+            metrics.data.reserve(11);
+            metrics.data.push_back(dbg.plan_time_ms);
+            metrics.data.push_back(dbg.valid_sample_ratio);
+            metrics.data.push_back(std::isfinite(dbg.best_total_cost) ? dbg.best_total_cost : -1.0);
+            metrics.data.push_back(std::isfinite(dbg.min_dynamic_clearance) ? dbg.min_dynamic_clearance : -1.0);
+            metrics.data.push_back(std::isfinite(dbg.min_cpa_time) ? dbg.min_cpa_time : -1.0);
+            metrics.data.push_back((double)dbg.dynamic_reject_count);
+            metrics.data.push_back((double)dbg.static_reject_count);
+            metrics.data.push_back((double)dbg.num_samples);
+            metrics.data.push_back(dbg.plan_valid ? 1.0 : 0.0);
+            metrics.data.push_back(std::isfinite(dbg.best_min_dynamic_clearance) ? dbg.best_min_dynamic_clearance : -1.0);
+            metrics.data.push_back(std::isfinite(dbg.best_min_cpa_time) ? dbg.best_min_cpa_time : -1.0);
+            mpc_debug_metrics_pub_.publish(metrics);
+        }
+
+        const bool interaction_yield_stop_active =
+            mpc_interaction_enable_ &&
+            mpc_interaction_enable_yield_ &&
+            mpc_interaction_scene_ == SCENE_CROSSING &&
+            (mpc_interaction_mode_ == MODE_YIELD || mpc_interaction_debug_.yield_required);
+        const bool stop_advice = mpc_stop_advice_enable_ && interaction_yield_stop_active;
+        const std::string stop_reason = stop_advice ? "INTERACTION_YIELD_CONFLICT" : "OK";
+        if (mpc_stop_advice_enable_)
+        {
+            std_msgs::Bool msg;
+            msg.data = stop_advice;
+            mpc_stop_advice_pub_.publish(msg);
+            std_msgs::String reason_msg;
+            reason_msg.data = stop_reason;
+            mpc_stop_reason_pub_.publish(reason_msg);
+        }
+        if (stop_advice && mpc_stop_advice_enforce_)
+        {
+            kinematic_mppi_controller_->resetWarmStart();
+            mpc_stuck_steps_ = 0;
+            publishFovRange();
+            publishCurrentWaypoint();
+            publishWaypointsList();
+            mpc_step_count_++;
+            if (gazebo_sim_) { geometry_msgs::Twist cmd; cmd_vel_pub_.publish(cmd); }
+            return false;
+        }
+
+        if (!kinematic_mppi_controller_->lastPlanValid())
+        {
+            if (!obs_pos.empty())
+                mpc_stuck_steps_ = 0;
+            ROS_WARN_THROTTLE(0.5, "[Kinematic MPPI] STOP reason=NO_VALID_PLAN valid=%.2f",
+                              dbg.valid_sample_ratio);
+            publishFovRange();
+            publishCurrentWaypoint();
+            mpc_step_count_++;
+            if (gazebo_sim_) { geometry_msgs::Twist cmd; cmd_vel_pub_.publish(cmd); }
+            return false;
+        }
+
+        const auto& best_path = kinematic_mppi_controller_->getBestPath();
+        if (!best_path.empty())
+        {
+            visualization_msgs::Marker traj_mk;
+            traj_mk.header.frame_id = "world";
+            traj_mk.header.stamp = ros::Time::now();
+            traj_mk.ns = "kinematic_mppi_best";
+            traj_mk.id = 0;
+            traj_mk.type = visualization_msgs::Marker::LINE_STRIP;
+            traj_mk.action = visualization_msgs::Marker::ADD;
+            traj_mk.pose.orientation.w = 1.0;
+            traj_mk.scale.x = 0.04;
+            traj_mk.color.a = 0.9;
+            traj_mk.color.r = 1.0;
+            traj_mk.color.g = 0.4;
+            traj_mk.color.b = 0.0;
+            for (const auto& pt : best_path)
+            {
+                geometry_msgs::Point p;
+                p.x = pt(0); p.y = pt(1); p.z = 0.2;
+                traj_mk.points.push_back(p);
+            }
+            mpc_best_traj_pub_.publish(traj_mk);
+        }
+
+        const double dt = std::max(1e-3, kinematic_mppi_controller_->getDt());
+        const double v = control(0);
+        const double omega = control(1);
+        const double theta_new = std::atan2(std::sin(start_state_(2) + omega * dt),
+                                            std::cos(start_state_(2) + omega * dt));
+        odom_pos_(0) += v * std::cos(theta_new) * dt;
+        odom_pos_(1) += v * std::sin(theta_new) * dt;
+        start_state_(0) = odom_pos_(0);
+        start_state_(1) = odom_pos_(1);
+        start_state_(2) = theta_new;
+        odom_vel_(0) = v * std::cos(theta_new);
+        odom_vel_(1) = v * std::sin(theta_new);
+        odom_vel_(2) = 0.0;
+        mpc_step_path_.push_back(Eigen::Vector3d(odom_pos_(0), odom_pos_(1), theta_new));
+
+        if (gazebo_sim_)
+        {
+            geometry_msgs::Twist cmd;
+            cmd.linear.x = v;
+            cmd.angular.z = std::max(-1.2, std::min(1.2, omega));
+            cmd_vel_pub_.publish(cmd);
+            std_msgs::Float64 steer;
+            steer.data = std::max(-0.9, std::min(0.9, omega * dt));
+            steer_pub_.publish(steer);
+        }
+
+        publishSimOdom();
+        publishFovRange();
+        publishCurrentWaypoint();
+        publishWaypointsList();
+        displayMpcPlan();
+        publishMpcPath();
+        mpc_step_count_++;
+        return false;
+    }
+
     void PlannerManager::publishSimOdom()
     {
-        Eigen::Vector3d com = (gazebo_sim_) ? odom_pos_ : lfpc_model_->getCOMPos();
-        Eigen::Vector3d vel = lfpc_model_->getNextIterState();
-        double theta = (gazebo_sim_) ? start_state_(2) : vel(2);
+        Eigen::Vector3d com = (gazebo_sim_ || planner_ == 4) ? odom_pos_ : lfpc_model_->getCOMPos();
+        Eigen::Vector3d vel = (planner_ == 4) ? odom_vel_ : lfpc_model_->getNextIterState();
+        double theta = (gazebo_sim_ || planner_ == 4) ? start_state_(2) : vel(2);
 
         nav_msgs::Odometry odom;
         odom.header.frame_id = "world";
@@ -1889,7 +2075,9 @@ namespace cane_planner
     void PlannerManager::publishRiskField(const std::vector<Eigen::Vector3d>& obs_pos,
                                           const std::vector<Eigen::Vector3d>& obs_vel)
     {
-        if (!mpc_controller_ || obs_pos.empty()) return;
+        if (obs_pos.empty()) return;
+        if (planner_ == 3 && !mpc_controller_) return;
+        if (planner_ == 4 && !kinematic_mppi_controller_) return;
 
         // Hard threshold = A * ratio (points at or above this risk = INF in MPC)
         double A, ratio;
@@ -1902,7 +2090,9 @@ namespace cane_planner
         cloud_hard.header.stamp = pcl_conversions::toPCL(ros::Time::now());
         cloud_halo.header = cloud_hard.header;
 
-        const auto& rf = mpc_controller_->getRiskField();
+        const auto& rf = (planner_ == 4) ?
+            kinematic_mppi_controller_->getRiskField() :
+            mpc_controller_->getRiskField();
         double cx = odom_pos_(0);
         double cy = odom_pos_(1);
         double range = mpc_fov_range_ + 2.0;

@@ -47,6 +47,10 @@ def yaw_from_quaternion(q):
     return math.atan2(siny_cosp, cosy_cosp)
 
 
+def angle_diff(a, b):
+    return math.atan2(math.sin(a - b), math.cos(a - b))
+
+
 def point_to_segment_distance(px, py, ax, ay, bx, by):
     vx = bx - ax
     vy = by - ay
@@ -247,6 +251,11 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
     actual_backward_step_count = 0
     actual_step_count = 0
     prev_odom_yaw = None
+    prev_odom_yaw_rate = None
+    total_abs_heading_change = 0.0
+    actual_abs_heading_step = RunningStats()
+    odom_yaw_rate_abs = RunningStats()
+    odom_yaw_accel_abs = RunningStats()
     final_waypoints = []
     latest_odom_yaw = None
     cmd_count = 0
@@ -323,6 +332,9 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
                                            odom_xy[1] - prev_odom_xy[1])
                     actual_path_length += step_dist
                     if prev_odom_yaw is not None:
+                        yaw_step = angle_diff(latest_odom_yaw, prev_odom_yaw)
+                        total_abs_heading_change += abs(yaw_step)
+                        actual_abs_heading_step.add(abs(yaw_step))
                         forward_step = ((odom_xy[0] - prev_odom_xy[0]) * math.cos(prev_odom_yaw) +
                                         (odom_xy[1] - prev_odom_xy[1]) * math.sin(prev_odom_yaw))
                         actual_forward_step.add(forward_step)
@@ -336,6 +348,12 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
                             speed.add(inst_speed)
                         else:
                             skipped_speed_samples += 1
+                        if prev_odom_yaw is not None:
+                            yaw_rate = angle_diff(latest_odom_yaw, prev_odom_yaw) / dt
+                            odom_yaw_rate_abs.add(abs(yaw_rate))
+                            if prev_odom_yaw_rate is not None:
+                                odom_yaw_accel_abs.add(abs(yaw_rate - prev_odom_yaw_rate) / dt)
+                            prev_odom_yaw_rate = yaw_rate
                     else:
                         skipped_speed_samples += 1
                 prev_odom_xy = odom_xy
@@ -592,6 +610,10 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
     if actual_step_count > 0:
         lines.append("actual_backward_step_ratio: {:.3f}".format(
             actual_backward_step_count / float(actual_step_count)))
+    lines.append("heading_change_total: {}".format(fmt(total_abs_heading_change, " rad")))
+    lines.append(actual_abs_heading_step.line("abs_heading_step", "rad"))
+    lines.append(odom_yaw_rate_abs.line("odom_abs_yaw_rate", "rad/s"))
+    lines.append(odom_yaw_accel_abs.line("odom_abs_yaw_accel", "rad/s^2"))
     lines.append("cmd_vel_messages: {}".format(cmd_count))
     lines.append(cmd_linear_x.line("cmd_linear_x", "m/s"))
     lines.append(cmd_angular_z.line("cmd_angular_z", "rad/s"))

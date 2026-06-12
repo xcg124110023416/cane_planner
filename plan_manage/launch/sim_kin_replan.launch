@@ -1,6 +1,6 @@
 <launch>
     <arg name="odometry_topic" value = "/simulation_generator/odom"/>
-    <arg name="planner" default="2"/>  <!-- A*:1, kinodynamic:2, MPC:3 -->
+    <arg name="planner" default="2"/>  <!-- A*:1, kinodynamic:2, LFPC-MPPI:3, kinematic MPPI:4 -->
     <!-- MPC ablation switches for lightweight simulation. -->
     <arg name="mpc_w_risk" default="2.0"/>
     <arg name="mpc_enable_cpa" default="false"/>

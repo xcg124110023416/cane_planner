@@ -42,7 +42,18 @@ add_library( path_searching
     src/lfpc.cpp
     src/dynamic_risk_field.cpp
     src/mpc_controller.cpp
+    src/kinematic_mppi_controller.cpp
     )
 target_link_libraries( path_searching
     ${catkin_LIBRARIES} 
     )  
+
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(test_kinematic_mppi_controller
+    test/test_kinematic_mppi_controller.cpp
+  )
+  target_link_libraries(test_kinematic_mppi_controller
+    path_searching
+    ${catkin_LIBRARIES}
+  )
+endif()

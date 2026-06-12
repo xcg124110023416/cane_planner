@@ -9,7 +9,7 @@ int main(int argc, char *argv[])
     ros::NodeHandle nh("~");
 
     int planner;
-    nh.param("planner_node/planner", planner, 2);
+    nh.param("planner_node/planner", planner, 2);  // 1=A*, 2=kinodynamic, 3=LFPC-MPPI, 4=kinematic MPPI
 
     PlannerManager plan_manage(planner);
     plan_manage.init(nh);

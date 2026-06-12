@@ -100,5 +100,6 @@ catkin_install_python(PROGRAMS
   scripts/summarize_mpc_eval.py
   scripts/publish_fixed_goal.py
   scripts/publish_lightweight_fixed_goal.py
+  scripts/run_lightweight_mppi_compare.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

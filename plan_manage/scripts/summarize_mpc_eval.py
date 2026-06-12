@@ -26,6 +26,15 @@ FIELDS = [
     "final_goal_error_m",
     "odom_speed_mean_mps",
     "odom_speed_max_mps",
+    "heading_change_total_rad",
+    "abs_heading_step_mean_rad",
+    "abs_heading_step_max_rad",
+    "odom_abs_yaw_rate_mean_radps",
+    "odom_abs_yaw_rate_max_radps",
+    "odom_abs_yaw_accel_mean_radps2",
+    "odom_abs_yaw_accel_max_radps2",
+    "cmd_angular_z_mean_radps",
+    "cmd_angular_z_max_radps",
     "deviation_mean_m",
     "deviation_max_m",
     "best_clearance_min_m",
@@ -97,6 +106,24 @@ def parse_summary(path):
                 stats = parse_stat_line(value)
                 row["odom_speed_mean_mps"] = stats.get("mean", "")
                 row["odom_speed_max_mps"] = stats.get("max", "")
+            elif key == "heading_change_total":
+                row["heading_change_total_rad"] = parse_number(value)
+            elif key == "abs_heading_step":
+                stats = parse_stat_line(value)
+                row["abs_heading_step_mean_rad"] = stats.get("mean", "")
+                row["abs_heading_step_max_rad"] = stats.get("max", "")
+            elif key == "odom_abs_yaw_rate":
+                stats = parse_stat_line(value)
+                row["odom_abs_yaw_rate_mean_radps"] = stats.get("mean", "")
+                row["odom_abs_yaw_rate_max_radps"] = stats.get("max", "")
+            elif key == "odom_abs_yaw_accel":
+                stats = parse_stat_line(value)
+                row["odom_abs_yaw_accel_mean_radps2"] = stats.get("mean", "")
+                row["odom_abs_yaw_accel_max_radps2"] = stats.get("max", "")
+            elif key == "cmd_angular_z":
+                stats = parse_stat_line(value)
+                row["cmd_angular_z_mean_radps"] = stats.get("mean", "")
+                row["cmd_angular_z_max_radps"] = stats.get("max", "")
             elif key == "deviation_from_global_waypoints":
                 stats = parse_stat_line(value)
                 row["deviation_mean_m"] = stats.get("mean", "")

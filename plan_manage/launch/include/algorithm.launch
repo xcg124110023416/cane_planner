@@ -7,7 +7,7 @@
     <arg name="sensor_pose_topic"/>
     <!-- simulation param -->
     <arg name="simulation"/>
-    <arg name="planner"/>
+    <arg name="planner"/> <!-- A*:1, kinodynamic:2, LFPC-MPPI:3, kinematic MPPI:4 -->
     <arg name="gazebo_sim" default="false"/>
     <arg name="map_simulation" default="false"/>  <!-- SDF map sync mode: false=cloud+odom, true=cloud+pose -->
     <arg name="slice_height"/>
@@ -296,6 +296,22 @@
         <param name="mpc/nominal_al" value="$(arg user_step_length)" type="double"/>
         <param name="mpc/nominal_aw" value="0.0" type="double"/>
         <param name="mpc/nominal_api" value="0.0" type="double"/>
+
+        <!-- kinematic MPPI baseline (planner=4): same risk/goal/static costs, unicycle rollout. -->
+        <!-- Match planner=3 timing: 10 control steps, each LFPC support duration 0.35s. -->
+        <param name="mpc_kin/horizon_steps" value="10" type="int"/>
+        <param name="mpc_kin/num_samples" value="$(arg mpc_num_samples)" type="int"/>
+        <param name="mpc_kin/mppi_iters" value="1" type="int"/>
+        <param name="mpc_kin/dt" value="0.35" type="double"/>
+        <param name="mpc_kin/min_v" value="0.0" type="double"/>
+        <!-- Match planner=3 nominal speed: user_step_length / lfpc_t_sup = 0.40 / 0.35 ~= 1.14 m/s. -->
+        <param name="mpc_kin/max_v" value="1.4" type="double"/>
+        <param name="mpc_kin/max_omega" value="1.0" type="double"/>
+        <param name="mpc_kin/sigma_v" value="0.12" type="double"/>
+        <param name="mpc_kin/sigma_omega" value="0.30" type="double"/>
+        <param name="mpc_kin/nominal_v" value="1.14" type="double"/>
+        <param name="mpc_kin/nominal_omega" value="0.0" type="double"/>
+        <param name="mpc_kin/robot_radius" value="0.25" type="double"/>
         <param name="mpc/risk_tau" value="0.8" type="double"/>
         <param name="mpc/risk_A" value="5.0" type="double"/>
         <param name="mpc/risk_sigma_x" value="0.6" type="double"/>

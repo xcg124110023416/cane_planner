@@ -24,6 +24,7 @@
 #include <path_searching/astar.h>
 #include <path_searching/kinodynamic_astar.h>
 #include <path_searching/mpc_controller.h>
+#include <path_searching/kinematic_mppi_controller.h>
 #include <path_searching/lfpc.h>
 #include <plan_env/collision_detection.h>
 #include <plan_container.hpp>
@@ -59,6 +60,7 @@ namespace cane_planner
         unique_ptr<Astar> astar_finder_;
         unique_ptr<KinodynamicAstar> kin_finder_;
         unique_ptr<MpcController> mpc_controller_;
+        unique_ptr<KinematicMppiController> kinematic_mppi_controller_;
         BsplineOptimizer::Ptr bspline_optimizers_;
         NonUniformBspline::Ptr bspline_init_;
 
@@ -223,6 +225,7 @@ namespace cane_planner
         void stepSimMotion();   // 沿sim_path_推进odom (所有planner通用)
         void mpcSimInit();
         bool mpcSimStep();
+        bool kinematicMppiSimStep();
         void publishSimOdom();
         void generateGlobalWaypoints();
         void reanchorWaypoint(const Eigen::Vector2d& robot_pos);
