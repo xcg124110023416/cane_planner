@@ -73,6 +73,15 @@
     <arg name="mpc_interaction_use_cpa_check" default="true"/>
     <arg name="mpc_interaction_stop_release_clear_time" default="0.15"/>
     <arg name="mpc_interaction_post_yield_grace_time" default="0.6"/>
+    <arg name="convex_corridor_enable" default="false"/>
+    <arg name="convex_corridor_segment_length" default="0.8"/>
+    <arg name="convex_corridor_half_width" default="0.45"/>
+    <arg name="convex_corridor_min_half_width" default="0.25"/>
+    <arg name="convex_corridor_static_sample_ds" default="0.2"/>
+    <arg name="convex_corridor_static_sample_dl" default="0.1"/>
+    <arg name="convex_corridor_pedestrian_radius" default="0.35"/>
+    <arg name="convex_corridor_pedestrian_time_margin" default="0.4"/>
+    <arg name="convex_corridor_start_grace_length" default="0.4"/>
 
     
     <node pkg="plan_manage" name="kin_replan_node" type="kin_replan_node" output="screen" >
@@ -339,6 +348,17 @@
         <param name="dwc/static_opt_lateral_range" value="1.0" type="double"/>
         <param name="dwc/static_opt_lateral_step" value="0.1" type="double"/>
         <param name="dwc/static_opt_smooth_weight" value="2.0" type="double"/>
+
+        <!-- Convex corridor diagnostics: generated and published only; MPPI enforcement is a later stage. -->
+        <param name="convex_corridor/enable" value="$(arg convex_corridor_enable)" type="bool"/>
+        <param name="convex_corridor/segment_length" value="$(arg convex_corridor_segment_length)" type="double"/>
+        <param name="convex_corridor/half_width" value="$(arg convex_corridor_half_width)" type="double"/>
+        <param name="convex_corridor/min_half_width" value="$(arg convex_corridor_min_half_width)" type="double"/>
+        <param name="convex_corridor/static_sample_ds" value="$(arg convex_corridor_static_sample_ds)" type="double"/>
+        <param name="convex_corridor/static_sample_dl" value="$(arg convex_corridor_static_sample_dl)" type="double"/>
+        <param name="convex_corridor/pedestrian_radius" value="$(arg convex_corridor_pedestrian_radius)" type="double"/>
+        <param name="convex_corridor/pedestrian_time_margin" value="$(arg convex_corridor_pedestrian_time_margin)" type="double"/>
+        <param name="convex_corridor/start_grace_length" value="$(arg convex_corridor_start_grace_length)" type="double"/>
 
         <!-- kinematic MPPI baseline (planner=4): same risk/goal/static costs, unicycle rollout. -->
         <!-- Match planner=3 timing: 10 control steps, each LFPC support duration 0.35s. -->

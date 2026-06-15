@@ -49,6 +49,15 @@
     <arg name="publish_static_map_debug" default="true"/>
     <arg name="mpc_enable_cpa" default="true"/>
     <arg name="mpc_enable_stop_enforce" default="true"/>
+    <arg name="convex_corridor_enable" default="false"/>
+    <arg name="convex_corridor_segment_length" default="0.8"/>
+    <arg name="convex_corridor_half_width" default="0.45"/>
+    <arg name="convex_corridor_min_half_width" default="0.25"/>
+    <arg name="convex_corridor_static_sample_ds" default="0.2"/>
+    <arg name="convex_corridor_static_sample_dl" default="0.1"/>
+    <arg name="convex_corridor_pedestrian_radius" default="0.35"/>
+    <arg name="convex_corridor_pedestrian_time_margin" default="0.4"/>
+    <arg name="convex_corridor_start_grace_length" default="0.4"/>
 
     <!-- Load the verified high-mounted Velodyne model to the param server. -->
     <param name="robot_description" textfile="$(arg urdf_file)"/>
@@ -170,6 +179,15 @@
         <arg name="publish_static_map_debug" value="$(arg publish_static_map_debug)"/>
         <arg name="mpc_enable_cpa" value="$(arg mpc_enable_cpa)"/>
         <arg name="mpc_enable_stop_enforce" value="$(arg mpc_enable_stop_enforce)"/>
+        <arg name="convex_corridor_enable" value="$(arg convex_corridor_enable)"/>
+        <arg name="convex_corridor_segment_length" value="$(arg convex_corridor_segment_length)"/>
+        <arg name="convex_corridor_half_width" value="$(arg convex_corridor_half_width)"/>
+        <arg name="convex_corridor_min_half_width" value="$(arg convex_corridor_min_half_width)"/>
+        <arg name="convex_corridor_static_sample_ds" value="$(arg convex_corridor_static_sample_ds)"/>
+        <arg name="convex_corridor_static_sample_dl" value="$(arg convex_corridor_static_sample_dl)"/>
+        <arg name="convex_corridor_pedestrian_radius" value="$(arg convex_corridor_pedestrian_radius)"/>
+        <arg name="convex_corridor_pedestrian_time_margin" value="$(arg convex_corridor_pedestrian_time_margin)"/>
+        <arg name="convex_corridor_start_grace_length" value="$(arg convex_corridor_start_grace_length)"/>
     </include>
 
     <!-- Pedestrian simulation -->

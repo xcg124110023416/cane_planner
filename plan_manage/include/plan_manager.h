@@ -26,6 +26,7 @@
 #include <path_searching/mpc_controller.h>
 #include <path_searching/kinematic_mppi_controller.h>
 #include <path_searching/dynamic_walking_corridor.h>
+#include <path_searching/convex_corridor.h>
 #include <path_searching/lfpc.h>
 #include <plan_env/collision_detection.h>
 #include <plan_container.hpp>
@@ -63,6 +64,7 @@ namespace cane_planner
         unique_ptr<MpcController> mpc_controller_;
         unique_ptr<KinematicMppiController> kinematic_mppi_controller_;
         unique_ptr<DynamicWalkingCorridor> dynamic_walking_corridor_;
+        unique_ptr<ConvexCorridor> convex_corridor_;
         BsplineOptimizer::Ptr bspline_optimizers_;
         NonUniformBspline::Ptr bspline_init_;
 
@@ -216,6 +218,8 @@ namespace cane_planner
         ros::Publisher mpc_interaction_debug_pub_; // std_msgs/Float64MultiArray
         ros::Publisher mpc_dynamic_body_pub_;      // visualization_msgs/MarkerArray
         ros::Publisher mpc_walking_corridor_pub_;  // visualization_msgs/MarkerArray
+        ros::Publisher mpc_convex_corridor_pub_;   // visualization_msgs/MarkerArray
+        ros::Publisher mpc_convex_corridor_debug_pub_; // std_msgs/String
         ros::Publisher risk_field_pub_;   // sensor_msgs::PointCloud2 (risk > hard_threshold)
         ros::Publisher risk_halo_pub_;    // sensor_msgs::PointCloud2 (halo component only)
         ros::Publisher cmd_vel_pub_;      // geometry_msgs::Twist for Gazebo
@@ -267,6 +271,12 @@ namespace cane_planner
         std::vector<Eigen::Vector2d> buildWalkingCorridorReferencePath(
                                              const Eigen::Vector3d& current_pose) const;
         void publishWalkingCorridor(const DynamicWalkingCorridor::Result& result);
+        ConvexCorridor::Result updateAndPublishConvexCorridor(
+                                             const Eigen::Vector3d& current_pose,
+                                             const std::vector<Eigen::Vector3d>& obs_pos,
+                                             const std::vector<Eigen::Vector3d>& obs_vel,
+                                             const std::vector<Eigen::Vector3d>& obs_size);
+        void publishConvexCorridor(const ConvexCorridor::Result& result);
         const char* interactionSceneName(InteractionScene scene) const;
         const char* interactionModeName(InteractionMode mode) const;
 

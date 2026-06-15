@@ -14,6 +14,71 @@
 
 namespace cane_planner
 {
+namespace
+{
+
+std::vector<Eigen::Vector2d> clipPolygonByHalfspace(
+    const std::vector<Eigen::Vector2d>& polygon,
+    const ConvexCorridor::Halfspace& h)
+{
+    std::vector<Eigen::Vector2d> clipped;
+    if (polygon.empty())
+        return clipped;
+
+    auto signedViolation = [&](const Eigen::Vector2d& p) {
+        return h.normal.dot(p) - h.offset;
+    };
+
+    for (size_t i = 0; i < polygon.size(); ++i)
+    {
+        const Eigen::Vector2d a = polygon[i];
+        const Eigen::Vector2d b = polygon[(i + 1) % polygon.size()];
+        const double va = signedViolation(a);
+        const double vb = signedViolation(b);
+        const bool a_in = va <= 1e-6;
+        const bool b_in = vb <= 1e-6;
+
+        if (a_in && b_in)
+        {
+            clipped.push_back(b);
+        }
+        else if (a_in && !b_in)
+        {
+            const double denom = va - vb;
+            if (std::abs(denom) > 1e-9)
+                clipped.push_back(a + (va / denom) * (b - a));
+        }
+        else if (!a_in && b_in)
+        {
+            const double denom = va - vb;
+            if (std::abs(denom) > 1e-9)
+                clipped.push_back(a + (va / denom) * (b - a));
+            clipped.push_back(b);
+        }
+    }
+    return clipped;
+}
+
+std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segment)
+{
+    const double extent = std::max(2.0, segment.s1 - segment.s0 + 2.0);
+    std::vector<Eigen::Vector2d> polygon = {
+        segment.center + Eigen::Vector2d(-extent, -extent),
+        segment.center + Eigen::Vector2d( extent, -extent),
+        segment.center + Eigen::Vector2d( extent,  extent),
+        segment.center + Eigen::Vector2d(-extent,  extent),
+    };
+
+    for (const auto& h : segment.halfspaces)
+    {
+        polygon = clipPolygonByHalfspace(polygon, h);
+        if (polygon.empty())
+            break;
+    }
+    return polygon;
+}
+
+}  // namespace
 
     PlannerManager::~PlannerManager()
     {
@@ -129,6 +194,24 @@ namespace cane_planner
             dynamic_walking_corridor_->setParam(nh);
             dynamic_walking_corridor_->setCollision(collision_);
         }
+        bool convex_corridor_enable = false;
+        nh.param("convex_corridor/enable", convex_corridor_enable, false);
+        if (convex_corridor_enable)
+        {
+            ROS_WARN(" Convex corridor diagnostics start");
+            convex_corridor_.reset(new ConvexCorridor);
+            ConvexCorridor::Config cfg;
+            nh.param("convex_corridor/segment_length", cfg.segment_length, 0.8);
+            nh.param("convex_corridor/half_width", cfg.half_width, 0.45);
+            nh.param("convex_corridor/min_half_width", cfg.min_half_width, 0.25);
+            nh.param("convex_corridor/static_sample_ds", cfg.static_sample_ds, 0.2);
+            nh.param("convex_corridor/static_sample_dl", cfg.static_sample_dl, 0.1);
+            nh.param("convex_corridor/pedestrian_radius", cfg.pedestrian_radius, 0.35);
+            nh.param("convex_corridor/pedestrian_time_margin", cfg.pedestrian_time_margin, 0.4);
+            nh.param("convex_corridor/start_grace_length", cfg.start_grace_length, 0.4);
+            cfg.enable = true;
+            convex_corridor_->setConfig(cfg);
+        }
         //init bspline
         ROS_WARN(" Bspline start");
         bspline_init_.reset(new NonUniformBspline);
@@ -181,6 +264,8 @@ namespace cane_planner
         mpc_interaction_debug_pub_ = nh.advertise<std_msgs::Float64MultiArray>("/mpc/interaction_debug", 10);
         mpc_dynamic_body_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/mpc/dynamic_obstacle_bodies", 10);
         mpc_walking_corridor_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/mpc/walking_corridors", 10);
+        mpc_convex_corridor_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/mpc/convex_corridor", 10);
+        mpc_convex_corridor_debug_pub_ = nh.advertise<std_msgs::String>("/mpc/convex_corridor_debug", 10);
         if (gazebo_sim_)
         {
             cmd_vel_pub_ = nh.advertise<geometry_msgs::Twist>("/cmd_vel_footprint", 10);
@@ -893,6 +978,146 @@ namespace cane_planner
         }
 
         mpc_walking_corridor_pub_.publish(markers);
+    }
+
+    ConvexCorridor::Result PlannerManager::updateAndPublishConvexCorridor(
+        const Eigen::Vector3d& current_pose,
+        const std::vector<Eigen::Vector3d>& obs_pos,
+        const std::vector<Eigen::Vector3d>& obs_vel,
+        const std::vector<Eigen::Vector3d>& obs_size)
+    {
+        ConvexCorridor::Result result;
+        if (!convex_corridor_)
+            return result;
+
+        const auto reference_path = buildWalkingCorridorReferencePath(current_pose);
+        if (reference_path.size() < 2 || !collision_)
+        {
+            publishConvexCorridor(result);
+            return result;
+        }
+
+        auto traversable = [this](double x, double y) {
+            return collision_->isTraversable(x, y);
+        };
+
+        std::vector<ConvexCorridor::PedestrianPrediction> pedestrians;
+        pedestrians.reserve(obs_pos.size());
+        for (size_t i = 0; i < obs_pos.size(); ++i)
+        {
+            ConvexCorridor::PedestrianPrediction pred;
+            pred.p0 = obs_pos[i].head(2);
+            if (i < obs_vel.size())
+                pred.v = obs_vel[i].head(2);
+            if (i < obs_size.size())
+                pred.radius = 0.5 * std::max(obs_size[i].x(), obs_size[i].y());
+            pedestrians.push_back(pred);
+        }
+
+        result = convex_corridor_->buildSpatioTemporal(reference_path, traversable, pedestrians);
+        publishConvexCorridor(result);
+        return result;
+    }
+
+    void PlannerManager::publishConvexCorridor(const ConvexCorridor::Result& result)
+    {
+        if (!mpc_convex_corridor_pub_)
+            return;
+
+        visualization_msgs::MarkerArray markers;
+        visualization_msgs::Marker clear;
+        clear.header.frame_id = "world";
+        clear.header.stamp = ros::Time::now();
+        clear.ns = "mpc_convex_corridor";
+        clear.action = visualization_msgs::Marker::DELETEALL;
+        clear.pose.orientation.w = 1.0;
+        markers.markers.push_back(clear);
+
+        for (size_t i = 0; i < result.segments.size(); ++i)
+        {
+            const auto& seg = result.segments[i];
+            const auto polygon = segmentPolygon(seg);
+
+            visualization_msgs::Marker mk;
+            mk.header = clear.header;
+            mk.ns = "mpc_convex_corridor";
+            mk.id = static_cast<int>(i) + 1;
+            mk.type = visualization_msgs::Marker::LINE_STRIP;
+            mk.action = visualization_msgs::Marker::ADD;
+            mk.pose.orientation.w = 1.0;
+            mk.scale.x = 0.045;
+            mk.color.a = 0.95;
+            if (seg.static_feasible && seg.dynamic_feasible)
+            {
+                mk.color.r = 0.95;
+                mk.color.g = 0.75;
+                mk.color.b = 0.05;
+            }
+            else
+            {
+                mk.color.r = 1.0;
+                mk.color.g = 0.1;
+                mk.color.b = 0.05;
+            }
+            mk.lifetime = ros::Duration(0.3);
+
+            for (const auto& p : polygon)
+            {
+                geometry_msgs::Point pt;
+                pt.x = p.x();
+                pt.y = p.y();
+                pt.z = 0.14;
+                mk.points.push_back(pt);
+            }
+            if (!polygon.empty())
+            {
+                geometry_msgs::Point pt;
+                pt.x = polygon.front().x();
+                pt.y = polygon.front().y();
+                pt.z = 0.14;
+                mk.points.push_back(pt);
+            }
+            markers.markers.push_back(mk);
+
+            visualization_msgs::Marker label;
+            label.header = clear.header;
+            label.ns = "mpc_convex_corridor_labels";
+            label.id = static_cast<int>(i) + 1001;
+            label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+            label.action = visualization_msgs::Marker::ADD;
+            label.pose.position.x = seg.center.x();
+            label.pose.position.y = seg.center.y();
+            label.pose.position.z = 0.45;
+            label.pose.orientation.w = 1.0;
+            label.scale.z = 0.18;
+            label.color.a = 0.9;
+            label.color.r = 1.0;
+            label.color.g = seg.static_feasible && seg.dynamic_feasible ? 0.95 : 0.2;
+            label.color.b = 0.2;
+            std::ostringstream ss;
+            ss << "seg=" << i
+               << " hs=" << seg.halfspaces.size()
+               << " st=" << (seg.static_feasible ? 1 : 0)
+               << " dyn=" << (seg.dynamic_feasible ? 1 : 0);
+            label.text = ss.str();
+            label.lifetime = ros::Duration(0.3);
+            markers.markers.push_back(label);
+        }
+
+        mpc_convex_corridor_pub_.publish(markers);
+
+        if (mpc_convex_corridor_debug_pub_)
+        {
+            std_msgs::String debug;
+            std::ostringstream ss;
+            ss << "segments=" << result.segments.size()
+               << " feasible=" << (result.feasible ? 1 : 0)
+               << " min_width=" << std::fixed << std::setprecision(3) << result.min_width
+               << " static_block=" << result.static_block_count
+               << " dynamic_block=" << result.dynamic_block_count;
+            debug.data = ss.str();
+            mpc_convex_corridor_debug_pub_.publish(debug);
+        }
     }
 
     void PlannerManager::GoalCallback(const geometry_msgs::PoseStamped::ConstPtr &msg)
@@ -1859,6 +2084,7 @@ namespace cane_planner
         updateInteractionDebug(current_com, obs_pos, obs_vel, obs_size);
         publishInteractionState();
         auto corridor_result = updateAndPublishWalkingCorridor(current_com, obs_pos, obs_vel, obs_size);
+        updateAndPublishConvexCorridor(current_com, obs_pos, obs_vel, obs_size);
         if (corridor_result.has_feasible)
             mpc_controller_->setWalkingCorridor(corridor_result.selected);
         else

@@ -29,6 +29,15 @@
     <arg name="mpc_interaction_use_cpa_check" default="true"/>
     <arg name="mpc_interaction_stop_release_clear_time" default="0.15"/>
     <arg name="mpc_interaction_post_yield_grace_time" default="0.6"/>
+    <arg name="convex_corridor_enable" default="false"/>
+    <arg name="convex_corridor_segment_length" default="0.8"/>
+    <arg name="convex_corridor_half_width" default="0.45"/>
+    <arg name="convex_corridor_min_half_width" default="0.25"/>
+    <arg name="convex_corridor_static_sample_ds" default="0.2"/>
+    <arg name="convex_corridor_static_sample_dl" default="0.1"/>
+    <arg name="convex_corridor_pedestrian_radius" default="0.35"/>
+    <arg name="convex_corridor_pedestrian_time_margin" default="0.4"/>
+    <arg name="convex_corridor_start_grace_length" default="0.4"/>
     <arg name="pedestrian_scenario" default="mixed"/>
     <arg name="use_static_global_map" default="false"/>
     <arg name="use_static_global_esdf" default="false"/>
@@ -90,6 +99,15 @@
         <arg name="mpc_interaction_use_cpa_check" value="$(arg mpc_interaction_use_cpa_check)"/>
         <arg name="mpc_interaction_stop_release_clear_time" value="$(arg mpc_interaction_stop_release_clear_time)"/>
         <arg name="mpc_interaction_post_yield_grace_time" value="$(arg mpc_interaction_post_yield_grace_time)"/>
+        <arg name="convex_corridor_enable" value="$(arg convex_corridor_enable)"/>
+        <arg name="convex_corridor_segment_length" value="$(arg convex_corridor_segment_length)"/>
+        <arg name="convex_corridor_half_width" value="$(arg convex_corridor_half_width)"/>
+        <arg name="convex_corridor_min_half_width" value="$(arg convex_corridor_min_half_width)"/>
+        <arg name="convex_corridor_static_sample_ds" value="$(arg convex_corridor_static_sample_ds)"/>
+        <arg name="convex_corridor_static_sample_dl" value="$(arg convex_corridor_static_sample_dl)"/>
+        <arg name="convex_corridor_pedestrian_radius" value="$(arg convex_corridor_pedestrian_radius)"/>
+        <arg name="convex_corridor_pedestrian_time_margin" value="$(arg convex_corridor_pedestrian_time_margin)"/>
+        <arg name="convex_corridor_start_grace_length" value="$(arg convex_corridor_start_grace_length)"/>
         <arg name="use_static_global_map" value="$(arg use_static_global_map)"/>
         <arg name="use_static_global_esdf" value="$(arg use_static_global_esdf)"/>
         <arg name="static_map_pcd" value="$(arg static_map_pcd)"/>

@@ -3,6 +3,15 @@
     <!-- <arg name="odometry_topic" value="/plvins_estimator/odometry" /> -->
     <!-- odom from fast-lio -->
     <arg name="odometry_topic" value="/Odometry" />
+    <arg name="convex_corridor_enable" default="false"/>
+    <arg name="convex_corridor_segment_length" default="0.8"/>
+    <arg name="convex_corridor_half_width" default="0.45"/>
+    <arg name="convex_corridor_min_half_width" default="0.25"/>
+    <arg name="convex_corridor_static_sample_ds" default="0.2"/>
+    <arg name="convex_corridor_static_sample_dl" default="0.1"/>
+    <arg name="convex_corridor_pedestrian_radius" default="0.35"/>
+    <arg name="convex_corridor_pedestrian_time_margin" default="0.4"/>
+    <arg name="convex_corridor_start_grace_length" default="0.4"/>
 
     <include file="$(find realsense2_camera)/launch/rs_rgbd.launch"/>
     <include file="$(find plan_manage)/launch/include/fasterlio.launch"/>
@@ -23,6 +32,15 @@
         <arg name="collision_margin" value="0.1"/>
         <arg name="slice_height" value="0.0"/>
         <arg name="kin_horizon" value="5.0"/>
+        <arg name="convex_corridor_enable" value="$(arg convex_corridor_enable)"/>
+        <arg name="convex_corridor_segment_length" value="$(arg convex_corridor_segment_length)"/>
+        <arg name="convex_corridor_half_width" value="$(arg convex_corridor_half_width)"/>
+        <arg name="convex_corridor_min_half_width" value="$(arg convex_corridor_min_half_width)"/>
+        <arg name="convex_corridor_static_sample_ds" value="$(arg convex_corridor_static_sample_ds)"/>
+        <arg name="convex_corridor_static_sample_dl" value="$(arg convex_corridor_static_sample_dl)"/>
+        <arg name="convex_corridor_pedestrian_radius" value="$(arg convex_corridor_pedestrian_radius)"/>
+        <arg name="convex_corridor_pedestrian_time_margin" value="$(arg convex_corridor_pedestrian_time_margin)"/>
+        <arg name="convex_corridor_start_grace_length" value="$(arg convex_corridor_start_grace_length)"/>
         <!-- map size -->
         <arg name="map_size_x" value="100.0"/>
         <arg name="map_size_y" value="50.0"/>
