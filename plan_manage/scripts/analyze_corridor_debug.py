@@ -10,6 +10,8 @@ from collections import Counter
 
 
 CORRIDOR_TOPIC = "/mpc/walking_corridors"
+CONVEX_CORRIDOR_TOPIC = "/mpc/convex_corridor"
+CONVEX_DEBUG_TOPIC = "/mpc/convex_corridor_debug"
 DEBUG_TOPIC = "/mpc/debug_metrics"
 STOP_ADVICE_TOPIC = "/mpc/stop_advice"
 STOP_REASON_TOPIC = "/mpc/stop_reason"
@@ -27,6 +29,14 @@ LABEL_RE = re.compile(
     r"dyn=(?P<dyn>[-+0-9]+)"
     r"(?:\s+tr=(?P<tr>[01]))?"
     r"(?:\s+sw_s=(?P<sw_s>[-+0-9.]+)\s+sw=\((?P<sw_x>[-+0-9.]+),(?P<sw_y>[-+0-9.]+)\))?"
+)
+
+CONVEX_DEBUG_RE = re.compile(
+    r"segments=(?P<segments>[-+0-9.]+)\s+"
+    r"feasible=(?P<feasible>[01])\s+"
+    r"min_width=(?P<min_width>[-+0-9.]+)\s+"
+    r"static_block=(?P<static_block>[-+0-9.]+)\s+"
+    r"dynamic_block=(?P<dynamic_block>[-+0-9.]+)"
 )
 
 
@@ -99,6 +109,22 @@ def parse_corridor_labels(msg, t_rel):
     return samples
 
 
+def parse_convex_debug(text, t_rel):
+    match = CONVEX_DEBUG_RE.search(text or "")
+    if not match:
+        return None
+    groups = match.groupdict()
+    return {
+        "t": t_rel,
+        "segments": float(groups["segments"]),
+        "feasible": int(groups["feasible"]),
+        "min_width": float(groups["min_width"]),
+        "static_block": float(groups["static_block"]),
+        "dynamic_block": float(groups["dynamic_block"]),
+        "text": text,
+    }
+
+
 def summarize_boolean_runs(samples, key):
     runs = []
     active_start = None
@@ -123,6 +149,7 @@ def analyze_bag(bag_path):
 
     corridor_samples = []
     debug_samples = []
+    convex_debug_samples = []
     stop_reason_samples = []
     stop_advice_samples = []
     rosout_stop_samples = []
@@ -134,6 +161,7 @@ def analyze_bag(bag_path):
 
     topics = [
         CORRIDOR_TOPIC, DEBUG_TOPIC, STOP_ADVICE_TOPIC, STOP_REASON_TOPIC,
+        CONVEX_CORRIDOR_TOPIC, CONVEX_DEBUG_TOPIC,
         ASTAR_TOPIC, MPC_PATH_TOPIC, WAYPOINTS_TOPIC,
     ] + ODOM_TOPICS + ROSOUT_TOPICS
 
@@ -145,6 +173,10 @@ def analyze_bag(bag_path):
 
             if topic == CORRIDOR_TOPIC:
                 corridor_samples.extend(parse_corridor_labels(msg, tr))
+            elif topic == CONVEX_DEBUG_TOPIC:
+                sample = parse_convex_debug(msg.data, tr)
+                if sample:
+                    convex_debug_samples.append(sample)
             elif topic == DEBUG_TOPIC:
                 data = list(msg.data)
                 debug_samples.append({
@@ -190,6 +222,7 @@ def analyze_bag(bag_path):
         "bag_path": bag_path,
         "corridor": corridor_samples,
         "debug": debug_samples,
+        "convex_debug": convex_debug_samples,
         "stop_reason": stop_reason_samples,
         "stop_advice": stop_advice_samples,
         "rosout_stop": rosout_stop_samples,
@@ -217,6 +250,7 @@ def write_outputs(result, out_dir):
 
     corridor = result["corridor"]
     debug = result["debug"]
+    convex_debug = result.get("convex_debug", [])
     reasons = result["stop_reason"]
     rosout_stop = result["rosout_stop"]
     stop_reasons = Counter(r["reason"] for r in reasons)
@@ -232,6 +266,15 @@ def write_outputs(result, out_dir):
                          if math.isfinite(d.get("convex_max_violation", float("nan")))]
     convex_segments = [d["convex_segments"] for d in debug
                        if math.isfinite(d.get("convex_segments", float("nan")))]
+    convex_dbg_segments = [d["segments"] for d in convex_debug
+                           if math.isfinite(d.get("segments", float("nan")))]
+    convex_dbg_widths = [d["min_width"] for d in convex_debug
+                         if math.isfinite(d.get("min_width", float("nan")))]
+    convex_dbg_feasible = sum(1 for d in convex_debug if d.get("feasible", 0))
+    convex_dbg_static_blocks = [d["static_block"] for d in convex_debug
+                                if math.isfinite(d.get("static_block", float("nan")))]
+    convex_dbg_dynamic_blocks = [d["dynamic_block"] for d in convex_debug
+                                 if math.isfinite(d.get("dynamic_block", float("nan")))]
 
     stop_with_context = []
     for reason in reasons:
@@ -247,6 +290,7 @@ def write_outputs(result, out_dir):
         f.write("bag: {}\n".format(result["bag_path"]))
         f.write("corridor_label_samples: {}\n".format(len(corridor)))
         f.write("debug_samples: {}\n".format(len(debug)))
+        f.write("convex_debug_samples: {}\n".format(len(convex_debug)))
         f.write("rosout_stop_logs: {}\n".format(len(rosout_stop)))
         f.write("odom_samples: {}\n".format(len(result["odom"])))
         f.write("astar_path_points_last: {} length={:.3f}m\n".format(
@@ -288,6 +332,25 @@ def write_outputs(result, out_dir):
             f.write("  max violation: mean={:.3f} max={:.3f}\n".format(
                 sum(convex_violations) / len(convex_violations),
                 max(convex_violations)))
+        if convex_debug:
+            f.write("  published debug feasible: {} / {}\n".format(
+                convex_dbg_feasible, len(convex_debug)))
+            if convex_dbg_segments:
+                f.write("  published segments: mean={:.2f} min={:.0f} max={:.0f}\n".format(
+                    sum(convex_dbg_segments) / len(convex_dbg_segments),
+                    min(convex_dbg_segments), max(convex_dbg_segments)))
+            if convex_dbg_widths:
+                f.write("  published min_width: mean={:.3f} min={:.3f} max={:.3f}\n".format(
+                    sum(convex_dbg_widths) / len(convex_dbg_widths),
+                    min(convex_dbg_widths), max(convex_dbg_widths)))
+            if convex_dbg_static_blocks:
+                f.write("  published static_block: mean={:.2f} max={:.0f}\n".format(
+                    sum(convex_dbg_static_blocks) / len(convex_dbg_static_blocks),
+                    max(convex_dbg_static_blocks)))
+            if convex_dbg_dynamic_blocks:
+                f.write("  published dynamic_block: mean={:.2f} max={:.0f}\n".format(
+                    sum(convex_dbg_dynamic_blocks) / len(convex_dbg_dynamic_blocks),
+                    max(convex_dbg_dynamic_blocks)))
 
         f.write("\nFirst non-OK stop contexts:\n")
         if not stop_with_context:

@@ -11,6 +11,8 @@ TOPICS = [
     "/rosout",
     "/rosout_agg",
     "/mpc/walking_corridors",
+    "/mpc/convex_corridor",
+    "/mpc/convex_corridor_debug",
     "/mpc/debug_metrics",
     "/mpc/stop_advice",
     "/mpc/stop_reason",
