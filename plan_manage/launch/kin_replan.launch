@@ -12,6 +12,7 @@
     <arg name="convex_corridor_pedestrian_radius" default="0.35"/>
     <arg name="convex_corridor_pedestrian_time_margin" default="0.4"/>
     <arg name="convex_corridor_start_grace_length" default="0.4"/>
+    <arg name="mpc_corridor_stop_valid_ratio_threshold" default="0.2"/>
 
     <include file="$(find realsense2_camera)/launch/rs_rgbd.launch"/>
     <include file="$(find plan_manage)/launch/include/fasterlio.launch"/>
@@ -41,6 +42,7 @@
         <arg name="convex_corridor_pedestrian_radius" value="$(arg convex_corridor_pedestrian_radius)"/>
         <arg name="convex_corridor_pedestrian_time_margin" value="$(arg convex_corridor_pedestrian_time_margin)"/>
         <arg name="convex_corridor_start_grace_length" value="$(arg convex_corridor_start_grace_length)"/>
+        <arg name="mpc_corridor_stop_valid_ratio_threshold" value="$(arg mpc_corridor_stop_valid_ratio_threshold)"/>
         <!-- map size -->
         <arg name="map_size_x" value="100.0"/>
         <arg name="map_size_y" value="50.0"/>

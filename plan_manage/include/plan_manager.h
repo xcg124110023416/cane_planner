@@ -116,6 +116,7 @@ namespace cane_planner
         double mpc_stop_hold_time_ = 0.8;
         double mpc_stop_release_clear_time_ = 0.5;
         bool mpc_corridor_stop_enable_ = true;
+        double mpc_corridor_stop_valid_ratio_threshold_ = 0.2;
         bool mpc_interaction_enable_ = false;
         bool mpc_interaction_enable_yield_ = false;
         double mpc_interaction_st_horizon_ = 4.0;

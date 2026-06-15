@@ -73,6 +73,7 @@
     <arg name="mpc_interaction_use_cpa_check" default="true"/>
     <arg name="mpc_interaction_stop_release_clear_time" default="0.15"/>
     <arg name="mpc_interaction_post_yield_grace_time" default="0.6"/>
+    <arg name="mpc_corridor_stop_valid_ratio_threshold" default="0.2"/>
     <arg name="convex_corridor_enable" default="false"/>
     <arg name="convex_corridor_segment_length" default="0.8"/>
     <arg name="convex_corridor_half_width" default="0.45"/>
@@ -296,12 +297,13 @@
         <param name="mpc/goal_arrival_threshold" value="0.2" type="double"/>
         <param name="mpc/fov_range" value="5.0" type="double"/>
         <param name="mpc/debug_enable" value="true" type="bool"/>
-        <!-- Stop advice for guide-cane use: publish/optionally enforce stop when predicted dynamic conflict is unavoidable. -->
+        <!-- Stop advice for guide-cane use: publish/optionally enforce stop when no viable MPPI rollout remains. -->
         <param name="mpc/stop_advice_enable" value="$(arg mpc_enable_stop_advice)" type="bool"/>
         <param name="mpc/stop_advice_enforce" value="$(arg mpc_enable_stop_enforce)" type="bool"/>
         <param name="mpc/stop_hold_time" value="0.8" type="double"/>
         <param name="mpc/stop_release_clear_time" value="0.5" type="double"/>
         <param name="mpc/corridor_stop_enable" value="true" type="bool"/>
+        <param name="mpc/corridor_stop_valid_ratio_threshold" value="$(arg mpc_corridor_stop_valid_ratio_threshold)" type="double"/>
         <!-- Stage 2 crossing interaction. ST yield supervises crossing priority; MPPI social cost is not used. -->
         <param name="mpc/interaction_enable" value="$(arg mpc_enable_interaction)" type="bool"/>
         <param name="mpc/interaction_enable_yield" value="$(arg mpc_interaction_enable_yield)" type="bool"/>

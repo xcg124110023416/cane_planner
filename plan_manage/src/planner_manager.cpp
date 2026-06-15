@@ -110,6 +110,8 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
         nh.param("mpc/stop_hold_time", mpc_stop_hold_time_, 0.8);
         nh.param("mpc/stop_release_clear_time", mpc_stop_release_clear_time_, 0.5);
         nh.param("mpc/corridor_stop_enable", mpc_corridor_stop_enable_, true);
+        nh.param("mpc/corridor_stop_valid_ratio_threshold",
+                 mpc_corridor_stop_valid_ratio_threshold_, 0.2);
         nh.param("mpc/interaction_enable", mpc_interaction_enable_, false);
         nh.param("mpc/interaction_enable_yield", mpc_interaction_enable_yield_, false);
         nh.param("mpc/interaction_st_horizon", mpc_interaction_st_horizon_, 4.0);
@@ -2133,10 +2135,24 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
             mpc_corridor_stop_enable_ &&
             !corridor_result.candidates.empty() &&
             !corridor_result.has_feasible;
+        const bool mppi_has_viable_plan =
+            dbg.plan_valid &&
+            dbg.valid_sample_ratio > mpc_corridor_stop_valid_ratio_threshold_;
+        const bool corridor_infeasible_hard_stop_active =
+            corridor_infeasible_stop_active && !mppi_has_viable_plan;
+        if (corridor_infeasible_stop_active && mppi_has_viable_plan)
+        {
+            ROS_WARN_THROTTLE(
+                1.0,
+                "[MPC] DWC infeasible but MPPI remains viable; suppressing corridor stop "
+                "valid=%.2f threshold=%.2f",
+                dbg.valid_sample_ratio,
+                mpc_corridor_stop_valid_ratio_threshold_);
+        }
 
         bool raw_stop_advice = false;
         std::string raw_stop_reason = "OK";
-        if (mpc_stop_advice_enable_ && corridor_infeasible_stop_active)
+        if (mpc_stop_advice_enable_ && corridor_infeasible_hard_stop_active)
         {
             raw_stop_advice = true;
             raw_stop_reason = "CORRIDOR_INFEASIBLE";
@@ -2174,7 +2190,7 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
                     (now - mpc_stop_enter_time_).toSec() >= mpc_stop_hold_time_;
                 const bool release_clear =
                     !interaction_yield_stop_active &&
-                    !corridor_infeasible_stop_active;
+                    !corridor_infeasible_hard_stop_active;
                 if (!release_clear)
                 {
                     mpc_stop_clear_since_ = ros::Time(0);
