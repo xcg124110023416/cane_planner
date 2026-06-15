@@ -10,6 +10,7 @@
 
 #include <path_searching/lfpc.h>
 #include <path_searching/dynamic_risk_field.h>
+#include <path_searching/dynamic_walking_corridor.h>
 #include <plan_env/collision_detection.h>
 
 namespace cane_planner
@@ -48,6 +49,7 @@ public:
 
         // Hard constraint: risk > threshold → INF cost (dynamic obstacles only)
         bool dynamic_hard_reject_enable = true;
+        bool dynamic_collision_hard_reject_enable = true;
         double risk_hard_threshold = 8.5;
 
         // Static obstacle: high penalty per colliding point (effectively hard)
@@ -63,6 +65,13 @@ public:
         // SDF proximity cost: repulsive gradient around obstacles
         double w_prox = 5.0;
         double prox_margin = 0.6;  // wider than collision margin (0.3)
+
+        // Dynamic walking corridor constraint. Points outside the selected
+        // corridor receive a quadratic penalty; large violations are rejected.
+        bool corridor_enable = true;
+        bool corridor_hard_reject_enable = true;
+        double w_corridor = 20.0;
+        double corridor_hard_margin = 0.30;
 
         // Use best trajectory instead of weighted average (avoids mode collapse)
         bool use_best = true;
@@ -94,6 +103,7 @@ public:
         double best_min_cpa_time = std::numeric_limits<double>::infinity();
         int dynamic_reject_count = 0;
         int static_reject_count = 0;
+        int corridor_reject_count = 0;
         int num_samples = 0;
         bool plan_valid = false;
     };
@@ -108,6 +118,8 @@ public:
     void setModel(const LFPC::Ptr &model);
     void setCollision(const CollisionDetection::Ptr &col);
     void setRiskField(const DynamicRiskField &rf);
+    void setWalkingCorridor(const DynamicWalkingCorridor::Candidate &candidate);
+    void clearWalkingCorridor();
 
     void setDynamicObstacles(const std::vector<Eigen::Vector3d> &pos,
                              const std::vector<Eigen::Vector3d> &vel);
@@ -138,6 +150,8 @@ private:
     LFPC::Ptr lfpc_model_;
     CollisionDetection::Ptr collision_;
     DynamicRiskField risk_field_;
+    bool has_walking_corridor_ = false;
+    DynamicWalkingCorridor::Candidate walking_corridor_;
 
     // Pre-allocated LFPC pool for rollout
     std::vector<LFPC::Ptr> lfpc_pool_;

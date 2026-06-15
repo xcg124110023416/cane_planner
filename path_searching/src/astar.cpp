@@ -206,7 +206,8 @@ namespace cane_planner
 
           /* not in close set */
           Eigen::Vector2i pro_id = posToIndex(pro_pos);
-          int pro_t_id = timeToIndex(pro_t);
+          pro_t = dynamic ? cur_node->time + 1.0 : 0.0;
+          int pro_t_id = dynamic ? timeToIndex(pro_t) : 0;
           NodePtr pro_node =
               dynamic ? expanded_nodes_.find(pro_id, pro_t_id) : expanded_nodes_.find(pro_id);
           if (pro_node != NULL && pro_node->node_state == IN_CLOSE_SET)
@@ -217,20 +218,65 @@ namespace cane_planner
           }
           Eigen::Vector3d pro_pos_3d;
           pro_pos_3d << pro_pos(0), pro_pos(1), collision_->getSliceHeight(); // 设置路径高度
+          const bool near_start = (pro_pos - start_pt).norm() <= static_endpoint_clear_radius_;
+          const bool near_goal = (pro_pos - end_pt).norm() <= static_endpoint_clear_radius_;
+          const bool near_endpoint = near_start || near_goal;
+
           /* collision free */
           bool traversable = use_static ?
-              collision_->isStaticTraversable(pro_pos(0), pro_pos(1)) :
-              collision_->isTraversable(pro_pos(0), pro_pos(1));
+                                 collision_->isStaticTraversable(pro_pos(0), pro_pos(1)) :
+                                 collision_->isTraversable(pro_pos(0), pro_pos(1));
           if (use_static && !traversable)
           {
-            const bool near_start = (pro_pos - start_pt).norm() <= static_endpoint_clear_radius_;
-            const bool near_goal = (pro_pos - end_pt).norm() <= static_endpoint_clear_radius_;
-            traversable = near_start || near_goal;
+            traversable = near_endpoint;
           }
           if (!traversable)
           // if (!collision_->isTraversable(pro_pos_3d))
           {
             // cout << "Can't Traversable" << endl;
+            reject_collision++;
+            continue;
+          }
+
+          if (traversable_radius_ > 1e-6 && !near_endpoint)
+          {
+            const double sample_step = std::max(0.05, resolution_);
+            bool disk_traversable = true;
+            for (double sx = -traversable_radius_; sx <= traversable_radius_ + 1e-6 && disk_traversable; sx += sample_step)
+            {
+              for (double sy = -traversable_radius_; sy <= traversable_radius_ + 1e-6; sy += sample_step)
+              {
+                if (std::hypot(sx, sy) > traversable_radius_ + 1e-6)
+                  continue;
+                const Eigen::Vector2d sample = pro_pos + Eigen::Vector2d(sx, sy);
+                if (sample(0) <= origin_(0) || sample(0) >= map_size_2d_(0) ||
+                    sample(1) <= origin_(1) || sample(1) >= map_size_2d_(1))
+                {
+                  disk_traversable = false;
+                  break;
+                }
+                const bool sample_free = use_static ?
+                    collision_->isStaticTraversable(sample(0), sample(1)) :
+                    collision_->isTraversable(sample(0), sample(1));
+                if (!sample_free)
+                {
+                  disk_traversable = false;
+                  break;
+                }
+              }
+            }
+            if (!disk_traversable)
+            {
+              reject_collision++;
+              continue;
+            }
+          }
+
+          double sdf_dist = use_static ?
+              collision_->getStaticCollisionDistance(pro_pos) :
+              collision_->getCollisionDistance(pro_pos);
+          if (min_clearance_ > 1e-6 && !near_endpoint && sdf_dist < min_clearance_)
+          {
             reject_collision++;
             continue;
           }
@@ -242,9 +288,6 @@ namespace cane_planner
           // SDF 接近惩罚：仅当距墙小于缓冲区时生效，距离越近代价二次增长
           if (w_clearance_ > 1e-6)
           {
-            double sdf_dist = use_static ?
-                collision_->getStaticCollisionDistance(pro_pos) :
-                collision_->getCollisionDistance(pro_pos);
             if (sdf_dist < clearance_sigma_)
             {
               double t = 1.0 - sdf_dist / clearance_sigma_;
@@ -264,13 +307,13 @@ namespace cane_planner
             pro_node->node_state = IN_OPEN_SET;
             if (dynamic)
             {
-              pro_node->time = cur_node->time + 1.0;
+              pro_node->time = pro_t;
               pro_node->time_idx = timeToIndex(pro_node->time);
             }
             open_set_.push(pro_node);
 
             if (dynamic)
-              expanded_nodes_.insert(pro_id, pro_node->time, pro_node);
+              expanded_nodes_.insert(pro_id, pro_node->time_idx, pro_node);
             else
               expanded_nodes_.insert(pro_id, pro_node);
 
@@ -332,6 +375,8 @@ namespace cane_planner
     nh.param("astar/w_clearance", w_clearance_, 0.0);
     // 安全距离尺度（m），小于此值代价显著上升
     nh.param("astar/clearance_sigma", clearance_sigma_, 0.5);
+    nh.param("astar/min_clearance", min_clearance_, 0.0);
+    nh.param("astar/traversable_radius", traversable_radius_, 0.0);
     nh.param("astar/use_static_global_map", use_static_global_map_, false);
     nh.param("astar/static_endpoint_clear_radius", static_endpoint_clear_radius_, 0.25);
     // tie_breaker 见路径规划课程
@@ -355,7 +400,7 @@ namespace cane_planner
   std::vector<Eigen::Vector2d> Astar::getPath()
   {
     vector<Eigen::Vector2d> path;
-    for (int i = 0; i < path_nodes_.size(); ++i)
+    for (size_t i = 0; i < path_nodes_.size(); ++i)
     {
       path.push_back(path_nodes_[i]->position);
     }

@@ -25,6 +25,7 @@
 #include <path_searching/kinodynamic_astar.h>
 #include <path_searching/mpc_controller.h>
 #include <path_searching/kinematic_mppi_controller.h>
+#include <path_searching/dynamic_walking_corridor.h>
 #include <path_searching/lfpc.h>
 #include <plan_env/collision_detection.h>
 #include <plan_container.hpp>
@@ -61,6 +62,7 @@ namespace cane_planner
         unique_ptr<KinodynamicAstar> kin_finder_;
         unique_ptr<MpcController> mpc_controller_;
         unique_ptr<KinematicMppiController> kinematic_mppi_controller_;
+        unique_ptr<DynamicWalkingCorridor> dynamic_walking_corridor_;
         BsplineOptimizer::Ptr bspline_optimizers_;
         NonUniformBspline::Ptr bspline_init_;
 
@@ -93,6 +95,7 @@ namespace cane_planner
         std::vector<Eigen::Vector3d> mpc_step_path_;
 
         // 全局路径层 waypoints (A* → MPC 追踪)
+        std::vector<Eigen::Vector2d> global_path_dense_;
         std::vector<Eigen::Vector2d> global_waypoints_;
         size_t global_wp_idx_;
         double global_wp_spacing_ = 1.0;
@@ -110,6 +113,7 @@ namespace cane_planner
         bool mpc_stop_advice_enforce_ = true;
         double mpc_stop_hold_time_ = 0.8;
         double mpc_stop_release_clear_time_ = 0.5;
+        bool mpc_corridor_stop_enable_ = true;
         bool mpc_interaction_enable_ = false;
         bool mpc_interaction_enable_yield_ = false;
         double mpc_interaction_st_horizon_ = 4.0;
@@ -211,6 +215,7 @@ namespace cane_planner
         ros::Publisher mpc_interaction_mode_pub_;  // std_msgs/String
         ros::Publisher mpc_interaction_debug_pub_; // std_msgs/Float64MultiArray
         ros::Publisher mpc_dynamic_body_pub_;      // visualization_msgs/MarkerArray
+        ros::Publisher mpc_walking_corridor_pub_;  // visualization_msgs/MarkerArray
         ros::Publisher risk_field_pub_;   // sensor_msgs::PointCloud2 (risk > hard_threshold)
         ros::Publisher risk_halo_pub_;    // sensor_msgs::PointCloud2 (halo component only)
         ros::Publisher cmd_vel_pub_;      // geometry_msgs::Twist for Gazebo
@@ -254,6 +259,14 @@ namespace cane_planner
                                     const std::vector<Eigen::Vector3d>& obs_vel,
                                     const std::vector<Eigen::Vector3d>& obs_size);
         void publishInteractionState();
+        DynamicWalkingCorridor::Result updateAndPublishWalkingCorridor(
+                                             const Eigen::Vector3d& current_pose,
+                                             const std::vector<Eigen::Vector3d>& obs_pos,
+                                             const std::vector<Eigen::Vector3d>& obs_vel,
+                                             const std::vector<Eigen::Vector3d>& obs_size);
+        std::vector<Eigen::Vector2d> buildWalkingCorridorReferencePath(
+                                             const Eigen::Vector3d& current_pose) const;
+        void publishWalkingCorridor(const DynamicWalkingCorridor::Result& result);
         const char* interactionSceneName(InteractionScene scene) const;
         const char* interactionModeName(InteractionMode mode) const;
 

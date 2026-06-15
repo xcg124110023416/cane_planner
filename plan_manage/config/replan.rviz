@@ -608,7 +608,7 @@ Visualization Manager:
       Marker Topic: /mpc/best_traj
       Name: MPC_BestTraj
       Namespaces:
-        {}
+        mpc_best: true
       Queue Size: 10
       Value: true
     - Class: rviz/Marker
@@ -616,7 +616,7 @@ Visualization Manager:
       Marker Topic: /mpc/current_waypoint
       Name: MPC_current_waypoint
       Namespaces:
-        {}
+        mpc_curr_wp: true
       Queue Size: 10
       Value: true
     - Class: rviz/Marker
@@ -624,7 +624,7 @@ Visualization Manager:
       Marker Topic: /mpc/waypoints
       Name: MPC_waypoints
       Namespaces:
-        {}
+        mpc_waypoints: true
       Queue Size: 10
       Value: true
     - Alpha: 1
@@ -797,6 +797,14 @@ Visualization Manager:
       Use Fixed Frame: true
       Use rainbow: true
       Value: false
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /mpc/walking_corridors
+      Name: walking_corridors
+      Namespaces:
+        {}
+      Queue Size: 100
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 63; 63; 63
@@ -861,5 +869,5 @@ Window Geometry:
   Views:
     collapsed: true
   Width: 1268
-  X: 275
+  X: 493
   Y: -32

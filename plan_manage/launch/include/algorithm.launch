@@ -45,6 +45,8 @@
     <arg name="global_esdf_safe_distance" default="0.15"/>
     <arg name="global_esdf_min_points_per_cell" default="1"/>
     <arg name="static_endpoint_clear_radius" default="0.25"/>
+    <arg name="astar_min_clearance" default="0.35"/>
+    <arg name="astar_traversable_radius" default="0.25"/>
     <arg name="publish_static_map_debug" default="true"/>
     <arg name="mpc_enable_cpa" default="false"/>
     <arg name="mpc_enable_stop_enforce" default="true"/>
@@ -53,7 +55,7 @@
     <arg name="mpc_cpa_weight" default="0.6"/>
     <arg name="mpc_risk_sigma_y" default="0.4"/>
     <arg name="mpc_num_samples" default="200"/>
-    <arg name="mpc_enable_dynamic_hard_reject" default="true"/>
+    <arg name="mpc_enable_dynamic_hard_reject" default="false"/>
     <arg name="mpc_enable_interaction" default="true"/>
     <arg name="mpc_interaction_enable_yield" default="true"/>
     <arg name="mpc_interaction_st_horizon" default="4.0"/>
@@ -191,9 +193,11 @@
         <param name="astar/time_resolution" value="0"/>
         <param name="astar/lambda_heu" value="0.2"/>
         <param name="astar/allocate_num" value="300000"/>
-        <!-- A* clearance uses only the static global map; local ESDF avoidance is handled by MPC. -->
-        <param name="astar/w_clearance" value="0.8" type="double"/>
-        <param name="astar/clearance_sigma" value="0.9" type="double"/>
+        <!-- A* keeps the global guide away from static narrow bands; MPPI handles local dynamics. -->
+        <param name="astar/w_clearance" value="3.0" type="double"/>
+        <param name="astar/clearance_sigma" value="1.2" type="double"/>
+        <param name="astar/min_clearance" value="$(arg astar_min_clearance)" type="double"/>
+        <param name="astar/traversable_radius" value="$(arg astar_traversable_radius)" type="double"/>
         <param name="astar/use_static_global_map" value="$(arg use_static_global_map)" type="bool"/>
         <param name="astar/static_endpoint_clear_radius" value="$(arg static_endpoint_clear_radius)" type="double"/>
         <!-- collision set -->
@@ -247,6 +251,7 @@
         <!-- risk已归一化：每点平均risk×权重，不再是累加值 -->
         <param name="mpc/w_risk" value="$(arg mpc_w_risk)" type="double"/>
         <param name="mpc/dynamic_hard_reject_enable" value="$(arg mpc_enable_dynamic_hard_reject)" type="bool"/>
+        <param name="mpc/dynamic_collision_hard_reject_enable" value="true" type="bool"/>
         <!-- goal已归一化：最终距离/horizon步数×权重 -->
         <param name="mpc/w_goal" value="25.0" type="double"/>
         <!-- 转向变化率惩罚权重：越大越平滑，越小越灵活（0=不限制） -->
@@ -263,6 +268,10 @@
         <!-- SDF排斥力权重、排斥生效距离(m)：距墙<margin时二次增长 -->
         <param name="mpc/w_prox" value="4.0" type="double"/>
         <param name="mpc/prox_margin" value="0.3" type="double"/>
+        <param name="mpc/corridor_enable" value="true" type="bool"/>
+        <param name="mpc/corridor_hard_reject_enable" value="false" type="bool"/>
+        <param name="mpc/w_corridor" value="20.0" type="double"/>
+        <param name="mpc/corridor_hard_margin" value="0.30" type="double"/>
         <param name="mpc/use_best" value="false" type="bool"/>
         <!-- 使用真实模式true，为false则步长和步宽不固定 -->
         <!-- Guide-cane gait model: forward motion is supplied by the user, MPC mainly optimizes steering. -->
@@ -275,6 +284,7 @@
         <param name="mpc/stop_advice_enforce" value="$(arg mpc_enable_stop_enforce)" type="bool"/>
         <param name="mpc/stop_hold_time" value="0.8" type="double"/>
         <param name="mpc/stop_release_clear_time" value="0.5" type="double"/>
+        <param name="mpc/corridor_stop_enable" value="true" type="bool"/>
         <!-- Stage 2 crossing interaction. ST yield supervises crossing priority; MPPI social cost is not used. -->
         <param name="mpc/interaction_enable" value="$(arg mpc_enable_interaction)" type="bool"/>
         <param name="mpc/interaction_enable_yield" value="$(arg mpc_interaction_enable_yield)" type="bool"/>
@@ -296,6 +306,39 @@
         <param name="mpc/nominal_al" value="$(arg user_step_length)" type="double"/>
         <param name="mpc/nominal_aw" value="0.0" type="double"/>
         <param name="mpc/nominal_api" value="0.0" type="double"/>
+
+        <!-- Dynamic walking corridor: a single path-following local corridor constrains MPPI.
+             Optional lateral candidates are kept for experiments but disabled by default. -->
+        <param name="dwc/enable" value="true" type="bool"/>
+        <param name="dwc/length" value="4.0" type="double"/>
+        <param name="dwc/half_width" value="0.45" type="double"/>
+        <param name="dwc/min_half_width" value="0.25" type="double"/>
+        <param name="dwc/lateral_candidates_enable" value="false" type="bool"/>
+        <param name="dwc/lateral_shift" value="0.9" type="double"/>
+        <param name="dwc/prediction_horizon" value="3.0" type="double"/>
+        <param name="dwc/prediction_dt" value="0.25" type="double"/>
+        <param name="dwc/robot_speed" value="1.14" type="double"/>
+        <param name="dwc/robot_radius" value="0.25" type="double"/>
+        <param name="dwc/dynamic_min_radius" value="0.20" type="double"/>
+        <param name="dwc/dynamic_safety_margin" value="0.15" type="double"/>
+        <param name="dwc/dynamic_progress_margin" value="0.50" type="double"/>
+        <param name="dwc/dynamic_blocking_enable" value="false" type="bool"/>
+        <param name="dwc/lateral_offset_weight" value="0.2" type="double"/>
+        <param name="dwc/front_pass_weight" value="4.0" type="double"/>
+        <param name="dwc/front_pass_sigma_s" value="1.2" type="double"/>
+        <param name="dwc/front_pass_sigma_l" value="1.0" type="double"/>
+        <param name="dwc/front_pass_length" value="3.0" type="double"/>
+        <param name="dwc/front_pass_lateral" value="1.8" type="double"/>
+        <param name="dwc/static_sample_ds" value="0.4" type="double"/>
+        <param name="dwc/static_sample_dl" value="0.3" type="double"/>
+        <param name="dwc/static_centerline_opt_enable" value="true" type="bool"/>
+        <param name="dwc/static_truncate_enable" value="true" type="bool"/>
+        <param name="dwc/static_min_feasible_length" value="0.8" type="double"/>
+        <param name="dwc/static_truncate_backoff" value="0.2" type="double"/>
+        <param name="dwc/static_start_grace_length" value="0.4" type="double"/>
+        <param name="dwc/static_opt_lateral_range" value="1.0" type="double"/>
+        <param name="dwc/static_opt_lateral_step" value="0.1" type="double"/>
+        <param name="dwc/static_opt_smooth_weight" value="2.0" type="double"/>
 
         <!-- kinematic MPPI baseline (planner=4): same risk/goal/static costs, unicycle rollout. -->
         <!-- Match planner=3 timing: 10 control steps, each LFPC support duration 0.35s. -->

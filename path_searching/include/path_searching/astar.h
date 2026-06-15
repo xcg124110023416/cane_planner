@@ -124,6 +124,8 @@ namespace cane_planner
     /* clearance-aware cost */
     double w_clearance_;
     double clearance_sigma_;
+    double min_clearance_;
+    double traversable_radius_ = 0.0;
     bool use_static_global_map_ = false;
     double static_endpoint_clear_radius_ = 0.25;
     /* map */

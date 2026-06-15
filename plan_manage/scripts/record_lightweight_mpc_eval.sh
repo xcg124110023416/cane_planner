@@ -14,6 +14,7 @@ TOPICS = [
     "/mpc/best_traj",
     "/mpc/current_waypoint",
     "/mpc/waypoints",
+    "/mpc/walking_corridors",
     "/simulation_generator/odom",
     "/sim_odom",
     "/onboard_detector/dynamic_obstacles_info",

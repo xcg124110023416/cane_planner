@@ -42,6 +42,7 @@ void MpcController::setParam(ros::NodeHandle &nh)
     nh.param("mpc/w_goal", cfg_.w_goal, 10.0);
     nh.param("mpc/w_dapi", cfg_.w_dapi, 0.0);
     nh.param("mpc/dynamic_hard_reject_enable", cfg_.dynamic_hard_reject_enable, true);
+    nh.param("mpc/dynamic_collision_hard_reject_enable", cfg_.dynamic_collision_hard_reject_enable, true);
     nh.param("mpc/static_penalty", cfg_.static_penalty, 500.0);
     nh.param("mpc/w_static", cfg_.w_static, 1.0);
     nh.param("mpc/use_dynamic_size", cfg_.use_dynamic_size, true);
@@ -49,6 +50,10 @@ void MpcController::setParam(ros::NodeHandle &nh)
     nh.param("mpc/dynamic_min_radius", cfg_.dynamic_min_radius, 0.20);
     nh.param("mpc/w_prox", cfg_.w_prox, 5.0);
     nh.param("mpc/prox_margin", cfg_.prox_margin, 0.6);
+    nh.param("mpc/corridor_enable", cfg_.corridor_enable, true);
+    nh.param("mpc/corridor_hard_reject_enable", cfg_.corridor_hard_reject_enable, true);
+    nh.param("mpc/w_corridor", cfg_.w_corridor, 20.0);
+    nh.param("mpc/corridor_hard_margin", cfg_.corridor_hard_margin, 0.30);
     nh.param("mpc/use_best", cfg_.use_best, true);
     nh.param("mpc/fix_step_params", cfg_.fix_step_params, false);
     nh.param("mpc/goal_arrival_threshold", cfg_.goal_arrival_threshold, 0.3);
@@ -111,6 +116,17 @@ void MpcController::setCollision(const CollisionDetection::Ptr &col)
 void MpcController::setRiskField(const DynamicRiskField &rf)
 {
     risk_field_ = rf;
+}
+
+void MpcController::setWalkingCorridor(const DynamicWalkingCorridor::Candidate &candidate)
+{
+    walking_corridor_ = candidate;
+    has_walking_corridor_ = candidate.feasible && candidate.length > 1e-6 && candidate.half_width > 1e-6;
+}
+
+void MpcController::clearWalkingCorridor()
+{
+    has_walking_corridor_ = false;
 }
 
 void MpcController::setDynamicObstacles(const std::vector<Eigen::Vector3d> &pos,
@@ -336,6 +352,7 @@ void MpcController::rolloutBatch(
     int n_obs = (int)obs_pos.size();
     last_debug_metrics_.dynamic_reject_count = 0;
     last_debug_metrics_.static_reject_count = 0;
+    last_debug_metrics_.corridor_reject_count = 0;
     last_debug_metrics_.min_dynamic_clearance = std::numeric_limits<double>::infinity();
     last_debug_metrics_.min_cpa_time = std::numeric_limits<double>::infinity();
     double risk_thresh = cfg_.risk_hard_threshold;
@@ -368,6 +385,7 @@ void MpcController::rolloutBatch(
         double total_cost = 0.0;
         bool static_collided = false;
         bool dyn_collided = false;
+        bool corridor_violated = false;
         bool arrived_early = false;
         double rollout_min_dynamic_clearance = std::numeric_limits<double>::infinity();
         double rollout_min_cpa_time = std::numeric_limits<double>::infinity();
@@ -419,6 +437,7 @@ void MpcController::rolloutBatch(
             // ---- CoM path: FOV-gated proximity cost + dynamic check ----
             double prox_cost = 0.0;
             double risk_cost = 0.0;
+            double corridor_cost = 0.0;
             int risk_evals = 0;
             double step_min_dynamic_clearance = std::numeric_limits<double>::infinity();
             double step_min_cpa_time = std::numeric_limits<double>::infinity();
@@ -427,6 +446,22 @@ void MpcController::rolloutBatch(
                 double px = com_path[pi](0);
                 double py = com_path[pi](1);
                 const double point_t = n * step_dt + (double)(pi + 1) * path_dt;
+
+                if (cfg_.corridor_enable && has_walking_corridor_)
+                {
+                    const double outside = DynamicWalkingCorridor::outsideDistance(
+                        walking_corridor_, Eigen::Vector2d(px, py));
+                    if (outside > 0.0)
+                    {
+                        corridor_cost += cfg_.w_corridor * outside * outside;
+                        if (cfg_.corridor_hard_reject_enable &&
+                            outside > cfg_.corridor_hard_margin)
+                        {
+                            corridor_violated = true;
+                            break;
+                        }
+                    }
+                }
 
                 // FOV gate: beyond perception range → treat as traversable
                 bool in_fov = true;
@@ -480,7 +515,7 @@ void MpcController::rolloutBatch(
                         if (dyn_clearance < last_debug_metrics_.min_dynamic_clearance)
                             last_debug_metrics_.min_dynamic_clearance = dyn_clearance;
 
-                        if (cfg_.dynamic_hard_reject_enable &&
+                        if (cfg_.dynamic_collision_hard_reject_enable &&
                             ddx * ddx + ddy * ddy < dyn_radius * dyn_radius)
                         {
                             dyn_collided = true;
@@ -524,7 +559,7 @@ void MpcController::rolloutBatch(
                     }
                 }
                 // else: beyond FOV, skip all checks (optimistic)
-                if (dyn_collided || static_collided)
+                if (dyn_collided || static_collided || corridor_violated)
                     break;
             }
 
@@ -534,13 +569,13 @@ void MpcController::rolloutBatch(
                 risk_cost = w_risk * risk_cost / risk_evals;
             }
 
-            if (dyn_collided || static_collided)
+            if (dyn_collided || static_collided || corridor_violated)
             {
                 total_cost = std::numeric_limits<double>::infinity();
                 break;
             }
 
-            total_cost += move_cost + steer_cost + dapi_cost + risk_cost + prox_cost;
+            total_cost += move_cost + steer_cost + dapi_cost + risk_cost + prox_cost + corridor_cost;
 
             prev_com_x = fx;
             prev_com_y = fy;
@@ -562,13 +597,15 @@ void MpcController::rolloutBatch(
 
         // Hard-inf any trajectory that touched a static or dynamic obstacle,
         // regardless of where the break happened (foot placement or CoM path).
-        if (static_collided || dyn_collided)
+        if (static_collided || dyn_collided || corridor_violated)
         {
             total_cost = std::numeric_limits<double>::infinity();
             if (dyn_collided)
                 last_debug_metrics_.dynamic_reject_count++;
             if (static_collided)
                 last_debug_metrics_.static_reject_count++;
+            if (corridor_violated)
+                last_debug_metrics_.corridor_reject_count++;
         }
         else if (!arrived_early)
         {

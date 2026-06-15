@@ -6,6 +6,7 @@
 #include <std_msgs/String.h>
 
 #include <cmath>
+#include <iomanip>
 #include <sstream>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_types.h>
@@ -43,6 +44,7 @@ namespace cane_planner
         nh.param("mpc/stop_advice_enforce", mpc_stop_advice_enforce_, true);
         nh.param("mpc/stop_hold_time", mpc_stop_hold_time_, 0.8);
         nh.param("mpc/stop_release_clear_time", mpc_stop_release_clear_time_, 0.5);
+        nh.param("mpc/corridor_stop_enable", mpc_corridor_stop_enable_, true);
         nh.param("mpc/interaction_enable", mpc_interaction_enable_, false);
         nh.param("mpc/interaction_enable_yield", mpc_interaction_enable_yield_, false);
         nh.param("mpc/interaction_st_horizon", mpc_interaction_st_horizon_, 4.0);
@@ -120,6 +122,13 @@ namespace cane_planner
             kinematic_mppi_controller_->setCollision(collision_);
             kinematic_mppi_controller_->init();
         }
+        if (planner_ == 3 || planner_ == 4)
+        {
+            ROS_WARN(" Dynamic walking corridor start");
+            dynamic_walking_corridor_.reset(new DynamicWalkingCorridor);
+            dynamic_walking_corridor_->setParam(nh);
+            dynamic_walking_corridor_->setCollision(collision_);
+        }
         //init bspline
         ROS_WARN(" Bspline start");
         bspline_init_.reset(new NonUniformBspline);
@@ -171,6 +180,7 @@ namespace cane_planner
         mpc_interaction_mode_pub_ = nh.advertise<std_msgs::String>("/mpc/interaction_mode", 10);
         mpc_interaction_debug_pub_ = nh.advertise<std_msgs::Float64MultiArray>("/mpc/interaction_debug", 10);
         mpc_dynamic_body_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/mpc/dynamic_obstacle_bodies", 10);
+        mpc_walking_corridor_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/mpc/walking_corridors", 10);
         if (gazebo_sim_)
         {
             cmd_vel_pub_ = nh.advertise<geometry_msgs::Twist>("/cmd_vel_footprint", 10);
@@ -596,6 +606,293 @@ namespace cane_planner
         debug_msg.data.push_back(mpc_interaction_debug_.st_path_t_enter);
         debug_msg.data.push_back(mpc_interaction_debug_.st_path_t_exit);
         mpc_interaction_debug_pub_.publish(debug_msg);
+    }
+
+    DynamicWalkingCorridor::Result PlannerManager::updateAndPublishWalkingCorridor(
+        const Eigen::Vector3d& current_pose,
+        const std::vector<Eigen::Vector3d>& obs_pos,
+        const std::vector<Eigen::Vector3d>& obs_vel,
+        const std::vector<Eigen::Vector3d>& obs_size)
+    {
+        DynamicWalkingCorridor::Result empty_result;
+        if (!dynamic_walking_corridor_)
+            return empty_result;
+        const auto cfg = dynamic_walking_corridor_->getConfig();
+        if (!cfg.enable)
+            return empty_result;
+
+        const auto reference_path = buildWalkingCorridorReferencePath(current_pose);
+        auto result = reference_path.size() >= 2
+            ? dynamic_walking_corridor_->plan(reference_path, obs_pos, obs_vel, obs_size)
+            : dynamic_walking_corridor_->plan(
+                current_pose.head(2), computeInteractionPathForward(current_pose),
+                obs_pos, obs_vel, obs_size);
+        publishWalkingCorridor(result);
+        return result;
+    }
+
+    std::vector<Eigen::Vector2d> PlannerManager::buildWalkingCorridorReferencePath(
+        const Eigen::Vector3d& current_pose) const
+    {
+        std::vector<Eigen::Vector2d> path;
+        if (!dynamic_walking_corridor_)
+            return path;
+
+        const auto cfg = dynamic_walking_corridor_->getConfig();
+        const double max_len = std::max(0.5, cfg.length);
+        Eigen::Vector2d current = current_pose.head(2);
+        path.push_back(current);
+
+        const std::vector<Eigen::Vector2d>& ref =
+            global_path_dense_.size() >= 2 ? global_path_dense_ : global_waypoints_;
+        if (ref.size() >= 2)
+        {
+            double best_dist = std::numeric_limits<double>::infinity();
+            size_t best_seg = 0;
+            Eigen::Vector2d best_proj = ref.front();
+
+            for (size_t i = 0; i + 1 < ref.size(); ++i)
+            {
+                const Eigen::Vector2d a = ref[i];
+                const Eigen::Vector2d b = ref[i + 1];
+                const Eigen::Vector2d ab = b - a;
+                const double len_sq = ab.squaredNorm();
+                if (len_sq < 1e-9)
+                    continue;
+                double u = (current - a).dot(ab) / len_sq;
+                u = std::max(0.0, std::min(1.0, u));
+                const Eigen::Vector2d proj = a + u * ab;
+                const double dist = (current - proj).squaredNorm();
+                if (dist < best_dist)
+                {
+                    best_dist = dist;
+                    best_seg = i;
+                    best_proj = proj;
+                }
+            }
+
+            double accum = 0.0;
+            Eigen::Vector2d prev = current;
+            if ((best_proj - current).norm() > 0.05)
+            {
+                path.push_back(best_proj);
+                accum += (best_proj - current).norm();
+                prev = best_proj;
+            }
+
+            Eigen::Vector2d seg_end = ref[best_seg + 1];
+            if ((seg_end - best_proj).norm() > 1e-6)
+            {
+                const Eigen::Vector2d seg = seg_end - best_proj;
+                const double seg_len = seg.norm();
+                if (accum + seg_len > max_len)
+                {
+                    path.push_back(best_proj + ((max_len - accum) / seg_len) * seg);
+                    return path;
+                }
+                path.push_back(seg_end);
+                accum += seg_len;
+                prev = seg_end;
+            }
+
+            for (size_t i = best_seg + 1; i + 1 < ref.size() && accum < max_len; ++i)
+            {
+                const Eigen::Vector2d next = ref[i + 1];
+                const Eigen::Vector2d seg = next - prev;
+                const double seg_len = seg.norm();
+                if (seg_len < 1e-6)
+                    continue;
+                if (accum + seg_len > max_len)
+                {
+                    path.push_back(prev + ((max_len - accum) / seg_len) * seg);
+                    accum = max_len;
+                    break;
+                }
+                path.push_back(next);
+                accum += seg_len;
+                prev = next;
+            }
+
+            if (path.size() >= 2)
+                return path;
+        }
+
+        if (global_waypoints_.empty() || global_wp_idx_ + 1 >= global_waypoints_.size())
+        {
+            Eigen::Vector2d fallback(mpc_sim_goal_(0), mpc_sim_goal_(1));
+            if ((fallback - current).norm() < 1e-3)
+                fallback = end_pt_;
+            if ((fallback - current).norm() > 1e-3)
+                path.push_back(fallback);
+            return path;
+        }
+
+        double accum = 0.0;
+        Eigen::Vector2d prev = current;
+        for (size_t i = global_wp_idx_ + 1; i < global_waypoints_.size() && accum < max_len; ++i)
+        {
+            const Eigen::Vector2d next = global_waypoints_[i];
+            Eigen::Vector2d seg = next - prev;
+            const double seg_len = seg.norm();
+            if (seg_len < 1e-6)
+                continue;
+
+            if (accum + seg_len > max_len)
+            {
+                const double remain = max_len - accum;
+                path.push_back(prev + (remain / seg_len) * seg);
+                accum = max_len;
+                break;
+            }
+
+            path.push_back(next);
+            accum += seg_len;
+            prev = next;
+        }
+
+        if (path.size() < 2 && (end_pt_ - current).norm() > 1e-3)
+            path.push_back(end_pt_);
+        return path;
+    }
+
+    void PlannerManager::publishWalkingCorridor(const DynamicWalkingCorridor::Result& result)
+    {
+        if (!mpc_walking_corridor_pub_)
+            return;
+
+        visualization_msgs::MarkerArray markers;
+        visualization_msgs::Marker clear;
+        clear.header.frame_id = "world";
+        clear.header.stamp = ros::Time::now();
+        clear.ns = "mpc_walking_corridors";
+        clear.action = visualization_msgs::Marker::DELETEALL;
+        clear.pose.orientation.w = 1.0;
+        markers.markers.push_back(clear);
+
+        if (!dynamic_walking_corridor_)
+        {
+            mpc_walking_corridor_pub_.publish(markers);
+            return;
+        }
+        const auto cfg = dynamic_walking_corridor_->getConfig();
+
+        for (size_t i = 0; i < result.candidates.size(); ++i)
+        {
+            const auto& c = result.candidates[i];
+            const bool selected =
+                result.has_feasible && c.id == result.selected.id;
+
+            auto setCorridorColor = [&](visualization_msgs::Marker& mk)
+            {
+                if (!c.feasible)
+                {
+                    mk.color.r = 1.0;
+                    mk.color.g = 0.15;
+                    mk.color.b = 0.05;
+                    mk.color.a = 0.25;
+                }
+                else if (selected)
+                {
+                    mk.color.r = 0.1;
+                    mk.color.g = 1.0;
+                    mk.color.b = 0.25;
+                    mk.color.a = 0.38;
+                }
+                else
+                {
+                    mk.color.r = 0.1;
+                    mk.color.g = 0.45;
+                    mk.color.b = 1.0;
+                    mk.color.a = 0.20;
+                }
+            };
+
+            if (c.centerline.size() >= 2)
+            {
+                for (size_t si = 0; si + 1 < c.centerline.size(); ++si)
+                {
+                    Eigen::Vector2d seg = c.centerline[si + 1] - c.centerline[si];
+                    const double seg_len = seg.norm();
+                    if (seg_len < 1e-6)
+                        continue;
+                    visualization_msgs::Marker mk;
+                    mk.header = clear.header;
+                    mk.ns = "mpc_walking_corridors";
+                    mk.id = static_cast<int>(i) * 100 + static_cast<int>(si) + 1;
+                    mk.type = visualization_msgs::Marker::CUBE;
+                    mk.action = visualization_msgs::Marker::ADD;
+                    Eigen::Vector2d center = 0.5 * (c.centerline[si] + c.centerline[si + 1]);
+                    mk.pose.position.x = center.x();
+                    mk.pose.position.y = center.y();
+                    mk.pose.position.z = 0.06 + 0.02 * static_cast<double>(i);
+                    const double yaw = std::atan2(seg.y(), seg.x());
+                    mk.pose.orientation = tf::createQuaternionMsgFromYaw(yaw);
+                    mk.scale.x = seg_len;
+                    mk.scale.y = 2.0 * c.half_width;
+                    mk.scale.z = 0.04;
+                    mk.lifetime = ros::Duration(0.3);
+                    setCorridorColor(mk);
+                    markers.markers.push_back(mk);
+                }
+            }
+            else
+            {
+                visualization_msgs::Marker mk;
+                mk.header = clear.header;
+                mk.ns = "mpc_walking_corridors";
+                mk.id = static_cast<int>(i) + 1;
+                mk.type = visualization_msgs::Marker::CUBE;
+                mk.action = visualization_msgs::Marker::ADD;
+                Eigen::Vector2d center = c.start + 0.5 * cfg.length * c.forward;
+                mk.pose.position.x = center.x();
+                mk.pose.position.y = center.y();
+                mk.pose.position.z = 0.06 + 0.02 * static_cast<double>(i);
+                const double yaw = std::atan2(c.forward.y(), c.forward.x());
+                mk.pose.orientation = tf::createQuaternionMsgFromYaw(yaw);
+                mk.scale.x = cfg.length;
+                mk.scale.y = 2.0 * c.half_width;
+                mk.scale.z = 0.04;
+                mk.lifetime = ros::Duration(0.3);
+                setCorridorColor(mk);
+                markers.markers.push_back(mk);
+            }
+
+            visualization_msgs::Marker label;
+            label.header = clear.header;
+            label.ns = "mpc_walking_corridor_labels";
+            label.id = static_cast<int>(i) + 101;
+            label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+            label.action = visualization_msgs::Marker::ADD;
+            label.pose.position.x = c.start.x() + 0.35 * cfg.length * c.forward.x();
+            label.pose.position.y = c.start.y() + 0.35 * cfg.length * c.forward.y();
+            label.pose.position.z = 0.35 + 0.04 * static_cast<double>(i);
+            label.pose.orientation.w = 1.0;
+            label.scale.z = 0.20;
+            std::ostringstream ss;
+            ss << (selected ? "selected " : "")
+               << "off=" << std::fixed << std::setprecision(1) << c.lateral_offset
+               << " cost=" << std::setprecision(2)
+               << (std::isfinite(c.total_cost) ? c.total_cost : -1.0)
+               << " w=" << c.half_width
+               << " st=" << (c.blocked_static ? 1 : 0)
+               << " dyn=" << c.dynamic_block_count
+               << " tr=" << (c.truncated_static ? 1 : 0);
+            if (c.static_min_width_valid)
+            {
+                ss << " sw_s=" << std::setprecision(2) << c.static_min_s
+                   << " sw=(" << c.static_min_point.x()
+                   << "," << c.static_min_point.y() << ")";
+            }
+            label.text = ss.str();
+            label.color.a = 0.85;
+            label.color.r = c.feasible ? 0.8 : 1.0;
+            label.color.g = c.feasible ? 1.0 : 0.2;
+            label.color.b = c.feasible ? 0.8 : 0.2;
+            label.lifetime = ros::Duration(0.3);
+            markers.markers.push_back(label);
+        }
+
+        mpc_walking_corridor_pub_.publish(markers);
     }
 
     void PlannerManager::GoalCallback(const geometry_msgs::PoseStamped::ConstPtr &msg)
@@ -1278,12 +1575,15 @@ namespace cane_planner
 
     void PlannerManager::generateGlobalWaypoints()
     {
+        global_path_dense_.clear();
         global_waypoints_.clear();
         global_wp_idx_ = 0;
 
         auto path = astar_finder_->getPath();  // vector<Eigen::Vector2d>
+        global_path_dense_ = path;
         if (path.size() < 2)
         {
+            global_path_dense_.clear();
             global_waypoints_.push_back(end_pt_);
             ROS_WARN("[MPC global] A* path too short, using direct goal as only waypoint");
             return;
@@ -1558,6 +1858,11 @@ namespace cane_planner
         // MPC规划一步
         updateInteractionDebug(current_com, obs_pos, obs_vel, obs_size);
         publishInteractionState();
+        auto corridor_result = updateAndPublishWalkingCorridor(current_com, obs_pos, obs_vel, obs_size);
+        if (corridor_result.has_feasible)
+            mpc_controller_->setWalkingCorridor(corridor_result.selected);
+        else
+            mpc_controller_->clearWalkingCorridor();
 
         Eigen::Vector3d control = mpc_controller_->plan(
             lfpc_model_, mpc_sim_goal_, obs_pos, obs_vel, obs_size);
@@ -1565,7 +1870,7 @@ namespace cane_planner
         {
             const auto dbg = mpc_controller_->getDebugMetrics();
             std_msgs::Float64MultiArray metrics;
-            metrics.data.reserve(11);
+            metrics.data.reserve(12);
             metrics.data.push_back(dbg.plan_time_ms);
             metrics.data.push_back(dbg.valid_sample_ratio);
             metrics.data.push_back(std::isfinite(dbg.best_total_cost) ? dbg.best_total_cost : -1.0);
@@ -1577,6 +1882,7 @@ namespace cane_planner
             metrics.data.push_back(dbg.plan_valid ? 1.0 : 0.0);
             metrics.data.push_back(std::isfinite(dbg.best_min_dynamic_clearance) ? dbg.best_min_dynamic_clearance : -1.0);
             metrics.data.push_back(std::isfinite(dbg.best_min_cpa_time) ? dbg.best_min_cpa_time : -1.0);
+            metrics.data.push_back((double)dbg.corridor_reject_count);
             mpc_debug_metrics_pub_.publish(metrics);
         }
 
@@ -1590,10 +1896,19 @@ namespace cane_planner
             mpc_interaction_enable_yield_ &&
             mpc_interaction_scene_ == SCENE_CROSSING &&
             (interaction_yield_active || mpc_interaction_debug_.yield_required);
+        const bool corridor_infeasible_stop_active =
+            mpc_corridor_stop_enable_ &&
+            !corridor_result.candidates.empty() &&
+            !corridor_result.has_feasible;
 
         bool raw_stop_advice = false;
         std::string raw_stop_reason = "OK";
-        if (mpc_stop_advice_enable_ && interaction_yield_stop_active)
+        if (mpc_stop_advice_enable_ && corridor_infeasible_stop_active)
+        {
+            raw_stop_advice = true;
+            raw_stop_reason = "CORRIDOR_INFEASIBLE";
+        }
+        else if (mpc_stop_advice_enable_ && interaction_yield_stop_active)
         {
             raw_stop_advice = true;
             raw_stop_reason = "INTERACTION_YIELD_CONFLICT";
@@ -1624,7 +1939,9 @@ namespace cane_planner
                 const bool hold_elapsed =
                     mpc_stop_enter_time_.isZero() ||
                     (now - mpc_stop_enter_time_).toSec() >= mpc_stop_hold_time_;
-                const bool release_clear = !interaction_yield_stop_active;
+                const bool release_clear =
+                    !interaction_yield_stop_active &&
+                    !corridor_infeasible_stop_active;
                 if (!release_clear)
                 {
                     mpc_stop_clear_since_ = ros::Time(0);
@@ -1842,6 +2159,7 @@ namespace cane_planner
 
         updateInteractionDebug(current_pose, obs_pos, obs_vel, obs_size);
         publishInteractionState();
+        updateAndPublishWalkingCorridor(current_pose, obs_pos, obs_vel, obs_size);
 
         Eigen::Vector2d control = kinematic_mppi_controller_->plan(
             current_pose, mpc_sim_goal_, obs_pos, obs_vel, obs_size);

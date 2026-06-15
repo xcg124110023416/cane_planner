@@ -182,6 +182,7 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
     metrics_count = 0
     plan_valid_count = 0
     total_plan_count = 0
+    corridor_reject_count = 0
 
     plan_time = RunningStats()
     valid_ratio = RunningStats()
@@ -314,6 +315,8 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
                     value = metric_or_none(data, 10)
                     if value is not None:
                         best_ttc.add(value)
+                if len(data) > 11:
+                    corridor_reject_count += int(max(0.0, data[11]))
 
             elif topic == odom_topic:
                 odom_xy = (
@@ -597,6 +600,7 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
     if total_plan_count > 0:
         lines.append("plan_valid_ratio: {:.3f} ({}/{})".format(
             plan_valid_count / float(total_plan_count), plan_valid_count, total_plan_count))
+    lines.append("corridor_reject_count: {}".format(corridor_reject_count))
     lines.append("")
     lines.append("actual_path_length: {}".format(fmt(actual_path_length, " m")))
     lines.append("straight_start_to_end_distance: {}".format(fmt(straight_distance, " m")))

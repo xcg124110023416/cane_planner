@@ -41,6 +41,7 @@ add_library( path_searching
     src/kinodynamic_astar.cpp
     src/lfpc.cpp
     src/dynamic_risk_field.cpp
+    src/dynamic_walking_corridor.cpp
     src/mpc_controller.cpp
     src/kinematic_mppi_controller.cpp
     )
@@ -53,6 +54,13 @@ if(CATKIN_ENABLE_TESTING)
     test/test_kinematic_mppi_controller.cpp
   )
   target_link_libraries(test_kinematic_mppi_controller
+    path_searching
+    ${catkin_LIBRARIES}
+  )
+  catkin_add_gtest(test_dynamic_walking_corridor
+    test/test_dynamic_walking_corridor.cpp
+  )
+  target_link_libraries(test_dynamic_walking_corridor
     path_searching
     ${catkin_LIBRARIES}
   )
