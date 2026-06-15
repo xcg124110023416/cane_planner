@@ -22,7 +22,7 @@ find_package(catkin REQUIRED COMPONENTS
 
 catkin_package(
  INCLUDE_DIRS include
- LIBRARIES path_searching
+ LIBRARIES path_searching convex_corridor
  CATKIN_DEPENDS plan_env plan_ctrl
 #  DEPENDS system_lib
 )
@@ -35,6 +35,13 @@ include_directories(
     ${PCL_INCLUDE_DIRS}
 )
 
+add_library(convex_corridor
+    src/convex_corridor.cpp
+    )
+target_link_libraries(convex_corridor
+    ${catkin_LIBRARIES}
+    )
+
 
 add_library( path_searching
     src/astar.cpp
@@ -46,6 +53,7 @@ add_library( path_searching
     src/kinematic_mppi_controller.cpp
     )
 target_link_libraries( path_searching
+    convex_corridor
     ${catkin_LIBRARIES} 
     )  
 
@@ -62,6 +70,13 @@ if(CATKIN_ENABLE_TESTING)
   )
   target_link_libraries(test_dynamic_walking_corridor
     path_searching
+    ${catkin_LIBRARIES}
+  )
+  catkin_add_gtest(test_convex_corridor
+    test/test_convex_corridor.cpp
+  )
+  target_link_libraries(test_convex_corridor
+    convex_corridor
     ${catkin_LIBRARIES}
   )
 endif()
