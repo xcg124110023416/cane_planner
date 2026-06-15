@@ -82,6 +82,10 @@
     <arg name="convex_corridor_pedestrian_radius" default="0.35"/>
     <arg name="convex_corridor_pedestrian_time_margin" default="0.4"/>
     <arg name="convex_corridor_start_grace_length" default="0.4"/>
+    <arg name="mpc_convex_corridor_enable" default="$(arg convex_corridor_enable)"/>
+    <arg name="mpc_convex_corridor_hard_reject_enable" default="false"/>
+    <arg name="mpc_w_convex_corridor" default="30.0"/>
+    <arg name="mpc_convex_corridor_hard_margin" default="0.05"/>
 
     
     <node pkg="plan_manage" name="kin_replan_node" type="kin_replan_node" output="screen" >
@@ -281,6 +285,10 @@
         <param name="mpc/corridor_hard_reject_enable" value="false" type="bool"/>
         <param name="mpc/w_corridor" value="20.0" type="double"/>
         <param name="mpc/corridor_hard_margin" value="0.30" type="double"/>
+        <param name="mpc/convex_corridor_enable" value="$(arg mpc_convex_corridor_enable)" type="bool"/>
+        <param name="mpc/convex_corridor_hard_reject_enable" value="$(arg mpc_convex_corridor_hard_reject_enable)" type="bool"/>
+        <param name="mpc/w_convex_corridor" value="$(arg mpc_w_convex_corridor)" type="double"/>
+        <param name="mpc/convex_corridor_hard_margin" value="$(arg mpc_convex_corridor_hard_margin)" type="double"/>
         <param name="mpc/use_best" value="false" type="bool"/>
         <!-- 使用真实模式true，为false则步长和步宽不固定 -->
         <!-- Guide-cane gait model: forward motion is supplied by the user, MPC mainly optimizes steering. -->

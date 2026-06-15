@@ -2084,11 +2084,15 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
         updateInteractionDebug(current_com, obs_pos, obs_vel, obs_size);
         publishInteractionState();
         auto corridor_result = updateAndPublishWalkingCorridor(current_com, obs_pos, obs_vel, obs_size);
-        updateAndPublishConvexCorridor(current_com, obs_pos, obs_vel, obs_size);
+        auto convex_corridor_result = updateAndPublishConvexCorridor(current_com, obs_pos, obs_vel, obs_size);
         if (corridor_result.has_feasible)
             mpc_controller_->setWalkingCorridor(corridor_result.selected);
         else
             mpc_controller_->clearWalkingCorridor();
+        if (convex_corridor_ && convex_corridor_result.feasible)
+            mpc_controller_->setConvexCorridor(convex_corridor_result.segments);
+        else
+            mpc_controller_->clearConvexCorridor();
 
         Eigen::Vector3d control = mpc_controller_->plan(
             lfpc_model_, mpc_sim_goal_, obs_pos, obs_vel, obs_size);
@@ -2109,6 +2113,9 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
             metrics.data.push_back(std::isfinite(dbg.best_min_dynamic_clearance) ? dbg.best_min_dynamic_clearance : -1.0);
             metrics.data.push_back(std::isfinite(dbg.best_min_cpa_time) ? dbg.best_min_cpa_time : -1.0);
             metrics.data.push_back((double)dbg.corridor_reject_count);
+            metrics.data.push_back((double)dbg.convex_corridor_reject_count);
+            metrics.data.push_back(dbg.max_convex_corridor_violation);
+            metrics.data.push_back((double)dbg.convex_corridor_segments);
             mpc_debug_metrics_pub_.publish(metrics);
         }
 

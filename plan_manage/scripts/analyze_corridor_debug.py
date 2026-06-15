@@ -153,6 +153,9 @@ def analyze_bag(bag_path):
                     "plan_valid": data[8] if len(data) > 8 else float("nan"),
                     "best_clearance": data[9] if len(data) > 9 else float("nan"),
                     "corridor_reject_count": data[11] if len(data) > 11 else float("nan"),
+                    "convex_reject_count": data[12] if len(data) > 12 else float("nan"),
+                    "convex_max_violation": data[13] if len(data) > 13 else float("nan"),
+                    "convex_segments": data[14] if len(data) > 14 else float("nan"),
                     "dynamic_reject_count": data[5] if len(data) > 5 else float("nan"),
                     "static_reject_count": data[6] if len(data) > 6 else float("nan"),
                 })
@@ -223,6 +226,12 @@ def write_outputs(result, out_dir):
     feasible_like_count = sum(1 for s in corridor if not s["st"] and s["w"] >= 0.25)
     widths = [s["w"] for s in corridor if math.isfinite(s["w"])]
     longest_st = summarize_boolean_runs(corridor, "st")
+    convex_rejects = [d["convex_reject_count"] for d in debug
+                      if math.isfinite(d.get("convex_reject_count", float("nan")))]
+    convex_violations = [d["convex_max_violation"] for d in debug
+                         if math.isfinite(d.get("convex_max_violation", float("nan")))]
+    convex_segments = [d["convex_segments"] for d in debug
+                       if math.isfinite(d.get("convex_segments", float("nan")))]
 
     stop_with_context = []
     for reason in reasons:
@@ -265,6 +274,21 @@ def write_outputs(result, out_dir):
             f.write("  longest st=1 run: {:.2f}s -> {:.2f}s duration={:.2f}s\n".format(
                 longest_st[0], longest_st[1], longest_st[1] - longest_st[0]))
 
+        f.write("\nConvex corridor:\n")
+        if convex_segments:
+            f.write("  segments: mean={:.2f} min={:.0f} max={:.0f}\n".format(
+                sum(convex_segments) / len(convex_segments),
+                min(convex_segments), max(convex_segments)))
+        else:
+            f.write("  segments: none\n")
+        if convex_rejects:
+            f.write("  reject: mean={:.2f} max={:.0f}\n".format(
+                sum(convex_rejects) / len(convex_rejects), max(convex_rejects)))
+        if convex_violations:
+            f.write("  max violation: mean={:.3f} max={:.3f}\n".format(
+                sum(convex_violations) / len(convex_violations),
+                max(convex_violations)))
+
         f.write("\nFirst non-OK stop contexts:\n")
         if not stop_with_context:
             f.write("  none\n")
@@ -279,8 +303,10 @@ def write_outputs(result, out_dir):
             else:
                 f.write(" corridor[NA]")
             if d:
-                f.write(" debug[valid={:.3f} corridor_reject={} static_reject={} dynamic_reject={}]".format(
+                f.write(" debug[valid={:.3f} corridor_reject={} convex_reject={} convex_v={:.3f} static_reject={} dynamic_reject={}]".format(
                     d["valid_ratio"], d["corridor_reject_count"],
+                    d.get("convex_reject_count", float("nan")),
+                    d.get("convex_max_violation", float("nan")),
                     d["static_reject_count"], d["dynamic_reject_count"]))
             else:
                 f.write(" debug[NA]")
@@ -302,8 +328,10 @@ def write_outputs(result, out_dir):
             else:
                 f.write(" corridor[NA]")
             if d:
-                f.write(" debug[valid={:.3f} corridor_reject={} static_reject={} dynamic_reject={}]".format(
+                f.write(" debug[valid={:.3f} corridor_reject={} convex_reject={} convex_v={:.3f} static_reject={} dynamic_reject={}]".format(
                     d["valid_ratio"], d["corridor_reject_count"],
+                    d.get("convex_reject_count", float("nan")),
+                    d.get("convex_max_violation", float("nan")),
                     d["static_reject_count"], d["dynamic_reject_count"]))
             else:
                 f.write(" debug[NA]")
@@ -316,6 +344,8 @@ def write_outputs(result, out_dir):
             f.write("  Dominant issue: dynamic corridor occupancy (dyn>0 for most labels).\n")
         elif debug and max((d.get("corridor_reject_count", 0.0) for d in debug), default=0.0) > 0:
             f.write("  Dominant issue may be MPPI corridor hard rejection despite feasible labels.\n")
+        elif debug and max((d.get("convex_reject_count", 0.0) for d in debug), default=0.0) > 0:
+            f.write("  Dominant issue may be MPPI convex-corridor hard rejection.\n")
         else:
             f.write("  Dominant issue unclear from recorded topics; inspect CSV timeline.\n")
 

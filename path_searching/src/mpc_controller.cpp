@@ -54,6 +54,10 @@ void MpcController::setParam(ros::NodeHandle &nh)
     nh.param("mpc/corridor_hard_reject_enable", cfg_.corridor_hard_reject_enable, true);
     nh.param("mpc/w_corridor", cfg_.w_corridor, 20.0);
     nh.param("mpc/corridor_hard_margin", cfg_.corridor_hard_margin, 0.30);
+    nh.param("mpc/convex_corridor_enable", cfg_.convex_corridor_enable, false);
+    nh.param("mpc/convex_corridor_hard_reject_enable", cfg_.convex_corridor_hard_reject_enable, false);
+    nh.param("mpc/w_convex_corridor", cfg_.w_convex_corridor, 30.0);
+    nh.param("mpc/convex_corridor_hard_margin", cfg_.convex_corridor_hard_margin, 0.05);
     nh.param("mpc/use_best", cfg_.use_best, true);
     nh.param("mpc/fix_step_params", cfg_.fix_step_params, false);
     nh.param("mpc/goal_arrival_threshold", cfg_.goal_arrival_threshold, 0.3);
@@ -127,6 +131,18 @@ void MpcController::setWalkingCorridor(const DynamicWalkingCorridor::Candidate &
 void MpcController::clearWalkingCorridor()
 {
     has_walking_corridor_ = false;
+}
+
+void MpcController::setConvexCorridor(const std::vector<ConvexCorridor::Segment> &segments)
+{
+    convex_corridor_segments_ = segments;
+    has_convex_corridor_ = !convex_corridor_segments_.empty();
+}
+
+void MpcController::clearConvexCorridor()
+{
+    has_convex_corridor_ = false;
+    convex_corridor_segments_.clear();
 }
 
 void MpcController::setDynamicObstacles(const std::vector<Eigen::Vector3d> &pos,
@@ -273,6 +289,25 @@ void MpcController::ensurePool(int K)
     pool_initialized_ = true;
 }
 
+const ConvexCorridor::Segment* MpcController::nearestConvexSegment(const Eigen::Vector2d &point) const
+{
+    if (!has_convex_corridor_ || convex_corridor_segments_.empty())
+        return nullptr;
+
+    const ConvexCorridor::Segment* best = nullptr;
+    double best_dist = std::numeric_limits<double>::infinity();
+    for (const auto &seg : convex_corridor_segments_)
+    {
+        const double d = (point - seg.center).squaredNorm();
+        if (d < best_dist)
+        {
+            best_dist = d;
+            best = &seg;
+        }
+    }
+    return best;
+}
+
 // =========================================================================
 // Sampling
 // =========================================================================
@@ -353,6 +388,10 @@ void MpcController::rolloutBatch(
     last_debug_metrics_.dynamic_reject_count = 0;
     last_debug_metrics_.static_reject_count = 0;
     last_debug_metrics_.corridor_reject_count = 0;
+    last_debug_metrics_.convex_corridor_reject_count = 0;
+    last_debug_metrics_.convex_corridor_segments =
+        has_convex_corridor_ ? static_cast<int>(convex_corridor_segments_.size()) : 0;
+    last_debug_metrics_.max_convex_corridor_violation = 0.0;
     last_debug_metrics_.min_dynamic_clearance = std::numeric_limits<double>::infinity();
     last_debug_metrics_.min_cpa_time = std::numeric_limits<double>::infinity();
     double risk_thresh = cfg_.risk_hard_threshold;
@@ -362,6 +401,7 @@ void MpcController::rolloutBatch(
     double w_risk = cfg_.w_risk;
     double w_goal = cfg_.w_goal;
     double w_prox = cfg_.w_prox;
+    double w_convex_corridor = cfg_.w_convex_corridor;
     double prox_margin = cfg_.prox_margin;
     double dyn_margin = std::max(0.0, cfg_.dynamic_safety_margin);
     double dyn_min_radius = std::max(0.0, cfg_.dynamic_min_radius);
@@ -386,6 +426,7 @@ void MpcController::rolloutBatch(
         bool static_collided = false;
         bool dyn_collided = false;
         bool corridor_violated = false;
+        bool convex_corridor_violated = false;
         bool arrived_early = false;
         double rollout_min_dynamic_clearance = std::numeric_limits<double>::infinity();
         double rollout_min_cpa_time = std::numeric_limits<double>::infinity();
@@ -438,6 +479,7 @@ void MpcController::rolloutBatch(
             double prox_cost = 0.0;
             double risk_cost = 0.0;
             double corridor_cost = 0.0;
+            double convex_corridor_cost = 0.0;
             int risk_evals = 0;
             double step_min_dynamic_clearance = std::numeric_limits<double>::infinity();
             double step_min_cpa_time = std::numeric_limits<double>::infinity();
@@ -459,6 +501,29 @@ void MpcController::rolloutBatch(
                         {
                             corridor_violated = true;
                             break;
+                        }
+                    }
+                }
+
+                if (cfg_.convex_corridor_enable && has_convex_corridor_)
+                {
+                    const ConvexCorridor::Segment* seg =
+                        nearestConvexSegment(Eigen::Vector2d(px, py));
+                    if (seg)
+                    {
+                        const double v =
+                            ConvexCorridor::violation(*seg, Eigen::Vector2d(px, py));
+                        if (v > 0.0)
+                        {
+                            convex_corridor_cost += w_convex_corridor * v * v;
+                            if (v > last_debug_metrics_.max_convex_corridor_violation)
+                                last_debug_metrics_.max_convex_corridor_violation = v;
+                            if (cfg_.convex_corridor_hard_reject_enable &&
+                                v > cfg_.convex_corridor_hard_margin)
+                            {
+                                convex_corridor_violated = true;
+                                break;
+                            }
                         }
                     }
                 }
@@ -559,7 +624,7 @@ void MpcController::rolloutBatch(
                     }
                 }
                 // else: beyond FOV, skip all checks (optimistic)
-                if (dyn_collided || static_collided || corridor_violated)
+                if (dyn_collided || static_collided || corridor_violated || convex_corridor_violated)
                     break;
             }
 
@@ -569,13 +634,14 @@ void MpcController::rolloutBatch(
                 risk_cost = w_risk * risk_cost / risk_evals;
             }
 
-            if (dyn_collided || static_collided || corridor_violated)
+            if (dyn_collided || static_collided || corridor_violated || convex_corridor_violated)
             {
                 total_cost = std::numeric_limits<double>::infinity();
                 break;
             }
 
-            total_cost += move_cost + steer_cost + dapi_cost + risk_cost + prox_cost + corridor_cost;
+            total_cost += move_cost + steer_cost + dapi_cost + risk_cost + prox_cost +
+                          corridor_cost + convex_corridor_cost;
 
             prev_com_x = fx;
             prev_com_y = fy;
@@ -597,7 +663,7 @@ void MpcController::rolloutBatch(
 
         // Hard-inf any trajectory that touched a static or dynamic obstacle,
         // regardless of where the break happened (foot placement or CoM path).
-        if (static_collided || dyn_collided || corridor_violated)
+        if (static_collided || dyn_collided || corridor_violated || convex_corridor_violated)
         {
             total_cost = std::numeric_limits<double>::infinity();
             if (dyn_collided)
@@ -606,6 +672,8 @@ void MpcController::rolloutBatch(
                 last_debug_metrics_.static_reject_count++;
             if (corridor_violated)
                 last_debug_metrics_.corridor_reject_count++;
+            if (convex_corridor_violated)
+                last_debug_metrics_.convex_corridor_reject_count++;
         }
         else if (!arrived_early)
         {

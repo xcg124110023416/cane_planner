@@ -11,6 +11,7 @@
 #include <path_searching/lfpc.h>
 #include <path_searching/dynamic_risk_field.h>
 #include <path_searching/dynamic_walking_corridor.h>
+#include <path_searching/convex_corridor.h>
 #include <plan_env/collision_detection.h>
 
 namespace cane_planner
@@ -73,6 +74,13 @@ public:
         double w_corridor = 20.0;
         double corridor_hard_margin = 0.30;
 
+        // Optional convex corridor constraint. This is developed in parallel
+        // with the existing DWC corridor and is soft by default.
+        bool convex_corridor_enable = false;
+        bool convex_corridor_hard_reject_enable = false;
+        double w_convex_corridor = 30.0;
+        double convex_corridor_hard_margin = 0.05;
+
         // Use best trajectory instead of weighted average (avoids mode collapse)
         bool use_best = true;
 
@@ -104,6 +112,9 @@ public:
         int dynamic_reject_count = 0;
         int static_reject_count = 0;
         int corridor_reject_count = 0;
+        int convex_corridor_reject_count = 0;
+        int convex_corridor_segments = 0;
+        double max_convex_corridor_violation = 0.0;
         int num_samples = 0;
         bool plan_valid = false;
     };
@@ -120,6 +131,8 @@ public:
     void setRiskField(const DynamicRiskField &rf);
     void setWalkingCorridor(const DynamicWalkingCorridor::Candidate &candidate);
     void clearWalkingCorridor();
+    void setConvexCorridor(const std::vector<ConvexCorridor::Segment> &segments);
+    void clearConvexCorridor();
 
     void setDynamicObstacles(const std::vector<Eigen::Vector3d> &pos,
                              const std::vector<Eigen::Vector3d> &vel);
@@ -152,6 +165,8 @@ private:
     DynamicRiskField risk_field_;
     bool has_walking_corridor_ = false;
     DynamicWalkingCorridor::Candidate walking_corridor_;
+    bool has_convex_corridor_ = false;
+    std::vector<ConvexCorridor::Segment> convex_corridor_segments_;
 
     // Pre-allocated LFPC pool for rollout
     std::vector<LFPC::Ptr> lfpc_pool_;
@@ -192,6 +207,7 @@ private:
                                     int N);
     void shiftSequence(Eigen::MatrixXd &mean, int N);
     void ensurePool(int K);
+    const ConvexCorridor::Segment* nearestConvexSegment(const Eigen::Vector2d &point) const;
 };
 
 } // namespace cane_planner
