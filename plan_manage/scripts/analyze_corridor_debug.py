@@ -284,6 +284,21 @@ def write_outputs(result, out_dir):
         d = nearest_by_time(debug, reason["t"])
         stop_with_context.append((reason, c, d))
 
+    corridor_stop_reasons = [r for r in reasons if r["reason"] == "CORRIDOR_INFEASIBLE"]
+    gate_threshold = result.get("corridor_stop_valid_ratio_threshold", 0.2)
+    gate_suppressible = 0
+    gate_would_stop = 0
+    for reason in corridor_stop_reasons:
+        d = nearest_by_time(debug, reason["t"])
+        if d and d.get("plan_valid", 0.0) >= 0.5 and d.get("valid_ratio", 0.0) > gate_threshold:
+            gate_suppressible += 1
+        else:
+            gate_would_stop += 1
+    actual_gate_suppressed = sum(
+        1 for row in rosout_stop
+        if "DWC infeasible but MPPI remains viable" in row.get("msg", "")
+    )
+
     with open(summary_path, "w", encoding="utf-8") as f:
         f.write("Corridor Debug Summary\n")
         f.write("======================\n")
@@ -352,6 +367,16 @@ def write_outputs(result, out_dir):
                     sum(convex_dbg_dynamic_blocks) / len(convex_dbg_dynamic_blocks),
                     max(convex_dbg_dynamic_blocks)))
 
+        f.write("\nCorridor stop gate:\n")
+        f.write("  threshold: valid_ratio > {:.3f} suppresses DWC-only stop\n".format(
+            gate_threshold))
+        f.write("  recorded CORRIDOR_INFEASIBLE stops: {}\n".format(
+            len(corridor_stop_reasons)))
+        f.write("  offline suppressible by gate: {}\n".format(gate_suppressible))
+        f.write("  offline would still stop: {}\n".format(gate_would_stop))
+        f.write("  actual suppress warnings in rosout: {}\n".format(
+            actual_gate_suppressed))
+
         f.write("\nFirst non-OK stop contexts:\n")
         if not stop_with_context:
             f.write("  none\n")
@@ -419,12 +444,14 @@ def main():
     parser = argparse.ArgumentParser(description="Analyze walking-corridor debug bags.")
     parser.add_argument("bag_or_dir")
     parser.add_argument("--out-dir", default="")
+    parser.add_argument("--corridor-stop-valid-ratio-threshold", type=float, default=0.2)
     args = parser.parse_args()
 
     bag_path = resolve_bag_path(args.bag_or_dir)
     out_dir = args.out_dir or (args.bag_or_dir if os.path.isdir(args.bag_or_dir)
                                else os.path.dirname(os.path.abspath(bag_path)))
     result = analyze_bag(bag_path)
+    result["corridor_stop_valid_ratio_threshold"] = args.corridor_stop_valid_ratio_threshold
     csv_path, summary_path = write_outputs(result, out_dir)
     print("Wrote CSV: {}".format(csv_path))
     print("Wrote summary: {}".format(summary_path))
