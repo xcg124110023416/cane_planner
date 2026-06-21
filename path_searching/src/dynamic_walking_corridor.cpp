@@ -105,6 +105,39 @@ Eigen::Vector2d interpolatePolyline(const std::vector<Eigen::Vector2d> &path,
     return path.back();
 }
 
+bool hasTimedPolyline(const DynamicWalkingCorridor::Candidate &candidate)
+{
+    return candidate.centerline.size() >= 2 &&
+           candidate.centerline_times.size() == candidate.centerline.size();
+}
+
+double polylineDistanceAtTime(const std::vector<Eigen::Vector2d> &path,
+                              const std::vector<double> &times,
+                              double t)
+{
+    if (path.size() < 2 || times.size() != path.size())
+        return 0.0;
+    if (t <= times.front())
+        return 0.0;
+
+    double accum = 0.0;
+    for (size_t i = 0; i + 1 < path.size(); ++i)
+    {
+        const Eigen::Vector2d seg = path[i + 1] - path[i];
+        const double seg_len = seg.norm();
+        const double t0 = times[i];
+        const double t1 = times[i + 1];
+        if (t <= t1)
+        {
+            const double denom = std::max(1e-6, t1 - t0);
+            const double u = std::max(0.0, std::min(1.0, (t - t0) / denom));
+            return accum + u * seg_len;
+        }
+        accum += seg_len;
+    }
+    return accum;
+}
+
 bool projectPointToPolyline(const std::vector<Eigen::Vector2d> &path,
                             const Eigen::Vector2d &point,
                             double &along,
@@ -336,11 +369,37 @@ DynamicWalkingCorridor::Result DynamicWalkingCorridor::plan(
     const std::vector<Eigen::Vector3d> &obs_vel,
     const std::vector<Eigen::Vector3d> &obs_size) const
 {
-    std::vector<Eigen::Vector2d> reference_path;
-    reference_path.reserve(nominal_trajectory.points.size());
-    for (const auto &point : nominal_trajectory.points)
-        reference_path.push_back(point.position);
-    return plan(reference_path, obs_pos, obs_vel, obs_size);
+    if (!nominal_trajectory.valid())
+        return plan(std::vector<Eigen::Vector2d>(), obs_pos, obs_vel, obs_size);
+
+    Result result;
+    std::vector<double> offsets = {0.0};
+    if (cfg_.lateral_candidates_enable)
+    {
+        offsets.push_back(cfg_.lateral_shift);
+        offsets.push_back(-cfg_.lateral_shift);
+    }
+
+    result.candidates.reserve(offsets.size());
+    for (size_t i = 0; i < offsets.size(); ++i)
+    {
+        result.candidates.push_back(evaluateCandidate(
+            (int)i, offsets[i], nominal_trajectory, obs_pos, obs_vel, obs_size));
+    }
+
+    double best_cost = std::numeric_limits<double>::infinity();
+    for (const auto &candidate : result.candidates)
+    {
+        if (!candidate.feasible)
+            continue;
+        if (candidate.total_cost < best_cost)
+        {
+            best_cost = candidate.total_cost;
+            result.selected = candidate;
+            result.has_feasible = true;
+        }
+    }
+    return result;
 }
 
 DynamicWalkingCorridor::Candidate DynamicWalkingCorridor::evaluateCandidate(
@@ -419,6 +478,66 @@ DynamicWalkingCorridor::Candidate DynamicWalkingCorridor::evaluateCandidate(
         {
             candidate.centerline = optimized;
             candidate.half_width = std::min(candidate.half_width, optimized_half_width);
+        }
+    }
+    candidate.start = candidate.centerline.empty() ? Eigen::Vector2d::Zero() : candidate.centerline.front();
+    candidate.end = candidate.centerline.empty() ? candidate.start : candidate.centerline.back();
+    candidate.forward = polylineDirectionAtStart(candidate.centerline);
+    candidate.left = Eigen::Vector2d(-candidate.forward.y(), candidate.forward.x());
+
+    candidate.blocked_static = shrinkStaticWidth(candidate);
+    candidate.blocked_dynamic = isDynamicallyBlocked(
+        candidate, obs_pos, obs_vel, obs_size, candidate.dynamic_block_count);
+    candidate.front_pass_cost = computeFrontPassCost(candidate, obs_pos, obs_vel);
+    candidate.total_cost =
+        cfg_.lateral_offset_weight * std::abs(lateral_offset) +
+        candidate.front_pass_cost;
+    candidate.feasible =
+        !candidate.blocked_static &&
+        (cfg_.dynamic_blocking_enable ? !candidate.blocked_dynamic : true);
+    if (!candidate.feasible)
+        candidate.total_cost = std::numeric_limits<double>::infinity();
+    return candidate;
+}
+
+DynamicWalkingCorridor::Candidate DynamicWalkingCorridor::evaluateCandidate(
+    int id,
+    double lateral_offset,
+    const TimedTrajectory &nominal_trajectory,
+    const std::vector<Eigen::Vector3d> &obs_pos,
+    const std::vector<Eigen::Vector3d> &obs_vel,
+    const std::vector<Eigen::Vector3d> &obs_size) const
+{
+    std::vector<Eigen::Vector2d> reference_path;
+    reference_path.reserve(nominal_trajectory.points.size());
+    std::vector<double> reference_times;
+    reference_times.reserve(nominal_trajectory.points.size());
+    for (const auto &point : nominal_trajectory.points)
+    {
+        reference_path.push_back(point.position);
+        reference_times.push_back(point.t_from_now);
+    }
+
+    Candidate candidate;
+    candidate.id = id;
+    candidate.lateral_offset = lateral_offset;
+    candidate.centerline = shiftPolyline(reference_path, lateral_offset);
+    candidate.centerline_times = reference_times;
+    candidate.length = polylineLength(candidate.centerline);
+    candidate.half_width = cfg_.half_width;
+    if (cfg_.static_centerline_opt_enable && collision_)
+    {
+        double optimized_half_width = candidate.half_width;
+        std::vector<Eigen::Vector2d> optimized;
+        if (optimizeCenterlineForStaticMap(
+                candidate.centerline, cfg_,
+                [this](double x, double y) { return collision_->isTraversable(x, y); },
+                optimized, optimized_half_width))
+        {
+            candidate.centerline = optimized;
+            candidate.half_width = std::min(candidate.half_width, optimized_half_width);
+            if (candidate.centerline_times.size() != candidate.centerline.size())
+                candidate.centerline_times.clear();
         }
     }
     candidate.start = candidate.centerline.empty() ? Eigen::Vector2d::Zero() : candidate.centerline.front();
@@ -697,7 +816,11 @@ bool DynamicWalkingCorridor::isDynamicallyBlocked(
     const double robot_speed = std::max(0.0, cfg_.robot_speed);
     for (double t = 0.0; t <= cfg_.prediction_horizon + 1e-6; t += dt)
     {
-        const double robot_s = std::min(candidate.length, robot_speed * t);
+        const double robot_s = hasTimedPolyline(candidate)
+                                   ? polylineDistanceAtTime(candidate.centerline,
+                                                            candidate.centerline_times,
+                                                            t)
+                                   : std::min(candidate.length, robot_speed * t);
         for (size_t i = 0; i < obs_pos.size(); ++i)
         {
             Eigen::Vector2d ped(obs_pos[i](0), obs_pos[i](1));
@@ -746,7 +869,11 @@ double DynamicWalkingCorridor::computeFrontPassCost(
 
     for (double t = 0.0; t <= cfg_.prediction_horizon + 1e-6; t += dt)
     {
-        const double travel = std::min(cfg_.length, std::max(0.0, cfg_.robot_speed) * t);
+        const double travel = hasTimedPolyline(candidate)
+                                  ? polylineDistanceAtTime(candidate.centerline,
+                                                           candidate.centerline_times,
+                                                           t)
+                                  : std::min(cfg_.length, std::max(0.0, cfg_.robot_speed) * t);
         const Eigen::Vector2d robot =
             candidate.centerline.size() >= 2
                 ? interpolatePolyline(candidate.centerline, travel)

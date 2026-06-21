@@ -197,6 +197,51 @@ TEST(DynamicWalkingCorridor, GeneratesCandidatesAlongTimedNominalTrajectory)
     EXPECT_NEAR(1.0, result.selected.centerline.back().y(), 1e-9);
 }
 
+TEST(DynamicWalkingCorridor, UsesNominalTrajectoryTimeForDynamicBlocking)
+{
+    DynamicWalkingCorridor corridor;
+    DynamicWalkingCorridor::Config cfg;
+    cfg.length = 4.0;
+    cfg.half_width = 0.35;
+    cfg.lateral_shift = 0.8;
+    cfg.prediction_horizon = 6.0;
+    cfg.prediction_dt = 1.0;
+    cfg.robot_speed = 1.0;
+    cfg.robot_radius = 0.25;
+    cfg.dynamic_min_radius = 0.20;
+    cfg.dynamic_safety_margin = 0.10;
+    cfg.dynamic_progress_margin = 0.0;
+    cfg.dynamic_blocking_enable = true;
+    cfg.static_centerline_opt_enable = false;
+    corridor.setConfig(cfg);
+
+    std::vector<Eigen::Vector2d> spatial_path = {
+        Eigen::Vector2d(0.0, 0.0),
+        Eigen::Vector2d(2.0, 0.0),
+    };
+
+    TimedTrajectory nominal;
+    nominal.source = TimedTrajectorySource::PREVIOUS_MPPI;
+    TimedTrajectoryPoint p0;
+    p0.position = spatial_path[0];
+    p0.t_from_now = 0.0;
+    TimedTrajectoryPoint p1;
+    p1.position = spatial_path[1];
+    p1.t_from_now = 10.0;
+    nominal.points = {p0, p1};
+
+    std::vector<Eigen::Vector3d> obs_pos = {Eigen::Vector3d(1.0, 0.0, 0.0)};
+    std::vector<Eigen::Vector3d> obs_vel = {Eigen::Vector3d(0.0, 0.4, 0.0)};
+    std::vector<Eigen::Vector3d> obs_size = {Eigen::Vector3d(0.4, 0.4, 1.7)};
+
+    auto spatial_result = corridor.plan(spatial_path, obs_pos, obs_vel, obs_size);
+    EXPECT_FALSE(spatial_result.has_feasible);
+
+    auto timed_result = corridor.plan(nominal, obs_pos, obs_vel, obs_size);
+    ASSERT_TRUE(timed_result.has_feasible);
+    EXPECT_FALSE(timed_result.selected.blocked_dynamic);
+}
+
 TEST(DynamicWalkingCorridor, KeepsCenterCorridorAsSingleDefaultCandidate)
 {
     DynamicWalkingCorridor corridor;

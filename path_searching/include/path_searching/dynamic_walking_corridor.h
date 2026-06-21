@@ -73,6 +73,7 @@ public:
         Eigen::Vector2d forward = Eigen::Vector2d::UnitX();
         Eigen::Vector2d left = Eigen::Vector2d::UnitY();
         std::vector<Eigen::Vector2d> centerline;
+        std::vector<double> centerline_times;
     };
 
     struct Result
@@ -131,6 +132,12 @@ private:
     Candidate evaluateCandidate(int id,
                                 double lateral_offset,
                                 const std::vector<Eigen::Vector2d> &reference_path,
+                                const std::vector<Eigen::Vector3d> &obs_pos,
+                                const std::vector<Eigen::Vector3d> &obs_vel,
+                                const std::vector<Eigen::Vector3d> &obs_size) const;
+    Candidate evaluateCandidate(int id,
+                                double lateral_offset,
+                                const TimedTrajectory &nominal_trajectory,
                                 const std::vector<Eigen::Vector3d> &obs_pos,
                                 const std::vector<Eigen::Vector3d> &obs_vel,
                                 const std::vector<Eigen::Vector3d> &obs_size) const;
