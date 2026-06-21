@@ -1,4 +1,5 @@
 #include <path_searching/mpc_controller.h>
+#include <path_searching/trajectory_feasibility.h>
 #include <cmath>
 #include <algorithm>
 #include <chrono>
@@ -207,27 +208,25 @@ Eigen::Vector3d MpcController::plan(const LFPC::Ptr &lfpc_base,
         std::vector<std::vector<Eigen::Vector3d>> paths(K);
         std::vector<double> sample_min_dynamic_clearances;
         std::vector<double> sample_min_cpa_times;
+        std::vector<bool> sample_corridor_feasible;
         rolloutBatch(lfpc_base, samples, goal_pos, obs_pos, obs_vel, obs_size, costs, paths,
-                     sample_min_dynamic_clearances, sample_min_cpa_times);
+                     sample_min_dynamic_clearances, sample_min_cpa_times, sample_corridor_feasible);
 
         // 3. Find best trajectory
-        int best_idx = -1;
-        double min_cost = std::numeric_limits<double>::max();
         int valid_count = 0;
         for (int kk = 0; kk < K; ++kk)
         {
             if (std::isfinite(costs(kk)))
-            {
                 valid_count++;
-                if (costs(kk) < min_cost)
-                {
-                    min_cost = costs(kk);
-                    best_idx = kk;
-                }
-            }
         }
+        std::vector<double> cost_values(K, std::numeric_limits<double>::infinity());
+        for (int kk = 0; kk < K; ++kk)
+            cost_values[kk] = costs(kk);
+        int best_idx = selectBestTrajectoryIndex(
+            cost_values, sample_corridor_feasible,
+            last_debug_metrics_.corridor_evaluated);
         last_debug_metrics_.valid_sample_ratio = K > 0 ? (double)valid_count / (double)K : 0.0;
-        last_debug_metrics_.best_total_cost = best_idx >= 0 ? min_cost : std::numeric_limits<double>::infinity();
+        last_debug_metrics_.best_total_cost = best_idx >= 0 ? costs(best_idx) : std::numeric_limits<double>::infinity();
         if (best_idx >= 0 && best_idx < (int)sample_min_dynamic_clearances.size())
             last_debug_metrics_.best_min_dynamic_clearance = sample_min_dynamic_clearances[best_idx];
         if (best_idx >= 0 && best_idx < (int)sample_min_cpa_times.size())
@@ -388,7 +387,8 @@ void MpcController::rolloutBatch(
     Eigen::VectorXd &costs,
     std::vector<std::vector<Eigen::Vector3d>> &paths,
     std::vector<double> &sample_min_dynamic_clearances,
-    std::vector<double> &sample_min_cpa_times)
+    std::vector<double> &sample_min_cpa_times,
+    std::vector<bool> &sample_corridor_feasible)
 {
     int K = (int)samples.size();
     int N = cfg_.horizon_steps;
@@ -396,6 +396,7 @@ void MpcController::rolloutBatch(
     costs.setConstant(std::numeric_limits<double>::infinity());
     sample_min_dynamic_clearances.assign(K, std::numeric_limits<double>::infinity());
     sample_min_cpa_times.assign(K, std::numeric_limits<double>::infinity());
+    sample_corridor_feasible.assign(K, true);
 
     int n_obs = (int)obs_pos.size();
     last_debug_metrics_.dynamic_reject_count = 0;
@@ -730,10 +731,12 @@ void MpcController::rolloutBatch(
         costs(k) = total_cost;
         sample_min_dynamic_clearances[k] = rollout_min_dynamic_clearance;
         sample_min_cpa_times[k] = rollout_min_cpa_time;
+        sample_corridor_feasible[k] =
+            !corridor_evaluated_for_sample || sample_inside_corridor;
         if (std::isfinite(total_cost))
         {
             last_debug_metrics_.valid_trajectory_count++;
-            if (!corridor_evaluated_for_sample || sample_inside_corridor)
+            if (sample_corridor_feasible[k])
                 last_debug_metrics_.corridor_feasible_trajectory_count++;
         }
     }

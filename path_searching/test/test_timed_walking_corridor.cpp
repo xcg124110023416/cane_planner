@@ -7,6 +7,7 @@ using cane_planner::TimedTrajectorySource;
 using cane_planner::TimedWalkingCorridor;
 using cane_planner::TimedWalkingCorridorSegment;
 using cane_planner::TrajectoryFeasibility;
+using cane_planner::selectBestTrajectoryIndex;
 
 TEST(TimedWalkingCorridor, TracksTimeRangeAndSegmentLookup)
 {
@@ -100,6 +101,27 @@ TEST(TrajectoryFeasibility, CorridorEvaluationOverridesGenericValidity)
     feasibility.corridor_feasible_trajectory_count = 1;
     EXPECT_TRUE(feasibility.hasFeasibleTrajectory());
     EXPECT_FALSE(feasibility.shouldStop());
+}
+
+TEST(TrajectoryFeasibility, SelectsBestInsideCorridorWhenAvailable)
+{
+    const std::vector<double> costs = {4.0, 1.0, 2.0};
+    const std::vector<bool> corridor_feasible = {true, false, true};
+
+    EXPECT_EQ(2, selectBestTrajectoryIndex(costs, corridor_feasible, true));
+    EXPECT_EQ(1, selectBestTrajectoryIndex(costs, corridor_feasible, false));
+}
+
+TEST(TrajectoryFeasibility, FallsBackToBestFiniteCostWhenNoCorridorFeasibleSample)
+{
+    const std::vector<double> costs = {
+        std::numeric_limits<double>::infinity(),
+        3.0,
+        2.0,
+    };
+    const std::vector<bool> corridor_feasible = {false, false, false};
+
+    EXPECT_EQ(2, selectBestTrajectoryIndex(costs, corridor_feasible, true));
 }
 
 int main(int argc, char **argv)

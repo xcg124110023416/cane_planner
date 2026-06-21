@@ -208,7 +208,8 @@ private:
                       Eigen::VectorXd &costs,
                       std::vector<std::vector<Eigen::Vector3d>> &paths,
                       std::vector<double> &sample_min_dynamic_clearances,
-                      std::vector<double> &sample_min_cpa_times);
+                      std::vector<double> &sample_min_cpa_times,
+                      std::vector<bool> &sample_corridor_feasible);
     Eigen::VectorXd computeWeights(const Eigen::VectorXd &costs);
     Eigen::MatrixXd weightedUpdate(const std::vector<Eigen::MatrixXd> &samples,
                                     const Eigen::VectorXd &weights,
