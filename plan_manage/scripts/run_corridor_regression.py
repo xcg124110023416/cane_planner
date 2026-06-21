@@ -3,6 +3,7 @@
 import argparse
 import glob
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -60,6 +61,103 @@ def parse_launch_arg(raw):
     return raw
 
 
+def parse_summary(summary_path):
+    metrics = {
+        "rosout_stop_logs": None,
+        "non_ok_stop_count": 0,
+        "mpc_path_length": None,
+        "astar_path_length": None,
+        "static_label_count": None,
+        "corridor_label_count": None,
+    }
+    if not os.path.exists(summary_path):
+        raise RuntimeError("summary not found: {}".format(summary_path))
+
+    in_stop_reasons = False
+    with open(summary_path, "r", encoding="utf-8") as f:
+        for raw in f:
+            line = raw.rstrip()
+            stripped = line.strip()
+            if line.startswith("rosout_stop_logs:"):
+                metrics["rosout_stop_logs"] = int(line.split(":", 1)[1].strip())
+                continue
+
+            match = re.search(r"mpc_path_points_last:\s+\d+\s+length=([-+0-9.]+)m", line)
+            if match:
+                metrics["mpc_path_length"] = float(match.group(1))
+                continue
+            match = re.search(r"astar_path_points_last:\s+\d+\s+length=([-+0-9.]+)m", line)
+            if match:
+                metrics["astar_path_length"] = float(match.group(1))
+                continue
+            match = re.search(r"st=1 count:\s+(\d+)\s+/\s+(\d+)", line)
+            if match:
+                metrics["static_label_count"] = int(match.group(1))
+                metrics["corridor_label_count"] = int(match.group(2))
+                continue
+
+            if stripped == "Stop reasons:":
+                in_stop_reasons = True
+                continue
+            if in_stop_reasons:
+                if not line.startswith("  "):
+                    in_stop_reasons = False
+                    continue
+                if stripped == "none":
+                    continue
+                if ":" not in stripped:
+                    continue
+                reason, count_text = stripped.rsplit(":", 1)
+                count = int(count_text.strip())
+                if reason != "OK":
+                    metrics["non_ok_stop_count"] += count
+
+    return metrics
+
+
+def validate_summary(summary_path, args):
+    metrics = parse_summary(summary_path)
+    failures = []
+
+    if args.max_stop_logs is not None:
+        value = metrics.get("rosout_stop_logs")
+        if value is None or value > args.max_stop_logs:
+            failures.append("rosout_stop_logs={} > {}".format(value, args.max_stop_logs))
+
+    if args.max_non_ok_stops is not None:
+        value = metrics.get("non_ok_stop_count")
+        if value is None or value > args.max_non_ok_stops:
+            failures.append("non_OK_stop_count={} > {}".format(value, args.max_non_ok_stops))
+
+    if args.min_mpc_path_length is not None:
+        value = metrics.get("mpc_path_length")
+        if value is None or value < args.min_mpc_path_length:
+            failures.append("mpc_path_length={} < {:.3f}".format(value, args.min_mpc_path_length))
+
+    if args.min_path_length_ratio is not None:
+        mpc_len = metrics.get("mpc_path_length")
+        astar_len = metrics.get("astar_path_length")
+        ratio = (mpc_len / astar_len) if astar_len and astar_len > 1e-6 and mpc_len is not None else None
+        if ratio is None or ratio < args.min_path_length_ratio:
+            failures.append("mpc/astar_length_ratio={} < {:.3f}".format(ratio, args.min_path_length_ratio))
+
+    if args.max_static_label_ratio is not None:
+        st = metrics.get("static_label_count")
+        total = metrics.get("corridor_label_count")
+        ratio = (float(st) / float(total)) if total else None
+        if ratio is None or ratio > args.max_static_label_ratio:
+            failures.append("static_label_ratio={} > {:.3f}".format(ratio, args.max_static_label_ratio))
+
+    print("[run_corridor_regression] parsed metrics: {}".format(metrics))
+    if failures:
+        print("[run_corridor_regression] FAILED checks:")
+        for failure in failures:
+            print("  - {}".format(failure))
+        return False
+    print("[run_corridor_regression] PASSED checks")
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=(
@@ -89,6 +187,16 @@ def main():
                         help="Leave roslaunch running after recording.")
     parser.add_argument("--launch-arg", action="append", default=[], type=parse_launch_arg,
                         help="Extra sim_kin_replan.launch arg, e.g. name:=value. May repeat.")
+    parser.add_argument("--max-stop-logs", type=int, default=None,
+                        help="Fail if rosout_stop_logs is larger than this value.")
+    parser.add_argument("--max-non-ok-stops", type=int, default=None,
+                        help="Fail if non-OK stop reason samples exceed this value.")
+    parser.add_argument("--min-mpc-path-length", type=float, default=None,
+                        help="Fail if latest MPC path length is shorter than this many meters.")
+    parser.add_argument("--min-path-length-ratio", type=float, default=None,
+                        help="Fail if latest MPC path length / A* path length is below this ratio.")
+    parser.add_argument("--max-static-label-ratio", type=float, default=None,
+                        help="Fail if st=1 corridor label ratio exceeds this value.")
     args = parser.parse_args()
 
     launch_proc = None
@@ -143,6 +251,15 @@ def main():
         summary = os.path.join(out_dir, "corridor_debug_summary.txt")
         if os.path.exists(summary):
             print("[run_corridor_regression] summary: {}".format(summary))
+            checks_requested = any([
+                args.max_stop_logs is not None,
+                args.max_non_ok_stops is not None,
+                args.min_mpc_path_length is not None,
+                args.min_path_length_ratio is not None,
+                args.max_static_label_ratio is not None,
+            ])
+            if checks_requested and not validate_summary(summary, args):
+                return 3
 
     return 0
 
