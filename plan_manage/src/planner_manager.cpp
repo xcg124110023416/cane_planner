@@ -6,6 +6,7 @@
 #include <std_msgs/String.h>
 
 #include <cmath>
+#include <functional>
 #include <iomanip>
 #include <sstream>
 #include <pcl_conversions/pcl_conversions.h>
@@ -76,6 +77,55 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
             break;
     }
     return polygon;
+}
+
+bool segmentTraversable(
+    const Eigen::Vector2d& a,
+    const Eigen::Vector2d& b,
+    const std::function<bool(double, double)>& is_traversable)
+{
+    const Eigen::Vector2d ab = b - a;
+    const double length = ab.norm();
+    if (length < 1e-6)
+        return is_traversable(a.x(), a.y());
+
+    const int steps = std::max(1, static_cast<int>(std::ceil(length / 0.10)));
+    for (int i = 0; i <= steps; ++i)
+    {
+        const double u = static_cast<double>(i) / static_cast<double>(steps);
+        const Eigen::Vector2d p = a + u * ab;
+        if (!is_traversable(p.x(), p.y()))
+            return false;
+    }
+    return true;
+}
+
+std::vector<Eigen::Vector2d> shortcutTraversablePolyline(
+    const std::vector<Eigen::Vector2d>& path,
+    const std::function<bool(double, double)>& is_traversable)
+{
+    if (path.size() < 3)
+        return path;
+
+    std::vector<Eigen::Vector2d> out;
+    out.push_back(path.front());
+
+    size_t i = 0;
+    while (i + 1 < path.size())
+    {
+        size_t best = i + 1;
+        for (size_t j = path.size() - 1; j > i + 1; --j)
+        {
+            if (segmentTraversable(path[i], path[j], is_traversable))
+            {
+                best = j;
+                break;
+            }
+        }
+        out.push_back(path[best]);
+        i = best;
+    }
+    return out;
 }
 
 }  // namespace
@@ -266,6 +316,7 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
         mpc_interaction_debug_pub_ = nh.advertise<std_msgs::Float64MultiArray>("/mpc/interaction_debug", 10);
         mpc_dynamic_body_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/mpc/dynamic_obstacle_bodies", 10);
         mpc_walking_corridor_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/mpc/walking_corridors", 10);
+        mpc_walking_corridor_debug_pub_ = nh.advertise<std_msgs::String>("/mpc/walking_corridor_debug", 10);
         mpc_convex_corridor_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/mpc/convex_corridor", 10);
         mpc_convex_corridor_debug_pub_ = nh.advertise<std_msgs::String>("/mpc/convex_corridor_debug", 10);
         if (gazebo_sim_)
@@ -1007,6 +1058,34 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
         }
 
         mpc_walking_corridor_pub_.publish(markers);
+
+        if (mpc_walking_corridor_debug_pub_)
+        {
+            auto sourceName = [](TimedTrajectorySource source) -> const char*
+            {
+                switch (source)
+                {
+                case TimedTrajectorySource::ASTAR_BOOTSTRAP:
+                    return "astar_bootstrap";
+                case TimedTrajectorySource::PREVIOUS_MPPI:
+                    return "previous_mppi";
+                default:
+                    return "empty";
+                }
+            };
+
+            std_msgs::String debug;
+            std::ostringstream ss;
+            ss << "source=" << sourceName(result.timed_corridor.source)
+               << " segments=" << result.timed_corridor.segments.size()
+               << " feasible=" << (result.has_feasible ? 1 : 0)
+               << " t_start=" << std::fixed << std::setprecision(3)
+               << result.timed_corridor.tStart()
+               << " t_end=" << result.timed_corridor.tEnd()
+               << " candidates=" << result.candidates.size();
+            debug.data = ss.str();
+            mpc_walking_corridor_debug_pub_.publish(debug);
+        }
     }
 
     ConvexCorridor::Result PlannerManager::updateAndPublishConvexCorridor(
@@ -1834,6 +1913,15 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
         global_wp_idx_ = 0;
 
         auto path = astar_finder_->getPath();  // vector<Eigen::Vector2d>
+        const size_t raw_path_size = path.size();
+        if (collision_ && path.size() >= 3)
+        {
+            path = shortcutTraversablePolyline(
+                path,
+                [this](double x, double y) {
+                    return collision_->isTraversable(x, y);
+                });
+        }
         global_path_dense_ = path;
         if (path.size() < 2)
         {
@@ -1873,9 +1961,9 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
                 global_waypoints_.back() = end_pt_;  // snap last wp to exact goal
         }
 
-        ROS_INFO("[MPC global] Generated %zu waypoints (spacing=%.1fm) for %.1fm path",
+        ROS_INFO("[MPC global] Generated %zu waypoints (spacing=%.1fm) from %zu->%zu A* points",
                  global_waypoints_.size(), global_wp_spacing_,
-                 (path.back() - path.front()).norm());
+                 raw_path_size, path.size());
 
         publishWaypointsList();
     }
@@ -2115,7 +2203,8 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
         auto corridor_result = updateAndPublishWalkingCorridor(current_com, obs_pos, obs_vel, obs_size);
         auto convex_corridor_result = updateAndPublishConvexCorridor(current_com, obs_pos, obs_vel, obs_size);
         if (corridor_result.has_feasible)
-            mpc_controller_->setWalkingCorridor(corridor_result.selected);
+            mpc_controller_->setWalkingCorridor(
+                corridor_result.selected, corridor_result.timed_corridor);
         else
             mpc_controller_->clearWalkingCorridor();
         if (convex_corridor_ && convex_corridor_result.feasible)
@@ -2145,6 +2234,8 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
             metrics.data.push_back((double)dbg.convex_corridor_reject_count);
             metrics.data.push_back(dbg.max_convex_corridor_violation);
             metrics.data.push_back((double)dbg.convex_corridor_segments);
+            metrics.data.push_back(dbg.candidate_inside_corridor_ratio);
+            metrics.data.push_back((double)dbg.valid_trajectory_count);
             mpc_debug_metrics_pub_.publish(metrics);
         }
 
@@ -2162,9 +2253,7 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
             mpc_corridor_stop_enable_ &&
             !corridor_result.candidates.empty() &&
             !corridor_result.has_feasible;
-        const bool mppi_has_viable_plan =
-            dbg.plan_valid &&
-            dbg.valid_sample_ratio > mpc_corridor_stop_valid_ratio_threshold_;
+        const bool mppi_has_viable_plan = dbg.plan_valid;
         const bool corridor_infeasible_hard_stop_active =
             corridor_infeasible_stop_active && !mppi_has_viable_plan;
         if (corridor_infeasible_stop_active && mppi_has_viable_plan)
@@ -2172,9 +2261,8 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
             ROS_WARN_THROTTLE(
                 1.0,
                 "[MPC] DWC infeasible but MPPI remains viable; suppressing corridor stop "
-                "valid=%.2f threshold=%.2f",
-                dbg.valid_sample_ratio,
-                mpc_corridor_stop_valid_ratio_threshold_);
+                "valid=%.2f",
+                dbg.valid_sample_ratio);
         }
 
         bool raw_stop_advice = false;

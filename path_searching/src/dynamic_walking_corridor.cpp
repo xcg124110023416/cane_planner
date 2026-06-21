@@ -111,6 +111,36 @@ bool hasTimedPolyline(const DynamicWalkingCorridor::Candidate &candidate)
            candidate.centerline_times.size() == candidate.centerline.size();
 }
 
+TimedWalkingCorridor toTimedWalkingCorridor(
+    const DynamicWalkingCorridor::Candidate &candidate,
+    const TimedTrajectorySource source)
+{
+    TimedWalkingCorridor corridor;
+    corridor.source = source;
+    if (!hasTimedPolyline(candidate))
+        return corridor;
+
+    corridor.segments.reserve(candidate.centerline.size() - 1);
+    for (size_t i = 0; i + 1 < candidate.centerline.size(); ++i)
+    {
+        TimedWalkingCorridorSegment segment;
+        segment.t_start = candidate.centerline_times[i];
+        segment.t_end = candidate.centerline_times[i + 1];
+        segment.start = candidate.centerline[i];
+        segment.end = candidate.centerline[i + 1];
+        const Eigen::Vector2d delta = segment.end - segment.start;
+        segment.forward = normalizedOrDefault(delta);
+        segment.left = Eigen::Vector2d(-segment.forward.y(), segment.forward.x());
+        segment.centerline = {segment.start, segment.end};
+        segment.half_width = candidate.half_width;
+        segment.feasible = candidate.feasible;
+        segment.blocked_static = candidate.blocked_static;
+        segment.blocked_dynamic = candidate.blocked_dynamic;
+        corridor.segments.push_back(segment);
+    }
+    return corridor;
+}
+
 double polylineDistanceAtTime(const std::vector<Eigen::Vector2d> &path,
                               const std::vector<double> &times,
                               double t)
@@ -397,6 +427,8 @@ DynamicWalkingCorridor::Result DynamicWalkingCorridor::plan(
             best_cost = candidate.total_cost;
             result.selected = candidate;
             result.has_feasible = true;
+            result.timed_corridor = toTimedWalkingCorridor(
+                candidate, nominal_trajectory.source);
         }
     }
     return result;

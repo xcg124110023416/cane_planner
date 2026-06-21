@@ -69,6 +69,7 @@ def parse_summary(summary_path):
         "astar_path_length": None,
         "static_label_count": None,
         "corridor_label_count": None,
+        "dynamic_label_count": None,
     }
     if not os.path.exists(summary_path):
         raise RuntimeError("summary not found: {}".format(summary_path))
@@ -94,6 +95,12 @@ def parse_summary(summary_path):
             if match:
                 metrics["static_label_count"] = int(match.group(1))
                 metrics["corridor_label_count"] = int(match.group(2))
+                continue
+            match = re.search(r"dyn>0 count:\s+(\d+)\s+/\s+(\d+)", line)
+            if match:
+                metrics["dynamic_label_count"] = int(match.group(1))
+                if metrics["corridor_label_count"] is None:
+                    metrics["corridor_label_count"] = int(match.group(2))
                 continue
 
             if stripped == "Stop reasons:":
@@ -141,12 +148,26 @@ def validate_summary(summary_path, args):
         if ratio is None or ratio < args.min_path_length_ratio:
             failures.append("mpc/astar_length_ratio={} < {:.3f}".format(ratio, args.min_path_length_ratio))
 
+    if args.max_path_length_ratio is not None:
+        mpc_len = metrics.get("mpc_path_length")
+        astar_len = metrics.get("astar_path_length")
+        ratio = (mpc_len / astar_len) if astar_len and astar_len > 1e-6 and mpc_len is not None else None
+        if ratio is None or ratio > args.max_path_length_ratio:
+            failures.append("mpc/astar_length_ratio={} > {:.3f}".format(ratio, args.max_path_length_ratio))
+
     if args.max_static_label_ratio is not None:
         st = metrics.get("static_label_count")
         total = metrics.get("corridor_label_count")
         ratio = (float(st) / float(total)) if total else None
         if ratio is None or ratio > args.max_static_label_ratio:
             failures.append("static_label_ratio={} > {:.3f}".format(ratio, args.max_static_label_ratio))
+
+    if args.min_dynamic_label_ratio is not None:
+        dyn = metrics.get("dynamic_label_count")
+        total = metrics.get("corridor_label_count")
+        ratio = (float(dyn) / float(total)) if total else None
+        if ratio is None or ratio < args.min_dynamic_label_ratio:
+            failures.append("dynamic_label_ratio={} < {:.3f}".format(ratio, args.min_dynamic_label_ratio))
 
     print("[run_corridor_regression] parsed metrics: {}".format(metrics))
     if failures:
@@ -195,8 +216,12 @@ def main():
                         help="Fail if latest MPC path length is shorter than this many meters.")
     parser.add_argument("--min-path-length-ratio", type=float, default=None,
                         help="Fail if latest MPC path length / A* path length is below this ratio.")
+    parser.add_argument("--max-path-length-ratio", type=float, default=None,
+                        help="Fail if latest MPC path length / A* path length is above this ratio.")
     parser.add_argument("--max-static-label-ratio", type=float, default=None,
                         help="Fail if st=1 corridor label ratio exceeds this value.")
+    parser.add_argument("--min-dynamic-label-ratio", type=float, default=None,
+                        help="Fail if dyn>0 corridor label ratio is below this value.")
     args = parser.parse_args()
 
     launch_proc = None
@@ -256,7 +281,9 @@ def main():
                 args.max_non_ok_stops is not None,
                 args.min_mpc_path_length is not None,
                 args.min_path_length_ratio is not None,
+                args.max_path_length_ratio is not None,
                 args.max_static_label_ratio is not None,
+                args.min_dynamic_label_ratio is not None,
             ])
             if checks_requested and not validate_summary(summary, args):
                 return 3

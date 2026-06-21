@@ -197,6 +197,40 @@ TEST(DynamicWalkingCorridor, GeneratesCandidatesAlongTimedNominalTrajectory)
     EXPECT_NEAR(1.0, result.selected.centerline.back().y(), 1e-9);
 }
 
+TEST(DynamicWalkingCorridor, ExposesSelectedTimedCorridorFromNominalTrajectory)
+{
+    DynamicWalkingCorridor corridor;
+    DynamicWalkingCorridor::Config cfg;
+    cfg.length = 4.0;
+    cfg.half_width = 0.4;
+    cfg.static_centerline_opt_enable = false;
+    corridor.setConfig(cfg);
+
+    TimedTrajectory nominal;
+    nominal.source = TimedTrajectorySource::PREVIOUS_MPPI;
+    TimedTrajectoryPoint p0;
+    p0.position = Eigen::Vector2d(0.0, 0.0);
+    p0.t_from_now = 0.0;
+    TimedTrajectoryPoint p1;
+    p1.position = Eigen::Vector2d(1.0, 0.0);
+    p1.t_from_now = 0.2;
+    TimedTrajectoryPoint p2;
+    p2.position = Eigen::Vector2d(1.0, 1.0);
+    p2.t_from_now = 0.4;
+    nominal.points = {p0, p1, p2};
+
+    auto result = corridor.plan(nominal, {}, {}, {});
+
+    ASSERT_TRUE(result.has_feasible);
+    ASSERT_TRUE(result.timed_corridor.valid());
+    EXPECT_EQ(TimedTrajectorySource::PREVIOUS_MPPI, result.timed_corridor.source);
+    ASSERT_EQ(2u, result.timed_corridor.segments.size());
+    EXPECT_NEAR(0.0, result.timed_corridor.tStart(), 1e-9);
+    EXPECT_NEAR(0.4, result.timed_corridor.tEnd(), 1e-9);
+    ASSERT_NE(nullptr, result.timed_corridor.segmentAtTime(0.1));
+    EXPECT_NEAR(1.0, result.timed_corridor.segmentAtTime(0.3)->end.y(), 1e-9);
+}
+
 TEST(DynamicWalkingCorridor, UsesNominalTrajectoryTimeForDynamicBlocking)
 {
     DynamicWalkingCorridor corridor;

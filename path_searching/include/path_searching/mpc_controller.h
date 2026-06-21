@@ -115,6 +115,8 @@ public:
         int convex_corridor_reject_count = 0;
         int convex_corridor_segments = 0;
         double max_convex_corridor_violation = 0.0;
+        double candidate_inside_corridor_ratio = 1.0;
+        int valid_trajectory_count = 0;
         int num_samples = 0;
         bool plan_valid = false;
     };
@@ -130,6 +132,8 @@ public:
     void setCollision(const CollisionDetection::Ptr &col);
     void setRiskField(const DynamicRiskField &rf);
     void setWalkingCorridor(const DynamicWalkingCorridor::Candidate &candidate);
+    void setWalkingCorridor(const DynamicWalkingCorridor::Candidate &candidate,
+                            const TimedWalkingCorridor &timed_corridor);
     void clearWalkingCorridor();
     void setConvexCorridor(const std::vector<ConvexCorridor::Segment> &segments);
     void clearConvexCorridor();
@@ -165,6 +169,8 @@ private:
     DynamicRiskField risk_field_;
     bool has_walking_corridor_ = false;
     DynamicWalkingCorridor::Candidate walking_corridor_;
+    bool has_timed_walking_corridor_ = false;
+    TimedWalkingCorridor timed_walking_corridor_;
     bool has_convex_corridor_ = false;
     std::vector<ConvexCorridor::Segment> convex_corridor_segments_;
 

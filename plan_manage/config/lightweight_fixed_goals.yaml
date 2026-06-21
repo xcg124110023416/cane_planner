@@ -15,6 +15,22 @@ scenarios:
       z: 0.0
       yaw: 0.01213059201836586
 
+  mixed_stress:
+    description: "Mixed pedestrian regression with A* path through the interaction zone."
+    start:
+      x: -2.4102587699890137
+      y: 4.688024520874023
+      z: 0.0
+      yaw: -1.592039942741394
+      covariance_x: 0.25
+      covariance_y: 0.25
+      covariance_yaw: 0.06853892326654787
+    goal:
+      x: 4.889741230010987
+      y: -4.411975479125978
+      z: 0.0
+      yaw: 0.01213059201836586
+
   crossing:
     description: "Single crossing-pedestrian scenario."
     start:

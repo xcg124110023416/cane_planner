@@ -10,6 +10,7 @@
 
 #include <plan_env/collision_detection.h>
 #include <path_searching/timed_trajectory.h>
+#include <path_searching/timed_walking_corridor.h>
 
 namespace cane_planner
 {
@@ -81,6 +82,7 @@ public:
         bool has_feasible = false;
         Candidate selected;
         std::vector<Candidate> candidates;
+        TimedWalkingCorridor timed_corridor;
     };
 
     DynamicWalkingCorridor() = default;

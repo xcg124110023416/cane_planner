@@ -57,7 +57,7 @@
     <arg name="mpc_num_samples" default="200"/>
     <arg name="mpc_enable_dynamic_hard_reject" default="false"/>
     <arg name="mpc_enable_interaction" default="true"/>
-    <arg name="mpc_interaction_enable_yield" default="true"/>
+    <arg name="mpc_interaction_enable_yield" default="false"/>
     <arg name="mpc_interaction_st_horizon" default="4.0"/>
     <arg name="mpc_interaction_yield_trigger_time" default="2.5"/>
     <arg name="mpc_interaction_robot_radius" default="0.25"/>

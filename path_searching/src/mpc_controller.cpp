@@ -126,11 +126,24 @@ void MpcController::setWalkingCorridor(const DynamicWalkingCorridor::Candidate &
 {
     walking_corridor_ = candidate;
     has_walking_corridor_ = candidate.feasible && candidate.length > 1e-6 && candidate.half_width > 1e-6;
+    has_timed_walking_corridor_ = false;
+    timed_walking_corridor_.clear();
+}
+
+void MpcController::setWalkingCorridor(
+    const DynamicWalkingCorridor::Candidate &candidate,
+    const TimedWalkingCorridor &timed_corridor)
+{
+    setWalkingCorridor(candidate);
+    timed_walking_corridor_ = timed_corridor;
+    has_timed_walking_corridor_ = has_walking_corridor_ && timed_walking_corridor_.valid();
 }
 
 void MpcController::clearWalkingCorridor()
 {
     has_walking_corridor_ = false;
+    has_timed_walking_corridor_ = false;
+    timed_walking_corridor_.clear();
 }
 
 void MpcController::setConvexCorridor(const std::vector<ConvexCorridor::Segment> &segments)
@@ -392,8 +405,12 @@ void MpcController::rolloutBatch(
     last_debug_metrics_.convex_corridor_segments =
         has_convex_corridor_ ? static_cast<int>(convex_corridor_segments_.size()) : 0;
     last_debug_metrics_.max_convex_corridor_violation = 0.0;
+    last_debug_metrics_.candidate_inside_corridor_ratio = 1.0;
+    last_debug_metrics_.valid_trajectory_count = 0;
     last_debug_metrics_.min_dynamic_clearance = std::numeric_limits<double>::infinity();
     last_debug_metrics_.min_cpa_time = std::numeric_limits<double>::infinity();
+    int corridor_check_count = 0;
+    int corridor_inside_count = 0;
     double risk_thresh = cfg_.risk_hard_threshold;
     double w_move = cfg_.w_move;
     double w_steer = cfg_.w_steer;
@@ -491,8 +508,24 @@ void MpcController::rolloutBatch(
 
                 if (cfg_.corridor_enable && has_walking_corridor_)
                 {
-                    const double outside = DynamicWalkingCorridor::outsideDistance(
-                        walking_corridor_, Eigen::Vector2d(px, py));
+                    const Eigen::Vector2d point(px, py);
+                    double outside = 0.0;
+                    bool checked_timed_corridor = false;
+                    if (has_timed_walking_corridor_)
+                    {
+                        checked_timed_corridor =
+                            timed_walking_corridor_.segmentAtTime(point_t) != nullptr;
+                        if (checked_timed_corridor)
+                            outside = timed_walking_corridor_.outsideDistanceAtTime(point_t, point);
+                    }
+                    if (!checked_timed_corridor)
+                    {
+                        outside = DynamicWalkingCorridor::outsideDistance(
+                            walking_corridor_, point);
+                    }
+                    corridor_check_count++;
+                    if (outside <= 0.0)
+                        corridor_inside_count++;
                     if (outside > 0.0)
                     {
                         corridor_cost += cfg_.w_corridor * outside * outside;
@@ -690,6 +723,14 @@ void MpcController::rolloutBatch(
         costs(k) = total_cost;
         sample_min_dynamic_clearances[k] = rollout_min_dynamic_clearance;
         sample_min_cpa_times[k] = rollout_min_cpa_time;
+        if (std::isfinite(total_cost))
+            last_debug_metrics_.valid_trajectory_count++;
+    }
+    if (corridor_check_count > 0)
+    {
+        last_debug_metrics_.candidate_inside_corridor_ratio =
+            static_cast<double>(corridor_inside_count) /
+            static_cast<double>(corridor_check_count);
     }
 }
 

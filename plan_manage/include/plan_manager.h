@@ -220,6 +220,7 @@ namespace cane_planner
         ros::Publisher mpc_interaction_debug_pub_; // std_msgs/Float64MultiArray
         ros::Publisher mpc_dynamic_body_pub_;      // visualization_msgs/MarkerArray
         ros::Publisher mpc_walking_corridor_pub_;  // visualization_msgs/MarkerArray
+        ros::Publisher mpc_walking_corridor_debug_pub_; // std_msgs/String
         ros::Publisher mpc_convex_corridor_pub_;   // visualization_msgs/MarkerArray
         ros::Publisher mpc_convex_corridor_debug_pub_; // std_msgs/String
         ros::Publisher risk_field_pub_;   // sensor_msgs::PointCloud2 (risk > hard_threshold)

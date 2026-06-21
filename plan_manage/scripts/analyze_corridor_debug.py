@@ -10,6 +10,7 @@ from collections import Counter
 
 
 CORRIDOR_TOPIC = "/mpc/walking_corridors"
+WALKING_DEBUG_TOPIC = "/mpc/walking_corridor_debug"
 CONVEX_CORRIDOR_TOPIC = "/mpc/convex_corridor"
 CONVEX_DEBUG_TOPIC = "/mpc/convex_corridor_debug"
 DEBUG_TOPIC = "/mpc/debug_metrics"
@@ -37,6 +38,15 @@ CONVEX_DEBUG_RE = re.compile(
     r"min_width=(?P<min_width>[-+0-9.]+)\s+"
     r"static_block=(?P<static_block>[-+0-9.]+)\s+"
     r"dynamic_block=(?P<dynamic_block>[-+0-9.]+)"
+)
+
+WALKING_DEBUG_RE = re.compile(
+    r"source=(?P<source>\S+)\s+"
+    r"segments=(?P<segments>[-+0-9.]+)\s+"
+    r"feasible=(?P<feasible>[01])\s+"
+    r"t_start=(?P<t_start>[-+0-9.]+)\s+"
+    r"t_end=(?P<t_end>[-+0-9.]+)\s+"
+    r"candidates=(?P<candidates>[-+0-9.]+)"
 )
 
 
@@ -125,6 +135,23 @@ def parse_convex_debug(text, t_rel):
     }
 
 
+def parse_walking_debug(text, t_rel):
+    match = WALKING_DEBUG_RE.search(text or "")
+    if not match:
+        return None
+    groups = match.groupdict()
+    return {
+        "t": t_rel,
+        "source": groups["source"],
+        "segments": float(groups["segments"]),
+        "feasible": int(groups["feasible"]),
+        "t_start": float(groups["t_start"]),
+        "t_end": float(groups["t_end"]),
+        "candidates": float(groups["candidates"]),
+        "text": text,
+    }
+
+
 def summarize_boolean_runs(samples, key):
     runs = []
     active_start = None
@@ -148,6 +175,7 @@ def analyze_bag(bag_path):
     import rosbag
 
     corridor_samples = []
+    walking_debug_samples = []
     debug_samples = []
     convex_debug_samples = []
     stop_reason_samples = []
@@ -161,7 +189,7 @@ def analyze_bag(bag_path):
 
     topics = [
         CORRIDOR_TOPIC, DEBUG_TOPIC, STOP_ADVICE_TOPIC, STOP_REASON_TOPIC,
-        CONVEX_CORRIDOR_TOPIC, CONVEX_DEBUG_TOPIC,
+        WALKING_DEBUG_TOPIC, CONVEX_CORRIDOR_TOPIC, CONVEX_DEBUG_TOPIC,
         ASTAR_TOPIC, MPC_PATH_TOPIC, WAYPOINTS_TOPIC,
     ] + ODOM_TOPICS + ROSOUT_TOPICS
 
@@ -173,6 +201,10 @@ def analyze_bag(bag_path):
 
             if topic == CORRIDOR_TOPIC:
                 corridor_samples.extend(parse_corridor_labels(msg, tr))
+            elif topic == WALKING_DEBUG_TOPIC:
+                sample = parse_walking_debug(msg.data, tr)
+                if sample:
+                    walking_debug_samples.append(sample)
             elif topic == CONVEX_DEBUG_TOPIC:
                 sample = parse_convex_debug(msg.data, tr)
                 if sample:
@@ -188,6 +220,8 @@ def analyze_bag(bag_path):
                     "convex_reject_count": data[12] if len(data) > 12 else float("nan"),
                     "convex_max_violation": data[13] if len(data) > 13 else float("nan"),
                     "convex_segments": data[14] if len(data) > 14 else float("nan"),
+                    "candidate_inside_corridor_ratio": data[15] if len(data) > 15 else float("nan"),
+                    "valid_trajectory_count": data[16] if len(data) > 16 else float("nan"),
                     "dynamic_reject_count": data[5] if len(data) > 5 else float("nan"),
                     "static_reject_count": data[6] if len(data) > 6 else float("nan"),
                 })
@@ -221,6 +255,7 @@ def analyze_bag(bag_path):
     return {
         "bag_path": bag_path,
         "corridor": corridor_samples,
+        "walking_debug": walking_debug_samples,
         "debug": debug_samples,
         "convex_debug": convex_debug_samples,
         "stop_reason": stop_reason_samples,
@@ -249,6 +284,7 @@ def write_outputs(result, out_dir):
             writer.writerow(row)
 
     corridor = result["corridor"]
+    walking_debug = result.get("walking_debug", [])
     debug = result["debug"]
     convex_debug = result.get("convex_debug", [])
     reasons = result["stop_reason"]
@@ -260,12 +296,31 @@ def write_outputs(result, out_dir):
     feasible_like_count = sum(1 for s in corridor if not s["st"] and s["w"] >= 0.25)
     widths = [s["w"] for s in corridor if math.isfinite(s["w"])]
     longest_st = summarize_boolean_runs(corridor, "st")
+    walking_sources = Counter(d["source"] for d in walking_debug)
+    walking_segments = [d["segments"] for d in walking_debug
+                        if math.isfinite(d.get("segments", float("nan")))]
+    walking_candidates = [d["candidates"] for d in walking_debug
+                          if math.isfinite(d.get("candidates", float("nan")))]
+    walking_feasible = sum(1 for d in walking_debug if d.get("feasible", 0))
+    walking_time_ranges = [
+        d["t_end"] - d["t_start"] for d in walking_debug
+        if math.isfinite(d.get("t_start", float("nan"))) and
+        math.isfinite(d.get("t_end", float("nan")))
+    ]
     convex_rejects = [d["convex_reject_count"] for d in debug
                       if math.isfinite(d.get("convex_reject_count", float("nan")))]
     convex_violations = [d["convex_max_violation"] for d in debug
                          if math.isfinite(d.get("convex_max_violation", float("nan")))]
     convex_segments = [d["convex_segments"] for d in debug
                        if math.isfinite(d.get("convex_segments", float("nan")))]
+    candidate_inside_ratios = [
+        d["candidate_inside_corridor_ratio"] for d in debug
+        if math.isfinite(d.get("candidate_inside_corridor_ratio", float("nan")))
+    ]
+    valid_trajectory_counts = [
+        d["valid_trajectory_count"] for d in debug
+        if math.isfinite(d.get("valid_trajectory_count", float("nan")))
+    ]
     convex_dbg_segments = [d["segments"] for d in convex_debug
                            if math.isfinite(d.get("segments", float("nan")))]
     convex_dbg_widths = [d["min_width"] for d in convex_debug
@@ -285,12 +340,11 @@ def write_outputs(result, out_dir):
         stop_with_context.append((reason, c, d))
 
     corridor_stop_reasons = [r for r in reasons if r["reason"] == "CORRIDOR_INFEASIBLE"]
-    gate_threshold = result.get("corridor_stop_valid_ratio_threshold", 0.2)
     gate_suppressible = 0
     gate_would_stop = 0
     for reason in corridor_stop_reasons:
         d = nearest_by_time(debug, reason["t"])
-        if d and d.get("plan_valid", 0.0) >= 0.5 and d.get("valid_ratio", 0.0) > gate_threshold:
+        if d and d.get("plan_valid", 0.0) >= 0.5:
             gate_suppressible += 1
         else:
             gate_would_stop += 1
@@ -304,6 +358,7 @@ def write_outputs(result, out_dir):
         f.write("======================\n")
         f.write("bag: {}\n".format(result["bag_path"]))
         f.write("corridor_label_samples: {}\n".format(len(corridor)))
+        f.write("walking_corridor_debug_samples: {}\n".format(len(walking_debug)))
         f.write("debug_samples: {}\n".format(len(debug)))
         f.write("convex_debug_samples: {}\n".format(len(convex_debug)))
         f.write("rosout_stop_logs: {}\n".format(len(rosout_stop)))
@@ -332,6 +387,35 @@ def write_outputs(result, out_dir):
         if longest_st:
             f.write("  longest st=1 run: {:.2f}s -> {:.2f}s duration={:.2f}s\n".format(
                 longest_st[0], longest_st[1], longest_st[1] - longest_st[0]))
+
+        f.write("\nTimed walking corridor:\n")
+        if walking_debug:
+            f.write("  feasible: {} / {}\n".format(walking_feasible, len(walking_debug)))
+            f.write("  nominal source: {}\n".format(
+                ", ".join("{}={}".format(src, count)
+                          for src, count in walking_sources.most_common())))
+            if walking_segments:
+                f.write("  segments: mean={:.2f} min={:.0f} max={:.0f}\n".format(
+                    sum(walking_segments) / len(walking_segments),
+                    min(walking_segments), max(walking_segments)))
+            if walking_time_ranges:
+                f.write("  time range: mean={:.3f}s min={:.3f}s max={:.3f}s\n".format(
+                    sum(walking_time_ranges) / len(walking_time_ranges),
+                    min(walking_time_ranges), max(walking_time_ranges)))
+            if walking_candidates:
+                f.write("  candidates: mean={:.2f} min={:.0f} max={:.0f}\n".format(
+                    sum(walking_candidates) / len(walking_candidates),
+                    min(walking_candidates), max(walking_candidates)))
+            if candidate_inside_ratios:
+                f.write("  candidate inside ratio: mean={:.3f} min={:.3f} max={:.3f}\n".format(
+                    sum(candidate_inside_ratios) / len(candidate_inside_ratios),
+                    min(candidate_inside_ratios), max(candidate_inside_ratios)))
+            if valid_trajectory_counts:
+                f.write("  valid trajectory count: mean={:.2f} min={:.0f} max={:.0f}\n".format(
+                    sum(valid_trajectory_counts) / len(valid_trajectory_counts),
+                    min(valid_trajectory_counts), max(valid_trajectory_counts)))
+        else:
+            f.write("  none\n")
 
         f.write("\nConvex corridor:\n")
         if convex_segments:
@@ -368,8 +452,7 @@ def write_outputs(result, out_dir):
                     max(convex_dbg_dynamic_blocks)))
 
         f.write("\nCorridor stop gate:\n")
-        f.write("  threshold: valid_ratio > {:.3f} suppresses DWC-only stop\n".format(
-            gate_threshold))
+        f.write("  rule: MPPI plan_valid suppresses DWC-only stop\n")
         f.write("  recorded CORRIDOR_INFEASIBLE stops: {}\n".format(
             len(corridor_stop_reasons)))
         f.write("  offline suppressible by gate: {}\n".format(gate_suppressible))
@@ -444,14 +527,12 @@ def main():
     parser = argparse.ArgumentParser(description="Analyze walking-corridor debug bags.")
     parser.add_argument("bag_or_dir")
     parser.add_argument("--out-dir", default="")
-    parser.add_argument("--corridor-stop-valid-ratio-threshold", type=float, default=0.2)
     args = parser.parse_args()
 
     bag_path = resolve_bag_path(args.bag_or_dir)
     out_dir = args.out_dir or (args.bag_or_dir if os.path.isdir(args.bag_or_dir)
                                else os.path.dirname(os.path.abspath(bag_path)))
     result = analyze_bag(bag_path)
-    result["corridor_stop_valid_ratio_threshold"] = args.corridor_stop_valid_ratio_threshold
     csv_path, summary_path = write_outputs(result, out_dir)
     print("Wrote CSV: {}".format(csv_path))
     print("Wrote summary: {}".format(summary_path))

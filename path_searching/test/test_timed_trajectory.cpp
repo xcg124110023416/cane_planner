@@ -15,8 +15,8 @@ TEST(TimedTrajectoryBuilder, PrefersPreviousMppiBestPath)
         Eigen::Vector3d(1.5, 2.2, 0.3),
     };
     std::vector<Eigen::Vector2d> global_reference = {
-        Eigen::Vector2d(9.0, 9.0),
-        Eigen::Vector2d(10.0, 9.0),
+        Eigen::Vector2d(1.0, 2.0),
+        Eigen::Vector2d(2.0, 2.3),
     };
 
     auto timed = TimedTrajectoryBuilder::buildNominal(previous_mppi, global_reference, 0.2, 1.0, 5.0);
@@ -30,6 +30,29 @@ TEST(TimedTrajectoryBuilder, PrefersPreviousMppiBestPath)
     EXPECT_NEAR(0.0, timed.points[0].t_from_now, 1e-9);
     EXPECT_NEAR(0.2, timed.points[1].t_from_now, 1e-9);
     EXPECT_NEAR(0.4, timed.points[2].t_from_now, 1e-9);
+}
+
+TEST(TimedTrajectoryBuilder, RejectsPreviousMppiWhenItDriftsFromGlobalReference)
+{
+    std::vector<Eigen::Vector3d> previous_mppi = {
+        Eigen::Vector3d(0.0, 0.0, 0.0),
+        Eigen::Vector3d(0.5, 2.8, 1.0),
+        Eigen::Vector3d(1.0, 4.0, 1.0),
+    };
+    std::vector<Eigen::Vector2d> global_reference = {
+        Eigen::Vector2d(0.0, 0.0),
+        Eigen::Vector2d(2.0, 0.0),
+        Eigen::Vector2d(4.0, 0.0),
+    };
+
+    auto timed = TimedTrajectoryBuilder::buildNominal(previous_mppi, global_reference, 0.2, 1.0, 5.0);
+
+    ASSERT_TRUE(timed.valid());
+    EXPECT_EQ(TimedTrajectorySource::ASTAR_BOOTSTRAP, timed.source);
+    EXPECT_NEAR(0.0, timed.points[0].position.x(), 1e-9);
+    EXPECT_NEAR(0.0, timed.points[0].position.y(), 1e-9);
+    EXPECT_NEAR(2.0, timed.points[1].position.x(), 1e-9);
+    EXPECT_NEAR(0.0, timed.points[1].position.y(), 1e-9);
 }
 
 TEST(TimedTrajectoryBuilder, FallsBackToAstarBootstrapWithDistanceTiming)
