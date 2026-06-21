@@ -9,6 +9,7 @@
 #include <ros/ros.h>
 
 #include <plan_env/collision_detection.h>
+#include <path_searching/timed_trajectory.h>
 
 namespace cane_planner
 {
@@ -95,6 +96,11 @@ public:
                 const std::vector<Eigen::Vector3d> &obs_size = {}) const;
 
     Result plan(const std::vector<Eigen::Vector2d> &reference_path,
+                const std::vector<Eigen::Vector3d> &obs_pos,
+                const std::vector<Eigen::Vector3d> &obs_vel,
+                const std::vector<Eigen::Vector3d> &obs_size = {}) const;
+
+    Result plan(const TimedTrajectory &nominal_trajectory,
                 const std::vector<Eigen::Vector3d> &obs_pos,
                 const std::vector<Eigen::Vector3d> &obs_vel,
                 const std::vector<Eigen::Vector3d> &obs_size = {}) const;

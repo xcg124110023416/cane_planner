@@ -1,8 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <path_searching/dynamic_walking_corridor.h>
+#include <path_searching/timed_trajectory.h>
 
 using cane_planner::DynamicWalkingCorridor;
+using cane_planner::TimedTrajectory;
+using cane_planner::TimedTrajectoryPoint;
+using cane_planner::TimedTrajectorySource;
 
 TEST(DynamicWalkingCorridor, SelectsBehindSideForCrossingPedestrian)
 {
@@ -155,6 +159,42 @@ TEST(DynamicWalkingCorridor, GeneratesCandidatesAlongReferencePolyline)
     EXPECT_NEAR(0.0, result.selected.centerline[1].y(), 1e-9);
     EXPECT_NEAR(2.0, result.selected.centerline.back().x(), 1e-9);
     EXPECT_NEAR(2.0, result.selected.centerline.back().y(), 1e-9);
+}
+
+TEST(DynamicWalkingCorridor, GeneratesCandidatesAlongTimedNominalTrajectory)
+{
+    DynamicWalkingCorridor corridor;
+    DynamicWalkingCorridor::Config cfg;
+    cfg.length = 4.0;
+    cfg.half_width = 0.4;
+    cfg.lateral_shift = 0.8;
+    cfg.prediction_horizon = 0.5;
+    cfg.prediction_dt = 0.25;
+    corridor.setConfig(cfg);
+
+    TimedTrajectory nominal;
+    nominal.source = TimedTrajectorySource::PREVIOUS_MPPI;
+    TimedTrajectoryPoint p0;
+    p0.position = Eigen::Vector2d(0.0, 0.0);
+    p0.t_from_now = 0.0;
+    TimedTrajectoryPoint p1;
+    p1.position = Eigen::Vector2d(1.0, 0.0);
+    p1.t_from_now = 0.2;
+    TimedTrajectoryPoint p2;
+    p2.position = Eigen::Vector2d(1.0, 1.0);
+    p2.t_from_now = 0.4;
+    nominal.points = {p0, p1, p2};
+
+    auto result = corridor.plan(nominal, {}, {}, {});
+
+    ASSERT_TRUE(result.has_feasible);
+    ASSERT_GE(result.selected.centerline.size(), 3u);
+    EXPECT_NEAR(0.0, result.selected.centerline.front().x(), 1e-9);
+    EXPECT_NEAR(0.0, result.selected.centerline.front().y(), 1e-9);
+    EXPECT_NEAR(1.0, result.selected.centerline[1].x(), 1e-9);
+    EXPECT_NEAR(0.0, result.selected.centerline[1].y(), 1e-9);
+    EXPECT_NEAR(1.0, result.selected.centerline.back().x(), 1e-9);
+    EXPECT_NEAR(1.0, result.selected.centerline.back().y(), 1e-9);
 }
 
 TEST(DynamicWalkingCorridor, KeepsCenterCorridorAsSingleDefaultCandidate)

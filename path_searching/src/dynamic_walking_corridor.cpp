@@ -330,6 +330,19 @@ DynamicWalkingCorridor::Result DynamicWalkingCorridor::plan(
     return result;
 }
 
+DynamicWalkingCorridor::Result DynamicWalkingCorridor::plan(
+    const TimedTrajectory &nominal_trajectory,
+    const std::vector<Eigen::Vector3d> &obs_pos,
+    const std::vector<Eigen::Vector3d> &obs_vel,
+    const std::vector<Eigen::Vector3d> &obs_size) const
+{
+    std::vector<Eigen::Vector2d> reference_path;
+    reference_path.reserve(nominal_trajectory.points.size());
+    for (const auto &point : nominal_trajectory.points)
+        reference_path.push_back(point.position);
+    return plan(reference_path, obs_pos, obs_vel, obs_size);
+}
+
 DynamicWalkingCorridor::Candidate DynamicWalkingCorridor::evaluateCandidate(
     int id,
     double lateral_offset,
