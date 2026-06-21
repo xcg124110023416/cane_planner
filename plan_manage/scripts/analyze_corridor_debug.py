@@ -222,6 +222,8 @@ def analyze_bag(bag_path):
                     "convex_segments": data[14] if len(data) > 14 else float("nan"),
                     "candidate_inside_corridor_ratio": data[15] if len(data) > 15 else float("nan"),
                     "valid_trajectory_count": data[16] if len(data) > 16 else float("nan"),
+                    "corridor_feasible_trajectory_count": data[17] if len(data) > 17 else float("nan"),
+                    "corridor_evaluated": data[18] if len(data) > 18 else float("nan"),
                     "dynamic_reject_count": data[5] if len(data) > 5 else float("nan"),
                     "static_reject_count": data[6] if len(data) > 6 else float("nan"),
                 })
@@ -321,6 +323,15 @@ def write_outputs(result, out_dir):
         d["valid_trajectory_count"] for d in debug
         if math.isfinite(d.get("valid_trajectory_count", float("nan")))
     ]
+    corridor_feasible_trajectory_counts = [
+        d["corridor_feasible_trajectory_count"] for d in debug
+        if math.isfinite(d.get("corridor_feasible_trajectory_count", float("nan")))
+    ]
+    corridor_evaluated_count = sum(
+        1 for d in debug
+        if math.isfinite(d.get("corridor_evaluated", float("nan"))) and
+        d.get("corridor_evaluated", 0.0) >= 0.5
+    )
     convex_dbg_segments = [d["segments"] for d in convex_debug
                            if math.isfinite(d.get("segments", float("nan")))]
     convex_dbg_widths = [d["min_width"] for d in convex_debug
@@ -414,6 +425,13 @@ def write_outputs(result, out_dir):
                 f.write("  valid trajectory count: mean={:.2f} min={:.0f} max={:.0f}\n".format(
                     sum(valid_trajectory_counts) / len(valid_trajectory_counts),
                     min(valid_trajectory_counts), max(valid_trajectory_counts)))
+            if corridor_feasible_trajectory_counts:
+                f.write("  corridor feasible trajectory count: mean={:.2f} min={:.0f} max={:.0f}\n".format(
+                    sum(corridor_feasible_trajectory_counts) / len(corridor_feasible_trajectory_counts),
+                    min(corridor_feasible_trajectory_counts),
+                    max(corridor_feasible_trajectory_counts)))
+                f.write("  corridor evaluated: {} / {}\n".format(
+                    corridor_evaluated_count, len(corridor_feasible_trajectory_counts)))
         else:
             f.write("  none\n")
 

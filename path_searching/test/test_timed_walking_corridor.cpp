@@ -86,6 +86,22 @@ TEST(TrajectoryFeasibility, EncodesGoStopFromMppiFeasibleTrajectory)
     EXPECT_TRUE(infeasible.shouldStop());
 }
 
+TEST(TrajectoryFeasibility, CorridorEvaluationOverridesGenericValidity)
+{
+    TrajectoryFeasibility feasibility;
+    feasibility.valid_trajectory_count = 12;
+    feasibility.corridor_feasible_trajectory_count = 0;
+    feasibility.corridor_evaluated = true;
+    feasibility.inside_corridor_ratio = 0.25;
+
+    EXPECT_FALSE(feasibility.hasFeasibleTrajectory());
+    EXPECT_TRUE(feasibility.shouldStop());
+
+    feasibility.corridor_feasible_trajectory_count = 1;
+    EXPECT_TRUE(feasibility.hasFeasibleTrajectory());
+    EXPECT_FALSE(feasibility.shouldStop());
+}
+
 int main(int argc, char **argv)
 {
     testing::InitGoogleTest(&argc, argv);

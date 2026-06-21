@@ -407,6 +407,8 @@ void MpcController::rolloutBatch(
     last_debug_metrics_.max_convex_corridor_violation = 0.0;
     last_debug_metrics_.candidate_inside_corridor_ratio = 1.0;
     last_debug_metrics_.valid_trajectory_count = 0;
+    last_debug_metrics_.corridor_feasible_trajectory_count = 0;
+    last_debug_metrics_.corridor_evaluated = false;
     last_debug_metrics_.min_dynamic_clearance = std::numeric_limits<double>::infinity();
     last_debug_metrics_.min_cpa_time = std::numeric_limits<double>::infinity();
     int corridor_check_count = 0;
@@ -443,6 +445,8 @@ void MpcController::rolloutBatch(
         bool static_collided = false;
         bool dyn_collided = false;
         bool corridor_violated = false;
+        bool corridor_evaluated_for_sample = false;
+        bool sample_inside_corridor = true;
         bool convex_corridor_violated = false;
         bool arrived_early = false;
         double rollout_min_dynamic_clearance = std::numeric_limits<double>::infinity();
@@ -508,6 +512,7 @@ void MpcController::rolloutBatch(
 
                 if (cfg_.corridor_enable && has_walking_corridor_)
                 {
+                    corridor_evaluated_for_sample = true;
                     const Eigen::Vector2d point(px, py);
                     double outside = 0.0;
                     bool checked_timed_corridor = false;
@@ -526,6 +531,8 @@ void MpcController::rolloutBatch(
                     corridor_check_count++;
                     if (outside <= 0.0)
                         corridor_inside_count++;
+                    else
+                        sample_inside_corridor = false;
                     if (outside > 0.0)
                     {
                         corridor_cost += cfg_.w_corridor * outside * outside;
@@ -724,10 +731,15 @@ void MpcController::rolloutBatch(
         sample_min_dynamic_clearances[k] = rollout_min_dynamic_clearance;
         sample_min_cpa_times[k] = rollout_min_cpa_time;
         if (std::isfinite(total_cost))
+        {
             last_debug_metrics_.valid_trajectory_count++;
+            if (!corridor_evaluated_for_sample || sample_inside_corridor)
+                last_debug_metrics_.corridor_feasible_trajectory_count++;
+        }
     }
     if (corridor_check_count > 0)
     {
+        last_debug_metrics_.corridor_evaluated = true;
         last_debug_metrics_.candidate_inside_corridor_ratio =
             static_cast<double>(corridor_inside_count) /
             static_cast<double>(corridor_check_count);

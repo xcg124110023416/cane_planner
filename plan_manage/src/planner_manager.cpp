@@ -2218,7 +2218,7 @@ std::vector<Eigen::Vector2d> shortcutTraversablePolyline(
         {
             const auto dbg = mpc_controller_->getDebugMetrics();
             std_msgs::Float64MultiArray metrics;
-            metrics.data.reserve(12);
+            metrics.data.reserve(19);
             metrics.data.push_back(dbg.plan_time_ms);
             metrics.data.push_back(dbg.valid_sample_ratio);
             metrics.data.push_back(std::isfinite(dbg.best_total_cost) ? dbg.best_total_cost : -1.0);
@@ -2236,6 +2236,8 @@ std::vector<Eigen::Vector2d> shortcutTraversablePolyline(
             metrics.data.push_back((double)dbg.convex_corridor_segments);
             metrics.data.push_back(dbg.candidate_inside_corridor_ratio);
             metrics.data.push_back((double)dbg.valid_trajectory_count);
+            metrics.data.push_back((double)dbg.corridor_feasible_trajectory_count);
+            metrics.data.push_back(dbg.corridor_evaluated ? 1.0 : 0.0);
             mpc_debug_metrics_pub_.publish(metrics);
         }
 

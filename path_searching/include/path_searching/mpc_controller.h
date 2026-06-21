@@ -117,6 +117,8 @@ public:
         double max_convex_corridor_violation = 0.0;
         double candidate_inside_corridor_ratio = 1.0;
         int valid_trajectory_count = 0;
+        int corridor_feasible_trajectory_count = 0;
+        bool corridor_evaluated = false;
         int num_samples = 0;
         bool plan_valid = false;
     };
