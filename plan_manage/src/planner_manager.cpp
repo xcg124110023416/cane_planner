@@ -708,14 +708,41 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
         if (!cfg.enable)
             return empty_result;
 
-        const auto reference_path = buildWalkingCorridorReferencePath(current_pose);
-        auto result = reference_path.size() >= 2
-            ? dynamic_walking_corridor_->plan(reference_path, obs_pos, obs_vel, obs_size)
+        const auto nominal_trajectory = buildWalkingCorridorNominalTrajectory(current_pose);
+        auto result = nominal_trajectory.valid()
+            ? dynamic_walking_corridor_->plan(nominal_trajectory, obs_pos, obs_vel, obs_size)
             : dynamic_walking_corridor_->plan(
-                current_pose.head(2), computeInteractionPathForward(current_pose),
-                obs_pos, obs_vel, obs_size);
+                  current_pose.head(2), computeInteractionPathForward(current_pose),
+                  obs_pos, obs_vel, obs_size);
         publishWalkingCorridor(result);
         return result;
+    }
+
+    TimedTrajectory PlannerManager::buildWalkingCorridorNominalTrajectory(
+        const Eigen::Vector3d& current_pose) const
+    {
+        std::vector<Eigen::Vector3d> previous_mppi_path;
+        previous_mppi_path.push_back(current_pose);
+
+        if (mpc_controller_)
+        {
+            const auto best_path = mpc_controller_->getBestPath();
+            for (const auto& point : best_path)
+            {
+                if ((point.head(2) - current_pose.head(2)).norm() < 0.05)
+                    continue;
+                previous_mppi_path.push_back(point);
+            }
+        }
+
+        const auto reference_path = buildWalkingCorridorReferencePath(current_pose);
+        const auto cfg = dynamic_walking_corridor_->getConfig();
+        return TimedTrajectoryBuilder::buildNominal(
+            previous_mppi_path,
+            reference_path,
+            std::max(0.05, lfpc_t_sup_),
+            std::max(0.1, cfg.robot_speed),
+            std::max(0.5, cfg.length));
     }
 
     std::vector<Eigen::Vector2d> PlannerManager::buildWalkingCorridorReferencePath(

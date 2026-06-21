@@ -26,6 +26,7 @@
 #include <path_searching/mpc_controller.h>
 #include <path_searching/kinematic_mppi_controller.h>
 #include <path_searching/dynamic_walking_corridor.h>
+#include <path_searching/timed_trajectory_builder.h>
 #include <path_searching/convex_corridor.h>
 #include <path_searching/lfpc.h>
 #include <plan_env/collision_detection.h>
@@ -269,6 +270,8 @@ namespace cane_planner
                                              const std::vector<Eigen::Vector3d>& obs_pos,
                                              const std::vector<Eigen::Vector3d>& obs_vel,
                                              const std::vector<Eigen::Vector3d>& obs_size);
+        TimedTrajectory buildWalkingCorridorNominalTrajectory(
+                                             const Eigen::Vector3d& current_pose) const;
         std::vector<Eigen::Vector2d> buildWalkingCorridorReferencePath(
                                              const Eigen::Vector3d& current_pose) const;
         void publishWalkingCorridor(const DynamicWalkingCorridor::Result& result);
