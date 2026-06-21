@@ -49,6 +49,7 @@ add_library( path_searching
     src/lfpc.cpp
     src/dynamic_risk_field.cpp
     src/dynamic_walking_corridor.cpp
+    src/timed_trajectory_builder.cpp
     src/mpc_controller.cpp
     src/kinematic_mppi_controller.cpp
     )
@@ -77,6 +78,13 @@ if(CATKIN_ENABLE_TESTING)
   )
   target_link_libraries(test_convex_corridor
     convex_corridor
+    ${catkin_LIBRARIES}
+  )
+  catkin_add_gtest(test_timed_trajectory
+    test/test_timed_trajectory.cpp
+  )
+  target_link_libraries(test_timed_trajectory
+    path_searching
     ${catkin_LIBRARIES}
   )
 endif()
