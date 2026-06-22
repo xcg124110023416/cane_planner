@@ -80,55 +80,6 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
     return polygon;
 }
 
-bool segmentTraversable(
-    const Eigen::Vector2d& a,
-    const Eigen::Vector2d& b,
-    const std::function<bool(double, double)>& is_traversable)
-{
-    const Eigen::Vector2d ab = b - a;
-    const double length = ab.norm();
-    if (length < 1e-6)
-        return is_traversable(a.x(), a.y());
-
-    const int steps = std::max(1, static_cast<int>(std::ceil(length / 0.10)));
-    for (int i = 0; i <= steps; ++i)
-    {
-        const double u = static_cast<double>(i) / static_cast<double>(steps);
-        const Eigen::Vector2d p = a + u * ab;
-        if (!is_traversable(p.x(), p.y()))
-            return false;
-    }
-    return true;
-}
-
-std::vector<Eigen::Vector2d> shortcutTraversablePolyline(
-    const std::vector<Eigen::Vector2d>& path,
-    const std::function<bool(double, double)>& is_traversable)
-{
-    if (path.size() < 3)
-        return path;
-
-    std::vector<Eigen::Vector2d> out;
-    out.push_back(path.front());
-
-    size_t i = 0;
-    while (i + 1 < path.size())
-    {
-        size_t best = i + 1;
-        for (size_t j = path.size() - 1; j > i + 1; --j)
-        {
-            if (segmentTraversable(path[i], path[j], is_traversable))
-            {
-                best = j;
-                break;
-            }
-        }
-        out.push_back(path[best]);
-        i = best;
-    }
-    return out;
-}
-
 }  // namespace
 
     PlannerManager::~PlannerManager()
@@ -1916,15 +1867,6 @@ std::vector<Eigen::Vector2d> shortcutTraversablePolyline(
         global_wp_idx_ = 0;
 
         auto path = astar_finder_->getPath();  // vector<Eigen::Vector2d>
-        const size_t raw_path_size = path.size();
-        if (collision_ && path.size() >= 3)
-        {
-            path = shortcutTraversablePolyline(
-                path,
-                [this](double x, double y) {
-                    return collision_->isTraversable(x, y);
-                });
-        }
         global_path_dense_ = path;
         if (path.size() < 2)
         {
@@ -1964,9 +1906,9 @@ std::vector<Eigen::Vector2d> shortcutTraversablePolyline(
                 global_waypoints_.back() = end_pt_;  // snap last wp to exact goal
         }
 
-        ROS_INFO("[MPC global] Generated %zu waypoints (spacing=%.1fm) from %zu->%zu A* points",
+        ROS_INFO("[MPC global] Generated %zu waypoints (spacing=%.1fm) from %zu A* points",
                  global_waypoints_.size(), global_wp_spacing_,
-                 raw_path_size, path.size());
+                 path.size());
 
         publishWaypointsList();
     }
