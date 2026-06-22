@@ -104,6 +104,11 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
         nh.param("manager/sim_speed", sim_speed_, 0.5);  // 仿真行走速度 m/s
         nh.param("manager/global_wp_spacing", global_wp_spacing_, 1.0);
         nh.param("manager/global_wp_arrival_radius", global_wp_arrival_radius_, 0.1);
+        nh.param("manager/global_wp_smoothing_enable", global_wp_smoothing_enable_, true);
+        nh.param("manager/global_wp_smoothing_radius", global_wp_smoothing_radius_, 0.45);
+        nh.param("manager/global_wp_smoothing_min_turn_angle",
+                 global_wp_smoothing_min_turn_angle_, 0.55);
+        nh.param("manager/global_wp_smoothing_samples", global_wp_smoothing_samples_, 4);
         nh.param("manager/lookahead_dist", lookahead_dist_, 1.0);
         nh.param("mpc/fov_range", mpc_fov_range_, 5.0);
         nh.param("mpc/debug_enable", mpc_debug_enable_, true);
@@ -1904,6 +1909,25 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
                 global_waypoints_.push_back(end_pt_);
             else
                 global_waypoints_.back() = end_pt_;  // snap last wp to exact goal
+        }
+
+        if (global_wp_smoothing_enable_ && global_waypoints_.size() >= 3)
+        {
+            const size_t before_count = global_waypoints_.size();
+            PathSmoother::Config cfg;
+            cfg.enable = true;
+            cfg.corner_radius = global_wp_smoothing_radius_;
+            cfg.min_turn_angle = global_wp_smoothing_min_turn_angle_;
+            cfg.samples_per_corner = global_wp_smoothing_samples_;
+            auto traversable = [this](double x, double y) {
+                return !collision_ || collision_->isTraversable(x, y);
+            };
+            global_waypoints_ = PathSmoother::smoothCorners(global_waypoints_, cfg, traversable);
+            if (global_waypoints_.size() != before_count)
+            {
+                ROS_INFO("[MPC global] Smoothed waypoints %zu -> %zu (radius=%.2fm)",
+                         before_count, global_waypoints_.size(), cfg.corner_radius);
+            }
         }
 
         ROS_INFO("[MPC global] Generated %zu waypoints (spacing=%.1fm) from %zu A* points",

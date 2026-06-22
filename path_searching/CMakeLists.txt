@@ -50,6 +50,7 @@ add_library( path_searching
     src/dynamic_risk_field.cpp
     src/dynamic_walking_corridor.cpp
     src/timed_trajectory_builder.cpp
+    src/path_smoother.cpp
     src/mpc_controller.cpp
     src/kinematic_mppi_controller.cpp
     )
@@ -91,6 +92,13 @@ if(CATKIN_ENABLE_TESTING)
     test/test_timed_walking_corridor.cpp
   )
   target_link_libraries(test_timed_walking_corridor
+    path_searching
+    ${catkin_LIBRARIES}
+  )
+  catkin_add_gtest(test_path_smoother
+    test/test_path_smoother.cpp
+  )
+  target_link_libraries(test_path_smoother
     path_searching
     ${catkin_LIBRARIES}
   )

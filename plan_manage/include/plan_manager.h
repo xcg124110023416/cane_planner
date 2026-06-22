@@ -28,6 +28,7 @@
 #include <path_searching/dynamic_walking_corridor.h>
 #include <path_searching/timed_trajectory_builder.h>
 #include <path_searching/convex_corridor.h>
+#include <path_searching/path_smoother.h>
 #include <path_searching/lfpc.h>
 #include <plan_env/collision_detection.h>
 #include <plan_container.hpp>
@@ -103,6 +104,10 @@ namespace cane_planner
         size_t global_wp_idx_;
         double global_wp_spacing_ = 1.0;
         double global_wp_arrival_radius_ = 0.1;
+        bool global_wp_smoothing_enable_ = true;
+        double global_wp_smoothing_radius_ = 0.45;
+        double global_wp_smoothing_min_turn_angle_ = 0.55;
+        int global_wp_smoothing_samples_ = 4;
         double lookahead_dist_ = 1.0;
         Eigen::Vector2d last_goal_cmd_ = Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
         double last_goal_yaw_ = std::numeric_limits<double>::quiet_NaN();

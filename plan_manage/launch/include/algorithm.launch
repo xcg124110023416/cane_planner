@@ -100,6 +100,10 @@
         <param name="manager/sim_speed" value="1.0" type="double"/>
         <param name="manager/global_wp_spacing" value="1.0" type="double"/>
         <param name="manager/global_wp_arrival_radius" value="$(arg global_wp_arrival_radius)" type="double"/>
+        <param name="manager/global_wp_smoothing_enable" value="true" type="bool"/>
+        <param name="manager/global_wp_smoothing_radius" value="0.45" type="double"/>
+        <param name="manager/global_wp_smoothing_min_turn_angle" value="0.55" type="double"/>
+        <param name="manager/global_wp_smoothing_samples" value="4" type="int"/>
         <!-- 前向截断距离：从最近投影点向前看多少米选为当前目标 -->
         <param name="manager/lookahead_dist" value="2.2" type="double"/>
         <param name="manager/max_vel" value="1.0" type="double"/>
