@@ -2768,6 +2768,30 @@ std::vector<Eigen::Vector2d> shortcutTraversablePolyline(
             mk.points.push_back(pt);
         }
         mpc_wps_pub_.publish(mk);
+
+        visualization_msgs::Marker line;
+        line.header.frame_id = "world";
+        line.header.stamp = mk.header.stamp;
+        line.ns = "mpc_waypoint_polyline";
+        line.id = 1;
+        line.type = visualization_msgs::Marker::LINE_STRIP;
+        line.action = visualization_msgs::Marker::ADD;
+        line.pose.orientation.w = 1.0;
+        line.scale.x = 0.045;
+        line.color.a = 0.95;
+        line.color.r = 1.0;
+        line.color.g = 0.72;
+        line.color.b = 0.05;
+
+        for (size_t i = 0; i < global_waypoints_.size(); ++i)
+        {
+            geometry_msgs::Point pt;
+            pt.x = global_waypoints_[i](0);
+            pt.y = global_waypoints_[i](1);
+            pt.z = collision_->getSliceHeight() + 0.08;
+            line.points.push_back(pt);
+        }
+        mpc_wps_pub_.publish(line);
     }
 
     void PlannerManager::publishRiskField(const std::vector<Eigen::Vector3d>& obs_pos,
