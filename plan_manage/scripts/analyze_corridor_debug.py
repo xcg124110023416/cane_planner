@@ -20,6 +20,7 @@ ODOM_TOPICS = ["/sim_odom", "/simulation_generator/odom", "/localization_odom"]
 ASTAR_TOPIC = "/astar/path"
 MPC_PATH_TOPIC = "/mpc/path"
 WAYPOINTS_TOPIC = "/mpc/waypoints"
+CURRENT_WAYPOINT_TOPIC = "/mpc/current_waypoint"
 ROSOUT_TOPICS = ["/rosout", "/rosout_agg"]
 
 LABEL_RE = re.compile(
@@ -67,7 +68,9 @@ def path_points(msg):
     if hasattr(msg, "poses"):
         return [(p.pose.position.x, p.pose.position.y) for p in msg.poses]
     if hasattr(msg, "points"):
-        return [(p.x, p.y) for p in msg.points]
+        pts = [(p.x, p.y) for p in msg.points]
+        if pts:
+            return pts
     if hasattr(msg, "pose"):
         return [(msg.pose.position.x, msg.pose.position.y)]
     return []
@@ -79,6 +82,31 @@ def path_length(points):
         total += math.hypot(points[i][0] - points[i - 1][0],
                             points[i][1] - points[i - 1][1])
     return total
+
+
+def point_to_polyline_distance(point, polyline):
+    if not point or not polyline:
+        return float("nan")
+    px, py = point
+    if len(polyline) == 1:
+        return math.hypot(px - polyline[0][0], py - polyline[0][1])
+    best = float("inf")
+    for i in range(1, len(polyline)):
+        ax, ay = polyline[i - 1]
+        bx, by = polyline[i]
+        vx = bx - ax
+        vy = by - ay
+        denom = vx * vx + vy * vy
+        if denom <= 1e-12:
+            dist = math.hypot(px - ax, py - ay)
+        else:
+            u = ((px - ax) * vx + (py - ay) * vy) / denom
+            u = max(0.0, min(1.0, u))
+            qx = ax + u * vx
+            qy = ay + u * vy
+            dist = math.hypot(px - qx, py - qy)
+        best = min(best, dist)
+    return best
 
 
 def nearest_by_time(samples, t_rel, max_dt=0.35):
@@ -185,12 +213,13 @@ def analyze_bag(bag_path):
     latest_astar = []
     latest_mpc_path = []
     latest_waypoints = []
+    current_waypoint_samples = []
     t0 = None
 
     topics = [
         CORRIDOR_TOPIC, DEBUG_TOPIC, STOP_ADVICE_TOPIC, STOP_REASON_TOPIC,
         WALKING_DEBUG_TOPIC, CONVEX_CORRIDOR_TOPIC, CONVEX_DEBUG_TOPIC,
-        ASTAR_TOPIC, MPC_PATH_TOPIC, WAYPOINTS_TOPIC,
+        ASTAR_TOPIC, MPC_PATH_TOPIC, WAYPOINTS_TOPIC, CURRENT_WAYPOINT_TOPIC,
     ] + ODOM_TOPICS + ROSOUT_TOPICS
 
     with rosbag.Bag(bag_path, "r") as bag:
@@ -253,6 +282,14 @@ def analyze_bag(bag_path):
                 latest_mpc_path = path_points(msg)
             elif topic == WAYPOINTS_TOPIC:
                 latest_waypoints = path_points(msg)
+            elif topic == CURRENT_WAYPOINT_TOPIC:
+                pts = path_points(msg)
+                if pts:
+                    current_waypoint_samples.append({
+                        "t": tr,
+                        "x": pts[0][0],
+                        "y": pts[0][1],
+                    })
 
     return {
         "bag_path": bag_path,
@@ -267,6 +304,7 @@ def analyze_bag(bag_path):
         "astar": latest_astar,
         "mpc_path": latest_mpc_path,
         "waypoints": latest_waypoints,
+        "current_waypoint": current_waypoint_samples,
     }
 
 
@@ -341,6 +379,16 @@ def write_outputs(result, out_dir):
                                 if math.isfinite(d.get("static_block", float("nan")))]
     convex_dbg_dynamic_blocks = [d["dynamic_block"] for d in convex_debug
                                  if math.isfinite(d.get("dynamic_block", float("nan")))]
+    current_wp_to_astar = [
+        point_to_polyline_distance((s["x"], s["y"]), result["astar"])
+        for s in result.get("current_waypoint", [])
+    ]
+    current_wp_to_waypoints = [
+        point_to_polyline_distance((s["x"], s["y"]), result["waypoints"])
+        for s in result.get("current_waypoint", [])
+    ]
+    current_wp_to_astar = [d for d in current_wp_to_astar if math.isfinite(d)]
+    current_wp_to_waypoints = [d for d in current_wp_to_waypoints if math.isfinite(d)]
 
     stop_with_context = []
     for reason in reasons:
@@ -381,6 +429,18 @@ def write_outputs(result, out_dir):
             len(result["mpc_path"]), path_length(result["mpc_path"])))
         f.write("waypoints_last: {} length={:.3f}m\n".format(
             len(result["waypoints"]), path_length(result["waypoints"])))
+        f.write("current_waypoint_samples: {}\n".format(
+            len(result.get("current_waypoint", []))))
+        if current_wp_to_astar or current_wp_to_waypoints:
+            f.write("\nCurrent waypoint tracking:\n")
+            if current_wp_to_astar:
+                f.write("  distance to raw A*: mean={:.3f} max={:.3f}m\n".format(
+                    sum(current_wp_to_astar) / len(current_wp_to_astar),
+                    max(current_wp_to_astar)))
+            if current_wp_to_waypoints:
+                f.write("  distance to waypoint polyline: mean={:.3f} max={:.3f}m\n".format(
+                    sum(current_wp_to_waypoints) / len(current_wp_to_waypoints),
+                    max(current_wp_to_waypoints)))
         f.write("\nStop reasons:\n")
         if stop_reasons:
             for reason, count in stop_reasons.most_common():

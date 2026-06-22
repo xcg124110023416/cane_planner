@@ -12,6 +12,18 @@ mixed_stress:
   - {start: [-2.5, -3.0, 0.0], vel: [0.0, 0.5, 0.0], size: [0.5, 0.5, 1.7], period: 6.0, mode: loop}
   - {start: [0.0, -4.5, 0.0], vel: [0.3, 0.0, 0.0], size: [0.5, 0.5, 1.7], period: 4.0, mode: loop}
 
+mixed_stress_reverse:
+  # Same pedestrian motions as mixed_stress; reverse start/goal regression.
+  - {start: [1.0, 2.5, 0.0], vel: [0.0, 0.5, 0.0], size: [0.5, 0.5, 1.7], period: 4.0, mode: trigger}
+  - {start: [-2.5, -3.0, 0.0], vel: [0.0, 0.5, 0.0], size: [0.5, 0.5, 1.7], period: 6.0, mode: loop}
+  - {start: [0.0, -4.5, 0.0], vel: [0.3, 0.0, 0.0], size: [0.5, 0.5, 1.7], period: 4.0, mode: loop}
+
+mixed_turn_upper:
+  # Same pedestrian motions as mixed_stress; lower-to-upper cornering regression.
+  - {start: [1.0, 2.5, 0.0], vel: [0.0, 0.5, 0.0], size: [0.5, 0.5, 1.7], period: 4.0, mode: trigger}
+  - {start: [-2.5, -3.0, 0.0], vel: [0.0, 0.5, 0.0], size: [0.5, 0.5, 1.7], period: 6.0, mode: loop}
+  - {start: [0.0, -4.5, 0.0], vel: [0.3, 0.0, 0.0], size: [0.5, 0.5, 1.7], period: 4.0, mode: loop}
+
 crossing:
   - {start: [1.0, 2.5, 0.0], vel: [0.0, 0.5, 0.0], size: [0.5, 0.5, 1.7], period: 4.0, mode: trigger}
 
