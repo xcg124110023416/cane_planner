@@ -2,60 +2,18 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 
 namespace cane_planner
 {
 namespace
 {
 constexpr double kEps = 1e-6;
-constexpr double kMaxPreviousMppiGlobalDeviation = 1.5;
 
 double yawOf(const Eigen::Vector2d &delta, double fallback)
 {
     if (delta.norm() < kEps)
         return fallback;
     return std::atan2(delta.y(), delta.x());
-}
-
-double pointSegmentDistance(const Eigen::Vector2d &p,
-                            const Eigen::Vector2d &a,
-                            const Eigen::Vector2d &b)
-{
-    const Eigen::Vector2d ab = b - a;
-    const double ab2 = ab.squaredNorm();
-    if (ab2 < kEps)
-        return (p - a).norm();
-    const double u = std::max(0.0, std::min(1.0, (p - a).dot(ab) / ab2));
-    return (p - (a + u * ab)).norm();
-}
-
-double distanceToPolyline(const Eigen::Vector2d &p,
-                          const std::vector<Eigen::Vector2d> &polyline)
-{
-    if (polyline.empty())
-        return std::numeric_limits<double>::infinity();
-    if (polyline.size() == 1)
-        return (p - polyline.front()).norm();
-
-    double best = std::numeric_limits<double>::infinity();
-    for (size_t i = 1; i < polyline.size(); ++i)
-        best = std::min(best, pointSegmentDistance(p, polyline[i - 1], polyline[i]));
-    return best;
-}
-
-bool followsGlobalReference(const TimedTrajectory &previous,
-                            const std::vector<Eigen::Vector2d> &global_reference)
-{
-    if (!previous.valid() || global_reference.size() < 2)
-        return previous.valid();
-
-    for (const auto &point : previous.points)
-    {
-        if (distanceToPolyline(point.position, global_reference) > kMaxPreviousMppiGlobalDeviation)
-            return false;
-    }
-    return true;
 }
 
 } // namespace
@@ -68,7 +26,7 @@ TimedTrajectory TimedTrajectoryBuilder::buildNominal(
     double max_length)
 {
     TimedTrajectory timed = fromPreviousMppi(previous_mppi_path, mppi_dt, max_length);
-    if (followsGlobalReference(timed, global_reference))
+    if (timed.valid())
         return timed;
     return fromGlobalReference(global_reference, reference_speed, max_length);
 }

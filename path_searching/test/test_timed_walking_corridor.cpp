@@ -7,6 +7,7 @@ using cane_planner::TimedTrajectorySource;
 using cane_planner::TimedWalkingCorridor;
 using cane_planner::TimedWalkingCorridorSegment;
 using cane_planner::TrajectoryFeasibility;
+using cane_planner::corridorDeviationFeasible;
 using cane_planner::selectBestTrajectoryIndex;
 
 TEST(TimedWalkingCorridor, TracksTimeRangeAndSegmentLookup)
@@ -103,6 +104,25 @@ TEST(TrajectoryFeasibility, CorridorEvaluationOverridesGenericValidity)
     EXPECT_FALSE(feasibility.shouldStop());
 }
 
+TEST(TrajectoryFeasibility, ReportsNoFeasibleTrajectoryStopReason)
+{
+    TrajectoryFeasibility infeasible;
+    infeasible.valid_trajectory_count = 8;
+    infeasible.corridor_feasible_trajectory_count = 0;
+    infeasible.corridor_evaluated = true;
+
+    EXPECT_TRUE(infeasible.shouldStop());
+    EXPECT_EQ("NO_FEASIBLE_TRAJECTORY", infeasible.stopReason());
+
+    TrajectoryFeasibility feasible;
+    feasible.valid_trajectory_count = 8;
+    feasible.corridor_feasible_trajectory_count = 2;
+    feasible.corridor_evaluated = true;
+
+    EXPECT_FALSE(feasible.shouldStop());
+    EXPECT_EQ("OK", feasible.stopReason());
+}
+
 TEST(TrajectoryFeasibility, SelectsBestInsideCorridorWhenAvailable)
 {
     const std::vector<double> costs = {4.0, 1.0, 2.0};
@@ -110,6 +130,13 @@ TEST(TrajectoryFeasibility, SelectsBestInsideCorridorWhenAvailable)
 
     EXPECT_EQ(2, selectBestTrajectoryIndex(costs, corridor_feasible, true));
     EXPECT_EQ(1, selectBestTrajectoryIndex(costs, corridor_feasible, false));
+}
+
+TEST(TrajectoryFeasibility, AllowsBoundedCorridorDeviation)
+{
+    EXPECT_TRUE(corridorDeviationFeasible(0.0, 0.3));
+    EXPECT_TRUE(corridorDeviationFeasible(0.2, 0.3));
+    EXPECT_FALSE(corridorDeviationFeasible(0.31, 0.3));
 }
 
 TEST(TrajectoryFeasibility, FallsBackToBestFiniteCostWhenNoCorridorFeasibleSample)

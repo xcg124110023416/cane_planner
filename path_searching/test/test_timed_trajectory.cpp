@@ -32,7 +32,7 @@ TEST(TimedTrajectoryBuilder, PrefersPreviousMppiBestPath)
     EXPECT_NEAR(0.4, timed.points[2].t_from_now, 1e-9);
 }
 
-TEST(TimedTrajectoryBuilder, RejectsPreviousMppiWhenItDriftsFromGlobalReference)
+TEST(TimedTrajectoryBuilder, UsesPreviousMppiEvenWhenItLeavesGlobalReference)
 {
     std::vector<Eigen::Vector3d> previous_mppi = {
         Eigen::Vector3d(0.0, 0.0, 0.0),
@@ -48,11 +48,11 @@ TEST(TimedTrajectoryBuilder, RejectsPreviousMppiWhenItDriftsFromGlobalReference)
     auto timed = TimedTrajectoryBuilder::buildNominal(previous_mppi, global_reference, 0.2, 1.0, 5.0);
 
     ASSERT_TRUE(timed.valid());
-    EXPECT_EQ(TimedTrajectorySource::ASTAR_BOOTSTRAP, timed.source);
+    EXPECT_EQ(TimedTrajectorySource::PREVIOUS_MPPI, timed.source);
     EXPECT_NEAR(0.0, timed.points[0].position.x(), 1e-9);
     EXPECT_NEAR(0.0, timed.points[0].position.y(), 1e-9);
-    EXPECT_NEAR(2.0, timed.points[1].position.x(), 1e-9);
-    EXPECT_NEAR(0.0, timed.points[1].position.y(), 1e-9);
+    EXPECT_NEAR(0.5, timed.points[1].position.x(), 1e-9);
+    EXPECT_NEAR(2.8, timed.points[1].position.y(), 1e-9);
 }
 
 TEST(TimedTrajectoryBuilder, FallsBackToAstarBootstrapWithDistanceTiming)

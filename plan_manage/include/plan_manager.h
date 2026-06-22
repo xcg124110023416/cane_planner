@@ -137,6 +137,7 @@ namespace cane_planner
         double mpc_interaction_post_yield_grace_time_ = 0.6;
         double mpc_nominal_al_ = 0.40;
         double lfpc_t_sup_ = 0.35;
+        double lfpc_delta_t_ = 0.07;
         bool mpc_stop_state_active_ = false;
         ros::Time mpc_stop_enter_time_;
         ros::Time mpc_stop_clear_since_;
@@ -151,6 +152,7 @@ namespace cane_planner
         enum MpcSimState { MPC_IDLE, MPC_ACTIVE, MPC_DONE };
         enum InteractionScene { SCENE_NONE = 0, SCENE_CROSSING = 1 };
         enum InteractionMode { MODE_CONTINUE = 0, MODE_YIELD = 2 };
+        std::vector<Eigen::Vector3d> last_corridor_feasible_mppi_path_;
         struct InteractionDebug
         {
             bool candidate_valid = false;

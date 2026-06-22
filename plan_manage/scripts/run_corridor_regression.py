@@ -198,6 +198,10 @@ def main():
                         help="Seconds to wait after roslaunch before recording.")
     parser.add_argument("--record-warmup", type=float, default=1.0,
                         help="Seconds to record before publishing start/goal.")
+    parser.add_argument("--start-publish-duration", type=float, default=0.5,
+                        help="Seconds to keep publishing the fixed start pose.")
+    parser.add_argument("--goal-publish-duration", type=float, default=1.0,
+                        help="Seconds to keep publishing the fixed goal pose.")
     parser.add_argument("--no-launch", action="store_true",
                         help="Use an already-running simulation instead of starting roslaunch.")
     parser.add_argument("--no-goal", action="store_true",
@@ -249,6 +253,8 @@ def main():
             run_cmd([
                 "rosrun", "plan_manage", "publish_lightweight_fixed_goal.py",
                 "_scenario:={}".format(args.scenario),
+                "_start_publish_duration:={:.3f}".format(args.start_publish_duration),
+                "_goal_publish_duration:={:.3f}".format(args.goal_publish_duration),
             ])
 
         print("[run_corridor_regression] waiting for recorder to finish")

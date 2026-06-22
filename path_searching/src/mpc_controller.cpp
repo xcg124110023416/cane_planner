@@ -225,6 +225,20 @@ Eigen::Vector3d MpcController::plan(const LFPC::Ptr &lfpc_base,
         int best_idx = selectBestTrajectoryIndex(
             cost_values, sample_corridor_feasible,
             last_debug_metrics_.corridor_evaluated);
+        bool has_corridor_feasible_sample = false;
+        if (last_debug_metrics_.corridor_evaluated)
+        {
+            for (int kk = 0; kk < K; ++kk)
+            {
+                if (std::isfinite(costs(kk)) &&
+                    kk < static_cast<int>(sample_corridor_feasible.size()) &&
+                    sample_corridor_feasible[kk])
+                {
+                    has_corridor_feasible_sample = true;
+                    break;
+                }
+            }
+        }
         last_debug_metrics_.valid_sample_ratio = K > 0 ? (double)valid_count / (double)K : 0.0;
         last_debug_metrics_.best_total_cost = best_idx >= 0 ? costs(best_idx) : std::numeric_limits<double>::infinity();
         if (best_idx >= 0 && best_idx < (int)sample_min_dynamic_clearances.size())
@@ -243,7 +257,19 @@ Eigen::Vector3d MpcController::plan(const LFPC::Ptr &lfpc_base,
         else
         {
             // MPPI weighted average
-            Eigen::VectorXd weights = computeWeights(costs);
+            Eigen::VectorXd weight_costs = costs;
+            if (last_debug_metrics_.corridor_evaluated && has_corridor_feasible_sample)
+            {
+                for (int kk = 0; kk < K; ++kk)
+                {
+                    if (kk >= static_cast<int>(sample_corridor_feasible.size()) ||
+                        !sample_corridor_feasible[kk])
+                    {
+                        weight_costs(kk) = std::numeric_limits<double>::infinity();
+                    }
+                }
+            }
+            Eigen::VectorXd weights = computeWeights(weight_costs);
             mean_seq = weightedUpdate(samples, weights, N);
             control_cmd = mean_seq.row(0);
             if (best_idx >= 0)
@@ -343,6 +369,12 @@ std::vector<Eigen::MatrixXd> MpcController::sampleSequences(
 
     for (int k = 0; k < K; ++k)
     {
+        if (k == 0)
+        {
+            samples[k] = mean;
+            continue;
+        }
+
         samples[k] = Eigen::MatrixXd(N, 3);
         for (int n = 0; n < N; ++n)
         {
@@ -447,7 +479,7 @@ void MpcController::rolloutBatch(
         bool dyn_collided = false;
         bool corridor_violated = false;
         bool corridor_evaluated_for_sample = false;
-        bool sample_inside_corridor = true;
+        bool sample_corridor_feasible_for_sample = true;
         bool convex_corridor_violated = false;
         bool arrived_early = false;
         double rollout_min_dynamic_clearance = std::numeric_limits<double>::infinity();
@@ -510,30 +542,36 @@ void MpcController::rolloutBatch(
                 double px = com_path[pi](0);
                 double py = com_path[pi](1);
                 const double point_t = n * step_dt + (double)(pi + 1) * path_dt;
+                const bool key_state_point = (pi + 1 == com_path.size());
 
                 if (cfg_.corridor_enable && has_walking_corridor_)
                 {
-                    corridor_evaluated_for_sample = true;
                     const Eigen::Vector2d point(px, py);
                     double outside = 0.0;
-                    bool checked_timed_corridor = false;
+                    bool corridor_point_evaluated = false;
                     if (has_timed_walking_corridor_)
                     {
-                        checked_timed_corridor =
+                        corridor_point_evaluated =
                             timed_walking_corridor_.segmentAtTime(point_t) != nullptr;
-                        if (checked_timed_corridor)
+                        if (corridor_point_evaluated)
                             outside = timed_walking_corridor_.outsideDistanceAtTime(point_t, point);
                     }
-                    if (!checked_timed_corridor)
+                    else
                     {
+                        corridor_point_evaluated = true;
                         outside = DynamicWalkingCorridor::outsideDistance(
                             walking_corridor_, point);
                     }
+                    if (!corridor_point_evaluated)
+                        continue;
+
+                    corridor_evaluated_for_sample = true;
                     corridor_check_count++;
                     if (outside <= 0.0)
                         corridor_inside_count++;
-                    else
-                        sample_inside_corridor = false;
+                    if (key_state_point &&
+                        !corridorDeviationFeasible(outside, cfg_.corridor_hard_margin))
+                        sample_corridor_feasible_for_sample = false;
                     if (outside > 0.0)
                     {
                         corridor_cost += cfg_.w_corridor * outside * outside;
@@ -732,7 +770,7 @@ void MpcController::rolloutBatch(
         sample_min_dynamic_clearances[k] = rollout_min_dynamic_clearance;
         sample_min_cpa_times[k] = rollout_min_cpa_time;
         sample_corridor_feasible[k] =
-            !corridor_evaluated_for_sample || sample_inside_corridor;
+            !corridor_evaluated_for_sample || sample_corridor_feasible_for_sample;
         if (std::isfinite(total_cost))
         {
             last_debug_metrics_.valid_trajectory_count++;

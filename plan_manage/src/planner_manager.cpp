@@ -4,6 +4,7 @@
 #include <std_msgs/Float64.h>
 #include <std_msgs/Float64MultiArray.h>
 #include <std_msgs/String.h>
+#include <path_searching/trajectory_feasibility.h>
 
 #include <cmath>
 #include <functional>
@@ -181,6 +182,7 @@ std::vector<Eigen::Vector2d> shortcutTraversablePolyline(
         nh.param("mpc/interaction_post_yield_grace_time", mpc_interaction_post_yield_grace_time_, 0.6);
         nh.param("mpc/nominal_al", mpc_nominal_al_, 0.40);
         nh.param("lfpc/t_sup", lfpc_t_sup_, 0.35);
+        nh.param("lfpc/delta_t", lfpc_delta_t_, 0.07);
     }
 
 
@@ -775,10 +777,9 @@ std::vector<Eigen::Vector2d> shortcutTraversablePolyline(
         std::vector<Eigen::Vector3d> previous_mppi_path;
         previous_mppi_path.push_back(current_pose);
 
-        if (mpc_controller_)
+        if (!last_corridor_feasible_mppi_path_.empty())
         {
-            const auto best_path = mpc_controller_->getBestPath();
-            for (const auto& point : best_path)
+            for (const auto& point : last_corridor_feasible_mppi_path_)
             {
                 if ((point.head(2) - current_pose.head(2)).norm() < 0.05)
                     continue;
@@ -791,7 +792,7 @@ std::vector<Eigen::Vector2d> shortcutTraversablePolyline(
         return TimedTrajectoryBuilder::buildNominal(
             previous_mppi_path,
             reference_path,
-            std::max(0.05, lfpc_t_sup_),
+            std::max(0.01, lfpc_delta_t_),
             std::max(0.1, cfg.robot_speed),
             std::max(0.5, cfg.length));
     }
@@ -1244,6 +1245,7 @@ std::vector<Eigen::Vector2d> shortcutTraversablePolyline(
         // ROS_INFO("end yaw is: %lf", yaw);
         have_target_ = true;
         mpc_reached_goal_ = false;
+        last_corridor_feasible_mppi_path_.clear();
         if (have_odom_ && exec_state_ != INIT && exec_state_ != WAIT_TARGET)
         {
             if (gazebo_sim_)
@@ -1272,6 +1274,7 @@ std::vector<Eigen::Vector2d> shortcutTraversablePolyline(
         // ROS_INFO("end yaw is: %lf", yaw);
         have_target_ = true;
         mpc_reached_goal_ = false;
+        last_corridor_feasible_mppi_path_.clear();
         if (have_odom_ && exec_state_ != INIT && exec_state_ != WAIT_TARGET)
         {
             if (gazebo_sim_)
@@ -2001,6 +2004,7 @@ std::vector<Eigen::Vector2d> shortcutTraversablePolyline(
         mpc_com_path_.clear();
         mpc_feet_path_.clear();
         mpc_step_path_.clear();
+        last_corridor_feasible_mppi_path_.clear();
 
         // 初始化计数器
         mpc_step_count_ = 0;
@@ -2214,6 +2218,16 @@ std::vector<Eigen::Vector2d> shortcutTraversablePolyline(
 
         Eigen::Vector3d control = mpc_controller_->plan(
             lfpc_model_, mpc_sim_goal_, obs_pos, obs_vel, obs_size);
+        {
+            const auto dbg = mpc_controller_->getDebugMetrics();
+            const bool selected_path_is_corridor_feasible =
+                dbg.corridor_evaluated
+                    ? dbg.corridor_feasible_trajectory_count > 0
+                    : dbg.valid_trajectory_count > 0;
+            const auto best_path = mpc_controller_->getBestPath();
+            if (selected_path_is_corridor_feasible && !best_path.empty())
+                last_corridor_feasible_mppi_path_ = best_path;
+        }
         if (mpc_debug_enable_)
         {
             const auto dbg = mpc_controller_->getDebugMetrics();
@@ -2251,28 +2265,21 @@ std::vector<Eigen::Vector2d> shortcutTraversablePolyline(
             mpc_interaction_enable_yield_ &&
             mpc_interaction_scene_ == SCENE_CROSSING &&
             (interaction_yield_active || mpc_interaction_debug_.yield_required);
-        const bool corridor_infeasible_stop_active =
-            mpc_corridor_stop_enable_ &&
-            !corridor_result.candidates.empty() &&
-            !corridor_result.has_feasible;
-        const bool mppi_has_viable_plan = dbg.plan_valid;
-        const bool corridor_infeasible_hard_stop_active =
-            corridor_infeasible_stop_active && !mppi_has_viable_plan;
-        if (corridor_infeasible_stop_active && mppi_has_viable_plan)
-        {
-            ROS_WARN_THROTTLE(
-                1.0,
-                "[MPC] DWC infeasible but MPPI remains viable; suppressing corridor stop "
-                "valid=%.2f",
-                dbg.valid_sample_ratio);
-        }
+        TrajectoryFeasibility trajectory_feasibility;
+        trajectory_feasibility.valid_trajectory_count = dbg.valid_trajectory_count;
+        trajectory_feasibility.corridor_feasible_trajectory_count =
+            dbg.corridor_feasible_trajectory_count;
+        trajectory_feasibility.inside_corridor_ratio = dbg.candidate_inside_corridor_ratio;
+        trajectory_feasibility.corridor_evaluated = dbg.corridor_evaluated;
+        const bool no_feasible_trajectory_stop_active =
+            mpc_corridor_stop_enable_ && trajectory_feasibility.shouldStop();
 
         bool raw_stop_advice = false;
         std::string raw_stop_reason = "OK";
-        if (mpc_stop_advice_enable_ && corridor_infeasible_hard_stop_active)
+        if (mpc_stop_advice_enable_ && no_feasible_trajectory_stop_active)
         {
             raw_stop_advice = true;
-            raw_stop_reason = "CORRIDOR_INFEASIBLE";
+            raw_stop_reason = trajectory_feasibility.stopReason();
         }
         else if (mpc_stop_advice_enable_ && interaction_yield_stop_active)
         {
@@ -2282,7 +2289,14 @@ std::vector<Eigen::Vector2d> shortcutTraversablePolyline(
 
         bool stop_advice = raw_stop_advice;
         std::string stop_reason = raw_stop_reason;
-        if (!mpc_stop_advice_enable_)
+        if (raw_stop_reason == "NO_FEASIBLE_TRAJECTORY")
+        {
+            mpc_stop_state_active_ = false;
+            mpc_stop_enter_time_ = ros::Time(0);
+            mpc_stop_clear_since_ = ros::Time(0);
+            mpc_latched_stop_reason_ = "OK";
+        }
+        else if (!mpc_stop_advice_enable_)
         {
             mpc_stop_state_active_ = false;
             mpc_stop_enter_time_ = ros::Time(0);
@@ -2307,7 +2321,7 @@ std::vector<Eigen::Vector2d> shortcutTraversablePolyline(
                     (now - mpc_stop_enter_time_).toSec() >= mpc_stop_hold_time_;
                 const bool release_clear =
                     !interaction_yield_stop_active &&
-                    !corridor_infeasible_hard_stop_active;
+                    !no_feasible_trajectory_stop_active;
                 if (!release_clear)
                 {
                     mpc_stop_clear_since_ = ros::Time(0);

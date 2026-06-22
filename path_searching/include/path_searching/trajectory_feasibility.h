@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <limits>
+#include <string>
 #include <vector>
 
 namespace cane_planner
@@ -22,7 +23,17 @@ struct TrajectoryFeasibility
                    : valid_trajectory_count > 0;
     }
     bool shouldStop() const { return !hasFeasibleTrajectory(); }
+    std::string stopReason() const
+    {
+        return shouldStop() ? "NO_FEASIBLE_TRAJECTORY" : "OK";
+    }
 };
+
+inline bool corridorDeviationFeasible(const double outside_distance,
+                                      const double hard_margin)
+{
+    return outside_distance <= std::max(0.0, hard_margin);
+}
 
 inline int selectBestTrajectoryIndex(const std::vector<double> &costs,
                                      const std::vector<bool> &corridor_feasible,

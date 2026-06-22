@@ -350,19 +350,20 @@ def write_outputs(result, out_dir):
         d = nearest_by_time(debug, reason["t"])
         stop_with_context.append((reason, c, d))
 
-    corridor_stop_reasons = [r for r in reasons if r["reason"] == "CORRIDOR_INFEASIBLE"]
-    gate_suppressible = 0
-    gate_would_stop = 0
-    for reason in corridor_stop_reasons:
+    no_feasible_stop_reasons = [
+        r for r in reasons if r["reason"] == "NO_FEASIBLE_TRAJECTORY"
+    ]
+    legacy_corridor_stop_reasons = [
+        r for r in reasons if r["reason"] == "CORRIDOR_INFEASIBLE"
+    ]
+    no_feasible_with_context = 0
+    no_feasible_without_context = 0
+    for reason in no_feasible_stop_reasons:
         d = nearest_by_time(debug, reason["t"])
-        if d and d.get("plan_valid", 0.0) >= 0.5:
-            gate_suppressible += 1
+        if d and d.get("corridor_feasible_trajectory_count", 1.0) <= 0.0:
+            no_feasible_with_context += 1
         else:
-            gate_would_stop += 1
-    actual_gate_suppressed = sum(
-        1 for row in rosout_stop
-        if "DWC infeasible but MPPI remains viable" in row.get("msg", "")
-    )
+            no_feasible_without_context += 1
 
     with open(summary_path, "w", encoding="utf-8") as f:
         f.write("Corridor Debug Summary\n")
@@ -469,14 +470,17 @@ def write_outputs(result, out_dir):
                     sum(convex_dbg_dynamic_blocks) / len(convex_dbg_dynamic_blocks),
                     max(convex_dbg_dynamic_blocks)))
 
-        f.write("\nCorridor stop gate:\n")
-        f.write("  rule: MPPI plan_valid suppresses DWC-only stop\n")
-        f.write("  recorded CORRIDOR_INFEASIBLE stops: {}\n".format(
-            len(corridor_stop_reasons)))
-        f.write("  offline suppressible by gate: {}\n".format(gate_suppressible))
-        f.write("  offline would still stop: {}\n".format(gate_would_stop))
-        f.write("  actual suppress warnings in rosout: {}\n".format(
-            actual_gate_suppressed))
+        f.write("\nTrajectory feasibility stop:\n")
+        f.write("  rule: timed-corridor feasible trajectory exists -> GO; otherwise STOP\n")
+        f.write("  recorded NO_FEASIBLE_TRAJECTORY stops: {}\n".format(
+            len(no_feasible_stop_reasons)))
+        f.write("  stops with zero corridor-feasible trajectories: {}\n".format(
+            no_feasible_with_context))
+        f.write("  stops without matching zero-feasible context: {}\n".format(
+            no_feasible_without_context))
+        if legacy_corridor_stop_reasons:
+            f.write("  legacy CORRIDOR_INFEASIBLE stops: {}\n".format(
+                len(legacy_corridor_stop_reasons)))
 
         f.write("\nFirst non-OK stop contexts:\n")
         if not stop_with_context:
