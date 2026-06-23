@@ -13,6 +13,11 @@
     <arg name="min_half_width" default="0.25"/>
     <arg name="width_step" default="0.05"/>
     <arg name="obstacle_margin" default="0.08"/>
+    <arg name="use_dynamic" default="true"/>
+    <arg name="dynamic_radius" default="0.35"/>
+    <arg name="dynamic_margin" default="0.25"/>
+    <arg name="dynamic_time_margin" default="0.0"/>
+    <arg name="robot_speed" default="1.0"/>
 
     <include file="$(find plan_manage)/launch/sim_kin_replan.launch">
         <arg name="planner" value="$(arg planner)"/>
@@ -24,12 +29,18 @@
           name="global_path_corridor_demo" output="screen">
         <param name="path_topic" value="/astar/path"/>
         <param name="cloud_topic" value="/simulation_generator/global_cloud"/>
+        <param name="dynamic_topic" value="/onboard_detector/dynamic_obstacles_info"/>
         <param name="use_cloud" value="true" type="bool"/>
+        <param name="use_dynamic" value="$(arg use_dynamic)" type="bool"/>
         <param name="segment_length" value="$(arg segment_length)" type="double"/>
         <param name="overlap" value="$(arg overlap)" type="double"/>
         <param name="half_width" value="$(arg half_width)" type="double"/>
         <param name="min_half_width" value="$(arg min_half_width)" type="double"/>
         <param name="width_step" value="$(arg width_step)" type="double"/>
         <param name="obstacle_margin" value="$(arg obstacle_margin)" type="double"/>
+        <param name="dynamic_radius" value="$(arg dynamic_radius)" type="double"/>
+        <param name="dynamic_margin" value="$(arg dynamic_margin)" type="double"/>
+        <param name="dynamic_time_margin" value="$(arg dynamic_time_margin)" type="double"/>
+        <param name="robot_speed" value="$(arg robot_speed)" type="double"/>
     </node>
 </launch>

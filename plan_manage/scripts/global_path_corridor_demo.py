@@ -5,6 +5,7 @@ import threading
 import rospy
 from geometry_msgs.msg import Point
 from nav_msgs.msg import Path
+from onboard_detector.msg import DynamicObstacles
 from sensor_msgs.msg import PointCloud2
 import sensor_msgs.point_cloud2 as pc2
 from std_msgs.msg import String
@@ -15,8 +16,10 @@ class GlobalPathCorridorDemo:
     def __init__(self):
         self.path_topic = rospy.get_param("~path_topic", "/astar/path")
         self.cloud_topic = rospy.get_param("~cloud_topic", "/simulation_generator/global_cloud")
+        self.dynamic_topic = rospy.get_param("~dynamic_topic", "/onboard_detector/dynamic_obstacles_info")
         self.frame_id = rospy.get_param("~frame_id", "world")
         self.use_cloud = rospy.get_param("~use_cloud", True)
+        self.use_dynamic = rospy.get_param("~use_dynamic", True)
 
         self.segment_length = max(0.2, rospy.get_param("~segment_length", 1.8))
         self.overlap = max(0.0, rospy.get_param("~overlap", 0.7))
@@ -28,10 +31,16 @@ class GlobalPathCorridorDemo:
         self.max_z = rospy.get_param("~cloud_max_z", 2.60)
         self.max_cloud_points = int(rospy.get_param("~max_cloud_points", 60000))
         self.publish_rate = max(0.2, rospy.get_param("~publish_rate", 3.0))
+        self.robot_speed = max(0.05, rospy.get_param("~robot_speed", 1.0))
+        self.dynamic_radius = max(0.0, rospy.get_param("~dynamic_radius", 0.35))
+        self.dynamic_margin = max(0.0, rospy.get_param("~dynamic_margin", 0.25))
+        self.dynamic_time_margin = rospy.get_param("~dynamic_time_margin", 0.0)
+        self.min_polygon_area = max(0.01, rospy.get_param("~min_polygon_area", 0.08))
 
         self.lock = threading.Lock()
         self.path = []
         self.cloud_xy = []
+        self.dynamic_obstacles = []
         self.last_debug = "waiting for /astar/path"
 
         self.marker_pub = rospy.Publisher("~markers", MarkerArray, queue_size=1, latch=True)
@@ -39,6 +48,8 @@ class GlobalPathCorridorDemo:
         rospy.Subscriber(self.path_topic, Path, self.path_cb, queue_size=1)
         if self.use_cloud:
             rospy.Subscriber(self.cloud_topic, PointCloud2, self.cloud_cb, queue_size=1)
+        if self.use_dynamic:
+            rospy.Subscriber(self.dynamic_topic, DynamicObstacles, self.dynamic_cb, queue_size=1)
 
         rospy.Timer(rospy.Duration(1.0 / self.publish_rate), self.publish)
 
@@ -62,6 +73,22 @@ class GlobalPathCorridorDemo:
                     break
         with self.lock:
             self.cloud_xy = pts
+
+    def dynamic_cb(self, msg):
+        obstacles = []
+        count = min(msg.num, len(msg.position))
+        for i in range(count):
+            pos = msg.position[i]
+            vel = msg.velocity[i] if i < len(msg.velocity) else None
+            size = msg.size[i] if i < len(msg.size) else None
+            vx = vel.x if vel is not None else 0.0
+            vy = vel.y if vel is not None else 0.0
+            radius = self.dynamic_radius
+            if size is not None:
+                radius = max(radius, 0.5 * max(size.x, size.y))
+            obstacles.append((pos.x, pos.y, vx, vy, radius + self.dynamic_margin))
+        with self.lock:
+            self.dynamic_obstacles = obstacles
 
     @staticmethod
     def arc_lengths(path):
@@ -108,6 +135,95 @@ class GlobalPathCorridorDemo:
             (a[0] - lx * half_width, a[1] - ly * half_width),
         ]
 
+    @staticmethod
+    def polygon_area(poly):
+        if len(poly) < 3:
+            return 0.0
+        area = 0.0
+        for i, p in enumerate(poly):
+            q = poly[(i + 1) % len(poly)]
+            area += p[0] * q[1] - q[0] * p[1]
+        return abs(0.5 * area)
+
+    @staticmethod
+    def clip_polygon_keep_greater(poly, normal, threshold):
+        if len(poly) < 3:
+            return []
+
+        def value(p):
+            return p[0] * normal[0] + p[1] * normal[1] - threshold
+
+        clipped = []
+        for i, cur in enumerate(poly):
+            prev = poly[i - 1]
+            cur_v = value(cur)
+            prev_v = value(prev)
+            cur_inside = cur_v >= -1e-9
+            prev_inside = prev_v >= -1e-9
+            if cur_inside != prev_inside:
+                denom = prev_v - cur_v
+                if abs(denom) > 1e-9:
+                    u = prev_v / denom
+                    clipped.append((prev[0] + u * (cur[0] - prev[0]),
+                                    prev[1] + u * (cur[1] - prev[1])))
+            if cur_inside:
+                clipped.append(cur)
+        return clipped
+
+    @staticmethod
+    def point_in_segment_box(a, b, half_width, point, radius):
+        dx = b[0] - a[0]
+        dy = b[1] - a[1]
+        length = math.hypot(dx, dy)
+        if length < 1e-9:
+            return False
+        fx = dx / length
+        fy = dy / length
+        lx = -fy
+        ly = fx
+        rx = point[0] - a[0]
+        ry = point[1] - a[1]
+        s = rx * fx + ry * fy
+        l = rx * lx + ry * ly
+        return -radius <= s <= length + radius and abs(l) <= half_width + radius
+
+    def apply_dynamic_clips(self, polygon, a, b, half_width, s_mid, dyn_obs):
+        if not self.use_dynamic or not dyn_obs or len(polygon) < 3:
+            return polygon, 0
+        t = max(0.0, s_mid / self.robot_speed + self.dynamic_time_margin)
+        cx = 0.5 * (a[0] + b[0])
+        cy = 0.5 * (a[1] + b[1])
+        clipped_count = 0
+        for ox0, oy0, vx, vy, radius in dyn_obs:
+            ox = ox0 + vx * t
+            oy = oy0 + vy * t
+            if not self.point_in_segment_box(a, b, half_width, (ox, oy), radius):
+                continue
+            nx = cx - ox
+            ny = cy - oy
+            norm = math.hypot(nx, ny)
+            if norm < 1e-6:
+                dx = b[0] - a[0]
+                dy = b[1] - a[1]
+                seg_norm = math.hypot(dx, dy)
+                if seg_norm < 1e-6:
+                    continue
+                nx = -dy / seg_norm
+                ny = dx / seg_norm
+            else:
+                nx /= norm
+                ny /= norm
+            threshold = nx * ox + ny * oy + radius
+            new_polygon = self.clip_polygon_keep_greater(polygon, (nx, ny), threshold)
+            if new_polygon:
+                polygon = new_polygon
+            else:
+                polygon = []
+            clipped_count += 1
+            if len(polygon) < 3:
+                break
+        return polygon, clipped_count
+
     def segment_clear(self, a, b, half_width, cloud_xy):
         if not self.use_cloud or not cloud_xy:
             return True
@@ -136,7 +252,7 @@ class GlobalPathCorridorDemo:
                 return False
         return True
 
-    def build_corridor(self, path, cloud_xy):
+    def build_corridor(self, path, cloud_xy, dyn_obs):
         if len(path) < 2:
             return []
         arcs = self.arc_lengths(path)
@@ -154,8 +270,11 @@ class GlobalPathCorridorDemo:
             while width > self.min_half_width and not self.segment_clear(a, b, width, cloud_xy):
                 width = max(self.min_half_width, width - self.width_step)
             polygon = self.rect_polygon(a, b, width)
-            feasible = self.segment_clear(a, b, width, cloud_xy)
-            cells.append((s0, s1, width, feasible, polygon))
+            polygon, clipped_count = self.apply_dynamic_clips(
+                polygon, a, b, width, 0.5 * (s0 + s1), dyn_obs)
+            feasible = (self.segment_clear(a, b, width, cloud_xy) and
+                        self.polygon_area(polygon) >= self.min_polygon_area)
+            cells.append((s0, s1, width, feasible, polygon, clipped_count))
             s0 += stride
         return cells
 
@@ -172,13 +291,14 @@ class GlobalPathCorridorDemo:
         with self.lock:
             path = list(self.path)
             cloud_xy = list(self.cloud_xy)
+            dyn_obs = list(self.dynamic_obstacles)
 
         markers = MarkerArray()
         markers.markers.append(self.make_clear_marker())
-        cells = self.build_corridor(path, cloud_xy)
+        cells = self.build_corridor(path, cloud_xy, dyn_obs)
         now = rospy.Time.now()
 
-        for idx, (_s0, _s1, width, feasible, polygon) in enumerate(cells):
+        for idx, (_s0, _s1, width, feasible, polygon, clipped_count) in enumerate(cells):
             if len(polygon) < 3:
                 continue
             marker = Marker()
@@ -194,6 +314,10 @@ class GlobalPathCorridorDemo:
             marker.color.r = 0.0 if feasible else 1.0
             marker.color.g = 0.85 if feasible else 0.15
             marker.color.b = 1.0 if feasible else 0.15
+            if feasible and clipped_count > 0:
+                marker.color.r = 0.75
+                marker.color.g = 0.25
+                marker.color.b = 1.0
             for x, y in polygon + [polygon[0]]:
                 p = Point()
                 p.x = x
@@ -224,13 +348,36 @@ class GlobalPathCorridorDemo:
         if len(center.points) >= 2:
             markers.markers.append(center)
 
+        for idx, (ox0, oy0, vx, vy, radius) in enumerate(dyn_obs):
+            dyn = Marker()
+            dyn.header.frame_id = self.frame_id
+            dyn.header.stamp = now
+            dyn.ns = "global_path_corridor_demo_dynamic_obstacles"
+            dyn.id = 200000 + idx
+            dyn.type = Marker.CYLINDER
+            dyn.action = Marker.ADD
+            dyn.pose.position.x = ox0
+            dyn.pose.position.y = oy0
+            dyn.pose.position.z = 0.08
+            dyn.pose.orientation.w = 1.0
+            dyn.scale.x = 2.0 * radius
+            dyn.scale.y = 2.0 * radius
+            dyn.scale.z = 0.04
+            dyn.color.a = 0.35
+            dyn.color.r = 1.0
+            dyn.color.g = 0.0
+            dyn.color.b = 1.0
+            markers.markers.append(dyn)
+
         feasible_count = sum(1 for c in cells if c[3])
+        dynamic_clip_count = sum(c[5] for c in cells)
         mean_width = sum(c[2] for c in cells) / len(cells) if cells else 0.0
         self.last_debug = (
             "global_path_corridor_demo "
             "path_points={} cells={} feasible={} mean_half_width={:.2f} "
-            "cloud_points={}"
-        ).format(len(path), len(cells), feasible_count, mean_width, len(cloud_xy))
+            "cloud_points={} dynamic_obstacles={} dynamic_clips={}"
+        ).format(len(path), len(cells), feasible_count, mean_width,
+                 len(cloud_xy), len(dyn_obs), dynamic_clip_count)
         self.marker_pub.publish(markers)
         self.debug_pub.publish(String(data=self.last_debug))
 
