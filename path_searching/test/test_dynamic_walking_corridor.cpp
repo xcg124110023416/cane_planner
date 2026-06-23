@@ -3,10 +3,13 @@
 #include <path_searching/dynamic_walking_corridor.h>
 #include <path_searching/timed_trajectory.h>
 
+#include <algorithm>
+
 using cane_planner::DynamicWalkingCorridor;
 using cane_planner::TimedTrajectory;
 using cane_planner::TimedTrajectoryPoint;
 using cane_planner::TimedTrajectorySource;
+using cane_planner::TimedWalkingCorridorSegment;
 
 TEST(DynamicWalkingCorridor, SelectsBehindSideForCrossingPedestrian)
 {
@@ -231,6 +234,45 @@ TEST(DynamicWalkingCorridor, ExposesSelectedTimedCorridorFromNominalTrajectory)
     EXPECT_NEAR(1.0, result.timed_corridor.segmentAtTime(0.3)->end.y(), 1e-9);
 }
 
+TEST(DynamicWalkingCorridor, BuildsSparseOverlappingTimedCorridorCover)
+{
+    DynamicWalkingCorridor corridor;
+    DynamicWalkingCorridor::Config cfg;
+    cfg.length = 4.0;
+    cfg.half_width = 0.4;
+    cfg.static_min_feasible_length = 0.8;
+    cfg.static_centerline_opt_enable = false;
+    corridor.setConfig(cfg);
+
+    TimedTrajectory nominal;
+    nominal.source = TimedTrajectorySource::PREVIOUS_MPPI;
+    for (int i = 0; i <= 40; ++i)
+    {
+        TimedTrajectoryPoint p;
+        p.position = Eigen::Vector2d(0.1 * static_cast<double>(i), 0.0);
+        p.t_from_now = 0.1 * static_cast<double>(i);
+        nominal.points.push_back(p);
+    }
+
+    auto result = corridor.plan(nominal, {}, {}, {});
+
+    ASSERT_TRUE(result.has_feasible);
+    ASSERT_TRUE(result.timed_corridor.valid());
+    ASSERT_LE(result.timed_corridor.segments.size(), 5u);
+    ASSERT_GE(result.timed_corridor.segments.size(), 2u);
+    for (const auto &segment : result.timed_corridor.segments)
+    {
+        EXPECT_GE((segment.end - segment.start).norm(), 0.8);
+    }
+    for (size_t i = 1; i < result.timed_corridor.segments.size(); ++i)
+    {
+        const auto &prev = result.timed_corridor.segments[i - 1];
+        const auto &curr = result.timed_corridor.segments[i];
+        EXPECT_LT(curr.t_start, prev.t_end);
+        EXPECT_LT((curr.start - prev.end).norm(), (prev.end - prev.start).norm());
+    }
+}
+
 TEST(DynamicWalkingCorridor, TimedCorridorSegmentsExposeConvexCells)
 {
     DynamicWalkingCorridor corridor;
@@ -338,8 +380,16 @@ TEST(DynamicWalkingCorridor, ExposesDynamicPedestriansAsTimedEllipses)
 
     ASSERT_TRUE(result.has_feasible);
     ASSERT_TRUE(result.timed_corridor.valid());
-    ASSERT_EQ(1u, result.timed_corridor.segments.size());
-    ASSERT_EQ(1u, result.timed_corridor.segments.front().dynamic_obstacles.size());
+    ASSERT_FALSE(result.timed_corridor.segments.empty());
+    const auto segment_with_obstacle = std::find_if(
+        result.timed_corridor.segments.begin(),
+        result.timed_corridor.segments.end(),
+        [](const TimedWalkingCorridorSegment &segment)
+        {
+            return !segment.dynamic_obstacles.empty();
+        });
+    ASSERT_NE(result.timed_corridor.segments.end(), segment_with_obstacle);
+    ASSERT_EQ(1u, segment_with_obstacle->dynamic_obstacles.size());
     EXPECT_GT(result.timed_corridor.dynamicObstacleViolationAtTime(
                   0.5, Eigen::Vector2d(1.0, 0.0)),
               0.0);

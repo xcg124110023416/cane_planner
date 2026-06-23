@@ -587,8 +587,14 @@ void MpcController::rolloutBatch(
                         {
                             corridor_cost += cfg_.w_corridor *
                                              dyn_violation * dyn_violation;
-                            sample_corridor_feasible_for_sample = false;
-                            if (cfg_.corridor_hard_reject_enable)
+                            if (!corridorDeviationFeasible(
+                                    dyn_violation, cfg_.corridor_hard_margin))
+                            {
+                                sample_corridor_feasible_for_sample = false;
+                            }
+                            if (cfg_.corridor_hard_reject_enable &&
+                                !corridorDeviationFeasible(
+                                    dyn_violation, cfg_.corridor_hard_margin))
                             {
                                 corridor_violated = true;
                                 break;

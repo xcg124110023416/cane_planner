@@ -1067,9 +1067,34 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
             size_t half_plane_count = 0;
             size_t polygon_count = 0;
             double polygon_area_sum = 0.0;
-            for (const auto& segment : result.timed_corridor.segments)
+            double segment_length_sum = 0.0;
+            size_t segment_length_count = 0;
+            double overlap_ratio_sum = 0.0;
+            size_t overlap_ratio_count = 0;
+            const auto& segments = result.timed_corridor.segments;
+            for (size_t i = 0; i < segments.size(); ++i)
             {
+                const auto& segment = segments[i];
                 half_plane_count += segment.half_planes.size();
+                const double segment_length = (segment.end - segment.start).norm();
+                if (segment_length > 1e-6)
+                {
+                    segment_length_sum += segment_length;
+                    segment_length_count++;
+                }
+                if (i > 0)
+                {
+                    const auto& prev = segments[i - 1];
+                    const double prev_length = (prev.end - prev.start).norm();
+                    const double gap = (segment.start - prev.end).norm();
+                    if (prev_length > 1e-6)
+                    {
+                        const double overlap_ratio =
+                            std::max(0.0, std::min(1.0, 1.0 - gap / prev_length));
+                        overlap_ratio_sum += overlap_ratio;
+                        overlap_ratio_count++;
+                    }
+                }
                 if (segment.polygon.size() >= 3)
                 {
                     polygon_count++;
@@ -1095,6 +1120,14 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
                << " poly_area_mean="
                << (polygon_count > 0
                        ? polygon_area_sum / static_cast<double>(polygon_count)
+                       : 0.0)
+               << " seg_len_mean="
+               << (segment_length_count > 0
+                       ? segment_length_sum / static_cast<double>(segment_length_count)
+                       : 0.0)
+               << " overlap_mean="
+               << (overlap_ratio_count > 0
+                       ? overlap_ratio_sum / static_cast<double>(overlap_ratio_count)
                        : 0.0);
             debug.data = ss.str();
             mpc_walking_corridor_debug_pub_.publish(debug);

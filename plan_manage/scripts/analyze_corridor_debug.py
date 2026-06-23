@@ -51,6 +51,8 @@ WALKING_DEBUG_RE = re.compile(
     r"(?:\s+half_planes=(?P<half_planes>[-+0-9.]+))?"
     r"(?:\s+polygons=(?P<polygons>[-+0-9.]+))?"
     r"(?:\s+poly_area_mean=(?P<poly_area_mean>[-+0-9.]+))?"
+    r"(?:\s+seg_len_mean=(?P<seg_len_mean>[-+0-9.]+))?"
+    r"(?:\s+overlap_mean=(?P<overlap_mean>[-+0-9.]+))?"
 )
 
 
@@ -182,6 +184,8 @@ def parse_walking_debug(text, t_rel):
         "half_planes": float(groups["half_planes"]) if groups.get("half_planes") else float("nan"),
         "polygons": float(groups["polygons"]) if groups.get("polygons") else float("nan"),
         "poly_area_mean": float(groups["poly_area_mean"]) if groups.get("poly_area_mean") else float("nan"),
+        "seg_len_mean": float(groups["seg_len_mean"]) if groups.get("seg_len_mean") else float("nan"),
+        "overlap_mean": float(groups["overlap_mean"]) if groups.get("overlap_mean") else float("nan"),
         "text": text,
     }
 
@@ -355,6 +359,14 @@ def write_outputs(result, out_dir):
         d["poly_area_mean"] for d in walking_debug
         if math.isfinite(d.get("poly_area_mean", float("nan")))
     ]
+    walking_segment_length_means = [
+        d["seg_len_mean"] for d in walking_debug
+        if math.isfinite(d.get("seg_len_mean", float("nan")))
+    ]
+    walking_overlap_means = [
+        d["overlap_mean"] for d in walking_debug
+        if math.isfinite(d.get("overlap_mean", float("nan")))
+    ]
     walking_feasible = sum(1 for d in walking_debug if d.get("feasible", 0))
     walking_time_ranges = [
         d["t_end"] - d["t_start"] for d in walking_debug
@@ -504,6 +516,14 @@ def write_outputs(result, out_dir):
                 f.write("  polygon area mean: mean={:.3f} min={:.3f} max={:.3f}m^2\n".format(
                     sum(walking_poly_area_means) / len(walking_poly_area_means),
                     min(walking_poly_area_means), max(walking_poly_area_means)))
+            if walking_segment_length_means:
+                f.write("  segment length mean: mean={:.3f} min={:.3f} max={:.3f}m\n".format(
+                    sum(walking_segment_length_means) / len(walking_segment_length_means),
+                    min(walking_segment_length_means), max(walking_segment_length_means)))
+            if walking_overlap_means:
+                f.write("  overlap mean: mean={:.3f} min={:.3f} max={:.3f}\n".format(
+                    sum(walking_overlap_means) / len(walking_overlap_means),
+                    min(walking_overlap_means), max(walking_overlap_means)))
             if candidate_inside_ratios:
                 f.write("  candidate inside ratio: mean={:.3f} min={:.3f} max={:.3f}\n".format(
                     sum(candidate_inside_ratios) / len(candidate_inside_ratios),

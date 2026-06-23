@@ -111,6 +111,32 @@ Eigen::Vector2d interpolatePolyline(const std::vector<Eigen::Vector2d> &path,
     return path.back();
 }
 
+double interpolateTimeAtPolylineDistance(const std::vector<Eigen::Vector2d> &path,
+                                         const std::vector<double> &times,
+                                         double distance)
+{
+    if (path.empty() || times.size() != path.size())
+        return 0.0;
+    if (path.size() == 1 || distance <= 0.0)
+        return times.front();
+
+    double accum = 0.0;
+    for (size_t i = 0; i + 1 < path.size(); ++i)
+    {
+        const Eigen::Vector2d seg = path[i + 1] - path[i];
+        const double seg_len = seg.norm();
+        if (seg_len < 1e-6)
+            continue;
+        if (accum + seg_len >= distance)
+        {
+            const double u = std::max(0.0, std::min(1.0, (distance - accum) / seg_len));
+            return times[i] + u * (times[i + 1] - times[i]);
+        }
+        accum += seg_len;
+    }
+    return times.back();
+}
+
 bool hasTimedPolyline(const DynamicWalkingCorridor::Candidate &candidate)
 {
     return candidate.centerline.size() >= 2 &&
@@ -305,13 +331,30 @@ TimedWalkingCorridor toTimedWalkingCorridor(
         return corridor;
 
     corridor.segments.reserve(candidate.centerline.size() - 1);
-    for (size_t i = 0; i + 1 < candidate.centerline.size(); ++i)
+    const double total_length = polylineLength(candidate.centerline);
+    if (total_length < 1e-6)
+        return corridor;
+
+    const double cover_length = std::max(cfg.static_min_feasible_length,
+                                         0.5 * std::max(cfg.length, cfg.static_min_feasible_length));
+    const double cover_step = 0.5 * cover_length;
+
+    for (double start_s = 0.0; start_s < total_length - 1e-6; start_s += cover_step)
     {
+        double end_s = std::min(total_length, start_s + cover_length);
+        if (total_length - end_s > 1e-6 &&
+            total_length - end_s < cfg.static_min_feasible_length)
+        {
+            end_s = total_length;
+        }
+
         TimedWalkingCorridorSegment segment;
-        segment.t_start = candidate.centerline_times[i];
-        segment.t_end = candidate.centerline_times[i + 1];
-        segment.start = candidate.centerline[i];
-        segment.end = candidate.centerline[i + 1];
+        segment.t_start = interpolateTimeAtPolylineDistance(
+            candidate.centerline, candidate.centerline_times, start_s);
+        segment.t_end = interpolateTimeAtPolylineDistance(
+            candidate.centerline, candidate.centerline_times, end_s);
+        segment.start = interpolatePolyline(candidate.centerline, start_s);
+        segment.end = interpolatePolyline(candidate.centerline, end_s);
         const Eigen::Vector2d delta = segment.end - segment.start;
         segment.forward = normalizedOrDefault(delta);
         segment.left = Eigen::Vector2d(-segment.forward.y(), segment.forward.x());
