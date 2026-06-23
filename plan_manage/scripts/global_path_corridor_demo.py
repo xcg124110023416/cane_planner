@@ -187,39 +187,47 @@ class GlobalPathCorridorDemo:
         l = rx * lx + ry * ly
         return -radius <= s <= length + radius and abs(l) <= half_width + radius
 
+    def dynamic_clip_positions(self, obstacle, cell_time):
+        ox0, oy0, vx, vy, radius = obstacle
+        positions = [(ox0, oy0, radius)]
+        if cell_time > 1e-3 and (abs(vx) > 1e-6 or abs(vy) > 1e-6):
+            positions.append((ox0 + vx * cell_time, oy0 + vy * cell_time, radius))
+        return positions
+
     def apply_dynamic_clips(self, polygon, a, b, half_width, s_mid, dyn_obs):
         if not self.use_dynamic or not dyn_obs or len(polygon) < 3:
             return polygon, 0
-        t = max(0.0, s_mid / self.robot_speed + self.dynamic_time_margin)
+        cell_time = max(0.0, s_mid / self.robot_speed + self.dynamic_time_margin)
         cx = 0.5 * (a[0] + b[0])
         cy = 0.5 * (a[1] + b[1])
         clipped_count = 0
-        for ox0, oy0, vx, vy, radius in dyn_obs:
-            ox = ox0 + vx * t
-            oy = oy0 + vy * t
-            if not self.point_in_segment_box(a, b, half_width, (ox, oy), radius):
-                continue
-            nx = cx - ox
-            ny = cy - oy
-            norm = math.hypot(nx, ny)
-            if norm < 1e-6:
-                dx = b[0] - a[0]
-                dy = b[1] - a[1]
-                seg_norm = math.hypot(dx, dy)
-                if seg_norm < 1e-6:
+        for obstacle in dyn_obs:
+            for ox, oy, radius in self.dynamic_clip_positions(obstacle, cell_time):
+                if not self.point_in_segment_box(a, b, half_width, (ox, oy), radius):
                     continue
-                nx = -dy / seg_norm
-                ny = dx / seg_norm
-            else:
-                nx /= norm
-                ny /= norm
-            threshold = nx * ox + ny * oy + radius
-            new_polygon = self.clip_polygon_keep_greater(polygon, (nx, ny), threshold)
-            if new_polygon:
-                polygon = new_polygon
-            else:
-                polygon = []
-            clipped_count += 1
+                nx = cx - ox
+                ny = cy - oy
+                norm = math.hypot(nx, ny)
+                if norm < 1e-6:
+                    dx = b[0] - a[0]
+                    dy = b[1] - a[1]
+                    seg_norm = math.hypot(dx, dy)
+                    if seg_norm < 1e-6:
+                        continue
+                    nx = -dy / seg_norm
+                    ny = dx / seg_norm
+                else:
+                    nx /= norm
+                    ny /= norm
+                threshold = nx * ox + ny * oy + radius
+                new_polygon = self.clip_polygon_keep_greater(polygon, (nx, ny), threshold)
+                if new_polygon:
+                    polygon = new_polygon
+                else:
+                    polygon = []
+                clipped_count += 1
+                if len(polygon) < 3:
+                    break
             if len(polygon) < 3:
                 break
         return polygon, clipped_count
