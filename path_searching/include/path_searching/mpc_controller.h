@@ -44,12 +44,13 @@ public:
         // Cost weights
         double w_move = 1.0;
         double w_steer = 0.5;
-        double w_risk = 2.0;
+        double w_risk = 0.0;
         double w_goal = 10.0;
         double w_dapi = 0.0;    // steering rate penalty: |api[n] - api[n-1]|
 
-        // Hard constraint: risk > threshold → INF cost (dynamic obstacles only)
-        bool dynamic_hard_reject_enable = true;
+        // Dynamic pedestrians are handled as geometric timed-corridor obstacles.
+        // This legacy DRF switch is kept for parameter compatibility only.
+        bool dynamic_hard_reject_enable = false;
         bool dynamic_collision_hard_reject_enable = true;
         double risk_hard_threshold = 8.5;
 
@@ -57,8 +58,8 @@ public:
         double static_penalty = 500.0;
         double w_static = 1.0;
 
-        // Dynamic obstacle geometry. This is a physical collision fallback;
-        // DRF hard risk remains the primary dynamic keep-out region.
+        // Dynamic obstacle geometry. This is the physical collision check;
+        // wider pedestrian keep-out regions come from timed corridor ellipses.
         bool use_dynamic_size = true;
         double dynamic_safety_margin = 0.05;
         double dynamic_min_radius = 0.20;

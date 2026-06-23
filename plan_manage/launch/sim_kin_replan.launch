@@ -2,7 +2,7 @@
     <arg name="odometry_topic" value = "/simulation_generator/odom"/>
     <arg name="planner" default="2"/>  <!-- A*:1, kinodynamic:2, LFPC-MPPI:3, kinematic MPPI:4 -->
     <!-- MPC ablation switches for lightweight simulation. -->
-    <arg name="mpc_w_risk" default="2.0"/>
+    <arg name="mpc_w_risk" default="0.0"/>
     <arg name="mpc_enable_cpa" default="false"/>
     <arg name="mpc_enable_stop_enforce" default="true"/>
     <arg name="mpc_enable_stop_advice" default="true"/>
@@ -11,7 +11,7 @@
     <arg name="mpc_num_samples" default="200"/>
     <arg name="global_wp_arrival_radius" default="0.25"/>
     <!-- Optional full-PCD global map for A*. Keep local SDF for MPC. -->
-    <arg name="mpc_enable_dynamic_hard_reject" default="true"/>
+    <arg name="mpc_enable_dynamic_hard_reject" default="false"/>
     <arg name="mpc_enable_interaction" default="true"/>
     <arg name="mpc_interaction_enable_yield" default="false"/>
     <arg name="mpc_interaction_st_horizon" default="4.0"/>

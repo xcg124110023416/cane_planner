@@ -1014,6 +1014,37 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
             markers.markers.push_back(label);
         }
 
+        for (size_t si = 0; si < result.timed_corridor.segments.size(); ++si)
+        {
+            const auto& segment = result.timed_corridor.segments[si];
+            if (segment.polygon.size() < 3)
+                continue;
+
+            visualization_msgs::Marker poly;
+            poly.header = clear.header;
+            poly.ns = "mpc_walking_corridor_polygons";
+            poly.id = 2000 + static_cast<int>(si);
+            poly.type = visualization_msgs::Marker::LINE_STRIP;
+            poly.action = visualization_msgs::Marker::ADD;
+            poly.pose.orientation.w = 1.0;
+            poly.scale.x = 0.035;
+            poly.color.r = 0.05;
+            poly.color.g = 0.95;
+            poly.color.b = 0.95;
+            poly.color.a = 0.85;
+            poly.lifetime = ros::Duration(0.3);
+            for (const auto& v : segment.polygon)
+            {
+                geometry_msgs::Point p;
+                p.x = v.x();
+                p.y = v.y();
+                p.z = 0.13;
+                poly.points.push_back(p);
+            }
+            poly.points.push_back(poly.points.front());
+            markers.markers.push_back(poly);
+        }
+
         mpc_walking_corridor_pub_.publish(markers);
 
         if (mpc_walking_corridor_debug_pub_)
@@ -1033,13 +1064,38 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
 
             std_msgs::String debug;
             std::ostringstream ss;
+            size_t half_plane_count = 0;
+            size_t polygon_count = 0;
+            double polygon_area_sum = 0.0;
+            for (const auto& segment : result.timed_corridor.segments)
+            {
+                half_plane_count += segment.half_planes.size();
+                if (segment.polygon.size() >= 3)
+                {
+                    polygon_count++;
+                    double area = 0.0;
+                    for (size_t i = 0; i < segment.polygon.size(); ++i)
+                    {
+                        const auto& a = segment.polygon[i];
+                        const auto& b = segment.polygon[(i + 1) % segment.polygon.size()];
+                        area += a.x() * b.y() - a.y() * b.x();
+                    }
+                    polygon_area_sum += 0.5 * std::abs(area);
+                }
+            }
             ss << "source=" << sourceName(result.timed_corridor.source)
                << " segments=" << result.timed_corridor.segments.size()
                << " feasible=" << (result.has_feasible ? 1 : 0)
                << " t_start=" << std::fixed << std::setprecision(3)
                << result.timed_corridor.tStart()
                << " t_end=" << result.timed_corridor.tEnd()
-               << " candidates=" << result.candidates.size();
+               << " candidates=" << result.candidates.size()
+               << " half_planes=" << half_plane_count
+               << " polygons=" << polygon_count
+               << " poly_area_mean="
+               << (polygon_count > 0
+                       ? polygon_area_sum / static_cast<double>(polygon_count)
+                       : 0.0);
             debug.data = ss.str();
             mpc_walking_corridor_debug_pub_.publish(debug);
         }

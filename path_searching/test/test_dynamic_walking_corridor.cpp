@@ -231,6 +231,37 @@ TEST(DynamicWalkingCorridor, ExposesSelectedTimedCorridorFromNominalTrajectory)
     EXPECT_NEAR(1.0, result.timed_corridor.segmentAtTime(0.3)->end.y(), 1e-9);
 }
 
+TEST(DynamicWalkingCorridor, TimedCorridorSegmentsExposeConvexCells)
+{
+    DynamicWalkingCorridor corridor;
+    DynamicWalkingCorridor::Config cfg;
+    cfg.length = 4.0;
+    cfg.half_width = 0.4;
+    cfg.static_centerline_opt_enable = false;
+    corridor.setConfig(cfg);
+
+    TimedTrajectory nominal;
+    nominal.source = TimedTrajectorySource::PREVIOUS_MPPI;
+    TimedTrajectoryPoint p0;
+    p0.position = Eigen::Vector2d(0.0, 0.0);
+    p0.t_from_now = 0.0;
+    TimedTrajectoryPoint p1;
+    p1.position = Eigen::Vector2d(1.0, 0.0);
+    p1.t_from_now = 0.2;
+    nominal.points = {p0, p1};
+
+    auto result = corridor.plan(nominal, {}, {}, {});
+
+    ASSERT_TRUE(result.has_feasible);
+    ASSERT_TRUE(result.timed_corridor.valid());
+    ASSERT_EQ(1u, result.timed_corridor.segments.size());
+    const auto &segment = result.timed_corridor.segments.front();
+    EXPECT_GE(segment.half_planes.size(), 4u);
+    EXPECT_GE(segment.polygon.size(), 4u);
+    EXPECT_DOUBLE_EQ(0.0, result.timed_corridor.outsideDistanceAtTime(
+                              0.1, Eigen::Vector2d(0.5, 0.0)));
+}
+
 TEST(DynamicWalkingCorridor, UsesNominalTrajectoryTimeForDynamicBlocking)
 {
     DynamicWalkingCorridor corridor;
@@ -274,6 +305,46 @@ TEST(DynamicWalkingCorridor, UsesNominalTrajectoryTimeForDynamicBlocking)
     auto timed_result = corridor.plan(nominal, obs_pos, obs_vel, obs_size);
     ASSERT_TRUE(timed_result.has_feasible);
     EXPECT_FALSE(timed_result.selected.blocked_dynamic);
+}
+
+TEST(DynamicWalkingCorridor, ExposesDynamicPedestriansAsTimedEllipses)
+{
+    DynamicWalkingCorridor corridor;
+    DynamicWalkingCorridor::Config cfg;
+    cfg.length = 4.0;
+    cfg.half_width = 0.6;
+    cfg.prediction_dt = 0.25;
+    cfg.robot_radius = 0.25;
+    cfg.dynamic_min_radius = 0.20;
+    cfg.dynamic_safety_margin = 0.10;
+    cfg.static_centerline_opt_enable = false;
+    corridor.setConfig(cfg);
+
+    TimedTrajectory nominal;
+    nominal.source = TimedTrajectorySource::PREVIOUS_MPPI;
+    TimedTrajectoryPoint p0;
+    p0.position = Eigen::Vector2d(0.0, 0.0);
+    p0.t_from_now = 0.0;
+    TimedTrajectoryPoint p1;
+    p1.position = Eigen::Vector2d(2.0, 0.0);
+    p1.t_from_now = 1.0;
+    nominal.points = {p0, p1};
+
+    std::vector<Eigen::Vector3d> obs_pos = {Eigen::Vector3d(1.0, 0.0, 0.0)};
+    std::vector<Eigen::Vector3d> obs_vel = {Eigen::Vector3d(0.0, 0.0, 0.0)};
+    std::vector<Eigen::Vector3d> obs_size = {Eigen::Vector3d(0.4, 0.4, 1.7)};
+
+    auto result = corridor.plan(nominal, obs_pos, obs_vel, obs_size);
+
+    ASSERT_TRUE(result.has_feasible);
+    ASSERT_TRUE(result.timed_corridor.valid());
+    ASSERT_EQ(1u, result.timed_corridor.segments.size());
+    ASSERT_EQ(1u, result.timed_corridor.segments.front().dynamic_obstacles.size());
+    EXPECT_GT(result.timed_corridor.dynamicObstacleViolationAtTime(
+                  0.5, Eigen::Vector2d(1.0, 0.0)),
+              0.0);
+    EXPECT_DOUBLE_EQ(0.0, result.timed_corridor.dynamicObstacleViolationAtTime(
+                              0.5, Eigen::Vector2d(1.0, 1.5)));
 }
 
 TEST(DynamicWalkingCorridor, KeepsCenterCorridorAsSingleDefaultCandidate)

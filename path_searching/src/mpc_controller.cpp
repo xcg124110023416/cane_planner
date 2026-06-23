@@ -39,10 +39,10 @@ void MpcController::setParam(ros::NodeHandle &nh)
 
     nh.param("mpc/w_move", cfg_.w_move, 1.0);
     nh.param("mpc/w_steer", cfg_.w_steer, 0.5);
-    nh.param("mpc/w_risk", cfg_.w_risk, 2.0);
+    nh.param("mpc/w_risk", cfg_.w_risk, 0.0);
     nh.param("mpc/w_goal", cfg_.w_goal, 10.0);
     nh.param("mpc/w_dapi", cfg_.w_dapi, 0.0);
-    nh.param("mpc/dynamic_hard_reject_enable", cfg_.dynamic_hard_reject_enable, true);
+    nh.param("mpc/dynamic_hard_reject_enable", cfg_.dynamic_hard_reject_enable, false);
     nh.param("mpc/dynamic_collision_hard_reject_enable", cfg_.dynamic_collision_hard_reject_enable, true);
     nh.param("mpc/static_penalty", cfg_.static_penalty, 500.0);
     nh.param("mpc/w_static", cfg_.w_static, 1.0);
@@ -446,11 +446,9 @@ void MpcController::rolloutBatch(
     last_debug_metrics_.min_cpa_time = std::numeric_limits<double>::infinity();
     int corridor_check_count = 0;
     int corridor_inside_count = 0;
-    double risk_thresh = cfg_.risk_hard_threshold;
     double w_move = cfg_.w_move;
     double w_steer = cfg_.w_steer;
     double w_dapi = cfg_.w_dapi;
-    double w_risk = cfg_.w_risk;
     double w_goal = cfg_.w_goal;
     double w_prox = cfg_.w_prox;
     double w_convex_corridor = cfg_.w_convex_corridor;
@@ -531,10 +529,8 @@ void MpcController::rolloutBatch(
 
             // ---- CoM path: FOV-gated proximity cost + dynamic check ----
             double prox_cost = 0.0;
-            double risk_cost = 0.0;
             double corridor_cost = 0.0;
             double convex_corridor_cost = 0.0;
-            int risk_evals = 0;
             double step_min_dynamic_clearance = std::numeric_limits<double>::infinity();
             double step_min_cpa_time = std::numeric_limits<double>::infinity();
             for (size_t pi = 0; pi < com_path.size(); ++pi)
@@ -580,6 +576,23 @@ void MpcController::rolloutBatch(
                         {
                             corridor_violated = true;
                             break;
+                        }
+                    }
+                    if (has_timed_walking_corridor_)
+                    {
+                        const double dyn_violation =
+                            timed_walking_corridor_.dynamicObstacleViolationAtTime(
+                                point_t, point);
+                        if (dyn_violation > 0.0)
+                        {
+                            corridor_cost += cfg_.w_corridor *
+                                             dyn_violation * dyn_violation;
+                            sample_corridor_feasible_for_sample = false;
+                            if (cfg_.corridor_hard_reject_enable)
+                            {
+                                corridor_violated = true;
+                                break;
+                            }
                         }
                     }
                 }
@@ -636,7 +649,8 @@ void MpcController::rolloutBatch(
                         }
                     }
 
-                    // Dynamic obstacle: hard threshold + risk accumulation
+                    // Dynamic obstacle: physical geometry only. Wider pedestrian
+                    // keep-out is represented in the timed walking corridor.
                     for (int oi = 0; oi < n_obs; ++oi)
                     {
                         double vx = obs_vel[oi](0);
@@ -683,34 +697,11 @@ void MpcController::rolloutBatch(
                                 last_debug_metrics_.min_cpa_time = t_cpa;
                         }
 
-                        const bool eval_dynamic_risk =
-                            cfg_.dynamic_hard_reject_enable || w_risk > 1e-9;
-                        if (eval_dynamic_risk)
-                        {
-                            double r = risk_field_.getIndividualCostFast(px, py, ox, oy, vx, vy);
-                            if (std::isfinite(r) && cfg_.dynamic_hard_reject_enable && r > risk_thresh)
-                            {
-                                dyn_collided = true;
-                                break;
-                            }
-                            r += risk_field_.getTimeConflictCostFast(px, py, rvx, rvy, ox, oy, vx, vy, dyn_radius);
-                            if (std::isfinite(r))
-                            {
-                                risk_cost += r;
-                                risk_evals++;
-                            }
-                        }
                     }
                 }
                 // else: beyond FOV, skip all checks (optimistic)
                 if (dyn_collided || static_collided || corridor_violated || convex_corridor_violated)
                     break;
-            }
-
-            // Normalize risk: average per evaluation, then apply weight
-            if (risk_evals > 0)
-            {
-                risk_cost = w_risk * risk_cost / risk_evals;
             }
 
             if (dyn_collided || static_collided || corridor_violated || convex_corridor_violated)
@@ -719,7 +710,7 @@ void MpcController::rolloutBatch(
                 break;
             }
 
-            total_cost += move_cost + steer_cost + dapi_cost + risk_cost + prox_cost +
+            total_cost += move_cost + steer_cost + dapi_cost + prox_cost +
                           corridor_cost + convex_corridor_cost;
 
             prev_com_x = fx;

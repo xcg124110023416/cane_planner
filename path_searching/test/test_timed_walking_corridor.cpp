@@ -71,6 +71,62 @@ TEST(TimedWalkingCorridor, ComputesOutsideDistanceAtSegmentTime)
                               1.5, Eigen::Vector2d(5.0, 5.0)));
 }
 
+TEST(TimedWalkingCorridor, HalfPlanesOverrideCenterlineBandDistance)
+{
+    TimedWalkingCorridor corridor;
+    TimedWalkingCorridorSegment segment;
+    segment.t_start = 0.0;
+    segment.t_end = 1.0;
+    segment.start = Eigen::Vector2d(0.0, 0.0);
+    segment.end = Eigen::Vector2d(1.0, 0.0);
+    segment.forward = Eigen::Vector2d::UnitX();
+    segment.left = Eigen::Vector2d::UnitY();
+    segment.half_width = 0.1;
+    using HalfPlane2D = TimedWalkingCorridorSegment::HalfPlane2D;
+    segment.half_planes = {
+        HalfPlane2D{Eigen::Vector2d(1.0, 0.0), -1.0},
+        HalfPlane2D{Eigen::Vector2d(-1.0, 0.0), 0.0},
+        HalfPlane2D{Eigen::Vector2d(0.0, 1.0), -1.0},
+        HalfPlane2D{Eigen::Vector2d(0.0, -1.0), 0.0},
+    };
+    corridor.segments = {segment};
+
+    EXPECT_DOUBLE_EQ(0.0, corridor.outsideDistanceAtTime(
+                              0.5, Eigen::Vector2d(0.5, 0.8)));
+    EXPECT_NEAR(0.2, corridor.outsideDistanceAtTime(
+                         0.5, Eigen::Vector2d(1.2, 0.5)), 1e-9);
+}
+
+TEST(TimedWalkingCorridor, AllowsAdjacentConvexCellContinuityAtTurns)
+{
+    using HalfPlane2D = TimedWalkingCorridorSegment::HalfPlane2D;
+    TimedWalkingCorridor corridor;
+
+    TimedWalkingCorridorSegment first;
+    first.t_start = 0.0;
+    first.t_end = 0.5;
+    first.half_planes = {
+        HalfPlane2D{Eigen::Vector2d(1.0, 0.0), -1.0},
+        HalfPlane2D{Eigen::Vector2d(-1.0, 0.0), 0.0},
+        HalfPlane2D{Eigen::Vector2d(0.0, 1.0), -1.0},
+        HalfPlane2D{Eigen::Vector2d(0.0, -1.0), 0.0},
+    };
+
+    TimedWalkingCorridorSegment second;
+    second.t_start = 0.5;
+    second.t_end = 1.0;
+    second.half_planes = {
+        HalfPlane2D{Eigen::Vector2d(1.0, 0.0), -2.0},
+        HalfPlane2D{Eigen::Vector2d(-1.0, 0.0), 1.0},
+        HalfPlane2D{Eigen::Vector2d(0.0, 1.0), -1.0},
+        HalfPlane2D{Eigen::Vector2d(0.0, -1.0), 0.0},
+    };
+    corridor.segments = {first, second};
+
+    EXPECT_DOUBLE_EQ(0.0, corridor.outsideDistanceAtTime(
+                              0.25, Eigen::Vector2d(1.5, 0.5)));
+}
+
 TEST(TrajectoryFeasibility, EncodesGoStopFromMppiFeasibleTrajectory)
 {
     TrajectoryFeasibility feasible;

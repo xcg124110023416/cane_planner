@@ -48,6 +48,9 @@ WALKING_DEBUG_RE = re.compile(
     r"t_start=(?P<t_start>[-+0-9.]+)\s+"
     r"t_end=(?P<t_end>[-+0-9.]+)\s+"
     r"candidates=(?P<candidates>[-+0-9.]+)"
+    r"(?:\s+half_planes=(?P<half_planes>[-+0-9.]+))?"
+    r"(?:\s+polygons=(?P<polygons>[-+0-9.]+))?"
+    r"(?:\s+poly_area_mean=(?P<poly_area_mean>[-+0-9.]+))?"
 )
 
 
@@ -176,6 +179,9 @@ def parse_walking_debug(text, t_rel):
         "t_start": float(groups["t_start"]),
         "t_end": float(groups["t_end"]),
         "candidates": float(groups["candidates"]),
+        "half_planes": float(groups["half_planes"]) if groups.get("half_planes") else float("nan"),
+        "polygons": float(groups["polygons"]) if groups.get("polygons") else float("nan"),
+        "poly_area_mean": float(groups["poly_area_mean"]) if groups.get("poly_area_mean") else float("nan"),
         "text": text,
     }
 
@@ -341,6 +347,14 @@ def write_outputs(result, out_dir):
                         if math.isfinite(d.get("segments", float("nan")))]
     walking_candidates = [d["candidates"] for d in walking_debug
                           if math.isfinite(d.get("candidates", float("nan")))]
+    walking_half_planes = [d["half_planes"] for d in walking_debug
+                           if math.isfinite(d.get("half_planes", float("nan")))]
+    walking_polygons = [d["polygons"] for d in walking_debug
+                        if math.isfinite(d.get("polygons", float("nan")))]
+    walking_poly_area_means = [
+        d["poly_area_mean"] for d in walking_debug
+        if math.isfinite(d.get("poly_area_mean", float("nan")))
+    ]
     walking_feasible = sum(1 for d in walking_debug if d.get("feasible", 0))
     walking_time_ranges = [
         d["t_end"] - d["t_start"] for d in walking_debug
@@ -478,6 +492,18 @@ def write_outputs(result, out_dir):
                 f.write("  candidates: mean={:.2f} min={:.0f} max={:.0f}\n".format(
                     sum(walking_candidates) / len(walking_candidates),
                     min(walking_candidates), max(walking_candidates)))
+            if walking_half_planes:
+                f.write("  half-planes: mean={:.2f} min={:.0f} max={:.0f}\n".format(
+                    sum(walking_half_planes) / len(walking_half_planes),
+                    min(walking_half_planes), max(walking_half_planes)))
+            if walking_polygons:
+                f.write("  convex polygons: mean={:.2f} min={:.0f} max={:.0f}\n".format(
+                    sum(walking_polygons) / len(walking_polygons),
+                    min(walking_polygons), max(walking_polygons)))
+            if walking_poly_area_means:
+                f.write("  polygon area mean: mean={:.3f} min={:.3f} max={:.3f}m^2\n".format(
+                    sum(walking_poly_area_means) / len(walking_poly_area_means),
+                    min(walking_poly_area_means), max(walking_poly_area_means)))
             if candidate_inside_ratios:
                 f.write("  candidate inside ratio: mean={:.3f} min={:.3f} max={:.3f}\n".format(
                     sum(candidate_inside_ratios) / len(candidate_inside_ratios),

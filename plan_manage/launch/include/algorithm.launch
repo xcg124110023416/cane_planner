@@ -51,7 +51,7 @@
     <arg name="mpc_enable_cpa" default="false"/>
     <arg name="mpc_enable_stop_enforce" default="true"/>
     <arg name="mpc_enable_stop_advice" default="true"/>
-    <arg name="mpc_w_risk" default="2.0"/>
+    <arg name="mpc_w_risk" default="0.0"/>
     <arg name="mpc_cpa_weight" default="0.6"/>
     <arg name="mpc_risk_sigma_y" default="0.4"/>
     <arg name="mpc_num_samples" default="200"/>
@@ -261,12 +261,12 @@
         <param name="mpc/sigma_al" value="0.10" type="double"/>
         <param name="mpc/sigma_aw" value="0.06" type="double"/>
         <param name="mpc/sigma_api" value="0.15" type="double"/>
-        <!-- 代价权重。risk和goal已归一化，所有权重等效可比，改一个就有效果 -->
+        <!-- 代价权重。动态行人不再使用高斯势场惩罚，改由时变走廊几何约束处理。 -->
         <!-- 每步位移代价：惩罚绕路，保方向性 -->
         <param name="mpc/w_move" value="1.0" type="double"/>
         <!-- 转向幅度代价：惩罚|api|绝对值，越大越走直线 -->
         <param name="mpc/w_steer" value="0.5" type="double"/>
-        <!-- risk已归一化：每点平均risk×权重，不再是累加值 -->
+        <!-- 保留参数兼容旧实验；主线默认不使用动态势场惩罚。 -->
         <param name="mpc/w_risk" value="$(arg mpc_w_risk)" type="double"/>
         <param name="mpc/dynamic_hard_reject_enable" value="$(arg mpc_enable_dynamic_hard_reject)" type="bool"/>
         <param name="mpc/dynamic_collision_hard_reject_enable" value="true" type="bool"/>
@@ -274,7 +274,7 @@
         <param name="mpc/w_goal" value="25.0" type="double"/>
         <!-- 转向变化率惩罚权重：越大越平滑，越小越灵活（0=不限制） -->
         <param name="mpc/w_dapi" value="1.0" type="double"/>
-        <!-- hard threshold = risk_A × ratio. 越小越远离行人, 越大越敢靠近 -->
+        <!-- 旧动态势场阈值，仅用于兼容/可视化，不作为主线行人约束。 -->
         <param name="mpc/risk_hard_threshold_ratio" value="0.4" type="double"/>
         <!-- 静态障碍物碰撞惩罚（单点），总量级=w_static×n×penalty，巨大→几乎硬约束 -->
         <param name="mpc/static_penalty" value="500.0" type="double"/>
