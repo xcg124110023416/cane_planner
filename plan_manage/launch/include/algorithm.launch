@@ -105,12 +105,12 @@
         <param name="manager/global_wp_smoothing_min_turn_angle" value="0.55" type="double"/>
         <param name="manager/global_wp_smoothing_samples" value="4" type="int"/>
         <!-- 前向截断距离：从最近投影点向前看多少米选为当前目标 -->
-        <param name="manager/lookahead_dist" value="2.2" type="double"/>
+        <param name="manager/lookahead_dist" value="3.0" type="double"/>
         <param name="manager/max_vel" value="1.0" type="double"/>
         <param name="manager/max_acc" value="2.0" type="double"/>
         <param name="manager/max_jerk" value="4" type="double"/>
         <param name="manager/dynamic_environment" value="0" type="int"/>
-        <param name="manager/local_segment_length" value="6.0" type="double"/>
+        <param name="manager/local_segment_length" value="8.0" type="double"/>
         <param name="manager/clearance_threshold" value="0.2" type="double"/>
         <param name="manager/control_points_distance" value="0.35" type="double"/>
         <!-- planning fsm -->
