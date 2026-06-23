@@ -269,7 +269,7 @@
         <!-- 保留参数兼容旧实验；主线默认不使用动态势场惩罚。 -->
         <param name="mpc/w_risk" value="$(arg mpc_w_risk)" type="double"/>
         <param name="mpc/dynamic_hard_reject_enable" value="$(arg mpc_enable_dynamic_hard_reject)" type="bool"/>
-        <param name="mpc/dynamic_collision_hard_reject_enable" value="true" type="bool"/>
+        <param name="mpc/dynamic_collision_hard_reject_enable" value="false" type="bool"/>
         <!-- goal已归一化：最终距离/horizon步数×权重 -->
         <param name="mpc/w_goal" value="25.0" type="double"/>
         <!-- 转向变化率惩罚权重：越大越平滑，越小越灵活（0=不限制） -->
