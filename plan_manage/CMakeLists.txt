@@ -101,5 +101,6 @@ catkin_install_python(PROGRAMS
   scripts/publish_fixed_goal.py
   scripts/publish_lightweight_fixed_goal.py
   scripts/run_lightweight_mppi_compare.py
+  scripts/global_path_corridor_demo.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

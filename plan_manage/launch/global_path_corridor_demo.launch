@@ -1,0 +1,35 @@
+<launch>
+    <!--
+      Demo only: show a Na-style corridor generated along the global A* path.
+      It publishes visualization markers and does not constrain MPPI.
+    -->
+    <arg name="planner" default="3"/>
+    <arg name="pedestrian_scenario" default="mixed"/>
+    <arg name="use_pedestrians" default="true"/>
+
+    <arg name="segment_length" default="1.8"/>
+    <arg name="overlap" default="0.7"/>
+    <arg name="half_width" default="0.9"/>
+    <arg name="min_half_width" default="0.25"/>
+    <arg name="width_step" default="0.05"/>
+    <arg name="obstacle_margin" default="0.08"/>
+
+    <include file="$(find plan_manage)/launch/sim_kin_replan.launch">
+        <arg name="planner" value="$(arg planner)"/>
+        <arg name="pedestrian_scenario" value="$(arg pedestrian_scenario)"/>
+        <arg name="use_pedestrians" value="$(arg use_pedestrians)"/>
+    </include>
+
+    <node pkg="plan_manage" type="global_path_corridor_demo.py"
+          name="global_path_corridor_demo" output="screen">
+        <param name="path_topic" value="/astar/path"/>
+        <param name="cloud_topic" value="/simulation_generator/global_cloud"/>
+        <param name="use_cloud" value="true" type="bool"/>
+        <param name="segment_length" value="$(arg segment_length)" type="double"/>
+        <param name="overlap" value="$(arg overlap)" type="double"/>
+        <param name="half_width" value="$(arg half_width)" type="double"/>
+        <param name="min_half_width" value="$(arg min_half_width)" type="double"/>
+        <param name="width_step" value="$(arg width_step)" type="double"/>
+        <param name="obstacle_margin" value="$(arg obstacle_margin)" type="double"/>
+    </node>
+</launch>
