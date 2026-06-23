@@ -27,6 +27,8 @@ class GlobalPathCorridorDemo:
         self.min_half_width = max(0.01, rospy.get_param("~min_half_width", 0.25))
         self.width_step = max(0.01, rospy.get_param("~width_step", 0.05))
         self.obstacle_margin = max(0.0, rospy.get_param("~obstacle_margin", 0.08))
+        self.static_clip_enable = rospy.get_param("~static_clip_enable", True)
+        self.max_static_clips_per_cell = int(rospy.get_param("~max_static_clips_per_cell", 64))
         self.min_z = rospy.get_param("~cloud_min_z", 0.10)
         self.max_z = rospy.get_param("~cloud_max_z", 2.60)
         self.max_cloud_points = int(rospy.get_param("~max_cloud_points", 60000))
@@ -187,6 +189,93 @@ class GlobalPathCorridorDemo:
         l = rx * lx + ry * ly
         return -radius <= s <= length + radius and abs(l) <= half_width + radius
 
+    @staticmethod
+    def point_in_polygon(point, poly):
+        if len(poly) < 3:
+            return False
+        inside = False
+        x, y = point
+        j = len(poly) - 1
+        for i, pi in enumerate(poly):
+            pj = poly[j]
+            if ((pi[1] > y) != (pj[1] > y)):
+                x_cross = (pj[0] - pi[0]) * (y - pi[1]) / (pj[1] - pi[1] + 1e-12) + pi[0]
+                if x < x_cross:
+                    inside = not inside
+            j = i
+        return inside
+
+    def static_clip_points(self, a, b, half_width, cloud_xy):
+        if not self.use_cloud or not self.static_clip_enable or not cloud_xy:
+            return []
+        dx = b[0] - a[0]
+        dy = b[1] - a[1]
+        length = math.hypot(dx, dy)
+        if length < 1e-9:
+            return []
+        fx = dx / length
+        fy = dy / length
+        lx = -fy
+        ly = fx
+        margin = self.obstacle_margin
+        center = (0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1]))
+        candidates = []
+        min_x = min(a[0], b[0]) - half_width - margin
+        max_x = max(a[0], b[0]) + half_width + margin
+        min_y = min(a[1], b[1]) - half_width - margin
+        max_y = max(a[1], b[1]) + half_width + margin
+        for px, py in cloud_xy:
+            if px < min_x or px > max_x or py < min_y or py > max_y:
+                continue
+            rx = px - a[0]
+            ry = py - a[1]
+            s = rx * fx + ry * fy
+            l = rx * lx + ry * ly
+            if -margin <= s <= length + margin and abs(l) <= half_width + margin:
+                dist2 = (px - center[0]) * (px - center[0]) + (py - center[1]) * (py - center[1])
+                candidates.append((dist2, px, py))
+        candidates.sort(key=lambda item: item[0])
+        return [(px, py) for _dist2, px, py in candidates[:max(0, self.max_static_clips_per_cell)]]
+
+    def apply_static_clips(self, polygon, a, b, half_width, cloud_xy):
+        if not self.static_clip_enable or len(polygon) < 3:
+            return polygon, 0
+        cx = 0.5 * (a[0] + b[0])
+        cy = 0.5 * (a[1] + b[1])
+        clipped_count = 0
+        for ox, oy in self.static_clip_points(a, b, half_width, cloud_xy):
+            if not self.point_in_polygon((ox, oy), polygon):
+                continue
+            nx = cx - ox
+            ny = cy - oy
+            norm = math.hypot(nx, ny)
+            if norm < 1e-6:
+                dx = b[0] - a[0]
+                dy = b[1] - a[1]
+                seg_norm = math.hypot(dx, dy)
+                if seg_norm < 1e-6:
+                    continue
+                nx = -dy / seg_norm
+                ny = dx / seg_norm
+            else:
+                nx /= norm
+                ny /= norm
+            threshold = nx * ox + ny * oy + self.obstacle_margin
+            new_polygon = self.clip_polygon_keep_greater(polygon, (nx, ny), threshold)
+            polygon = new_polygon if new_polygon else []
+            clipped_count += 1
+            if len(polygon) < 3:
+                break
+        return polygon, clipped_count
+
+    def polygon_static_clear(self, polygon, cloud_xy):
+        if not self.use_cloud or not cloud_xy or len(polygon) < 3:
+            return True
+        for pt in cloud_xy:
+            if self.point_in_polygon(pt, polygon):
+                return False
+        return True
+
     def dynamic_clip_positions(self, obstacle, cell_time):
         ox0, oy0, vx, vy, radius = obstacle
         positions = [(ox0, oy0, radius)]
@@ -275,14 +364,15 @@ class GlobalPathCorridorDemo:
             a = self.interp(path, arcs, s0)
             b = self.interp(path, arcs, s1)
             width = self.half_width
-            while width > self.min_half_width and not self.segment_clear(a, b, width, cloud_xy):
-                width = max(self.min_half_width, width - self.width_step)
             polygon = self.rect_polygon(a, b, width)
+            polygon, static_clipped_count = self.apply_static_clips(
+                polygon, a, b, width, cloud_xy)
             polygon, clipped_count = self.apply_dynamic_clips(
                 polygon, a, b, width, 0.5 * (s0 + s1), dyn_obs)
-            feasible = (self.segment_clear(a, b, width, cloud_xy) and
+            feasible = (self.polygon_static_clear(polygon, cloud_xy) and
                         self.polygon_area(polygon) >= self.min_polygon_area)
-            cells.append((s0, s1, width, feasible, polygon, clipped_count))
+            cells.append((s0, s1, width, feasible, polygon,
+                          static_clipped_count, clipped_count))
             s0 += stride
         return cells
 
@@ -306,7 +396,8 @@ class GlobalPathCorridorDemo:
         cells = self.build_corridor(path, cloud_xy, dyn_obs)
         now = rospy.Time.now()
 
-        for idx, (_s0, _s1, width, feasible, polygon, clipped_count) in enumerate(cells):
+        for idx, (_s0, _s1, width, feasible, polygon,
+                  static_clipped_count, clipped_count) in enumerate(cells):
             if len(polygon) < 3:
                 continue
             marker = Marker()
@@ -378,14 +469,15 @@ class GlobalPathCorridorDemo:
             markers.markers.append(dyn)
 
         feasible_count = sum(1 for c in cells if c[3])
-        dynamic_clip_count = sum(c[5] for c in cells)
+        static_clip_count = sum(c[5] for c in cells)
+        dynamic_clip_count = sum(c[6] for c in cells)
         mean_width = sum(c[2] for c in cells) / len(cells) if cells else 0.0
         self.last_debug = (
             "global_path_corridor_demo "
             "path_points={} cells={} feasible={} mean_half_width={:.2f} "
-            "cloud_points={} dynamic_obstacles={} dynamic_clips={}"
+            "cloud_points={} static_clips={} dynamic_obstacles={} dynamic_clips={}"
         ).format(len(path), len(cells), feasible_count, mean_width,
-                 len(cloud_xy), len(dyn_obs), dynamic_clip_count)
+                 len(cloud_xy), static_clip_count, len(dyn_obs), dynamic_clip_count)
         self.marker_pub.publish(markers)
         self.debug_pub.publish(String(data=self.last_debug))
 

@@ -13,6 +13,8 @@
     <arg name="min_half_width" default="0.25"/>
     <arg name="width_step" default="0.05"/>
     <arg name="obstacle_margin" default="0.08"/>
+    <arg name="static_clip_enable" default="true"/>
+    <arg name="max_static_clips_per_cell" default="64"/>
     <arg name="use_dynamic" default="true"/>
     <arg name="dynamic_radius" default="0.35"/>
     <arg name="dynamic_margin" default="0.25"/>
@@ -38,6 +40,8 @@
         <param name="min_half_width" value="$(arg min_half_width)" type="double"/>
         <param name="width_step" value="$(arg width_step)" type="double"/>
         <param name="obstacle_margin" value="$(arg obstacle_margin)" type="double"/>
+        <param name="static_clip_enable" value="$(arg static_clip_enable)" type="bool"/>
+        <param name="max_static_clips_per_cell" value="$(arg max_static_clips_per_cell)" type="int"/>
         <param name="dynamic_radius" value="$(arg dynamic_radius)" type="double"/>
         <param name="dynamic_margin" value="$(arg dynamic_margin)" type="double"/>
         <param name="dynamic_time_margin" value="$(arg dynamic_time_margin)" type="double"/>
