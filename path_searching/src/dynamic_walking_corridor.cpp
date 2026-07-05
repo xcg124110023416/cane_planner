@@ -229,10 +229,11 @@ std::vector<Eigen::Vector2d> sampleDynamicEllipse(
     return points;
 }
 
-void addSeparatingHalfPlane(
+void addFiriLikeSupportHalfPlane(
     const Eigen::Vector2d &a,
     const Eigen::Vector2d &b,
     const Eigen::Vector2d &obstacle,
+    const double clearance,
     std::vector<TimedWalkingCorridorSegment::HalfPlane2D> &half_planes)
 {
     const Eigen::Vector2d ab = b - a;
@@ -243,18 +244,22 @@ void addSeparatingHalfPlane(
     double u = (obstacle - a).dot(ab) / len_sq;
     u = std::max(0.0, std::min(1.0, u));
     const Eigen::Vector2d closest = a + u * ab;
-    Eigen::Vector2d to_seed = closest - obstacle;
-    const double dist = to_seed.norm();
+    Eigen::Vector2d to_obstacle = obstacle - closest;
+    const double dist = to_obstacle.norm();
     if (dist < 1e-4)
         return;
-    to_seed /= dist;
+    to_obstacle /= dist;
+
+    const double seed_limit = std::max(to_obstacle.dot(a), to_obstacle.dot(b));
+    const double boundary = to_obstacle.dot(obstacle) - std::max(0.0, clearance);
+    if (boundary <= seed_limit + 1e-5)
+        return;
 
     TimedWalkingCorridorSegment::HalfPlane2D hp;
-    hp.normal = -to_seed;
-    const Eigen::Vector2d mid = 0.5 * (closest + obstacle);
-    hp.offset = to_seed.dot(mid);
+    hp.normal = to_obstacle;
+    hp.offset = -boundary;
 
-    if (hp.value(a) <= 1e-5 && hp.value(b) <= 1e-5)
+    if (hp.value(a) <= 1e-5 && hp.value(b) <= 1e-5 && hp.value(obstacle) > 1e-6)
         half_planes.push_back(hp);
 }
 
@@ -308,8 +313,10 @@ void buildConvexCellForSegment(
                                ellipse_points.begin(), ellipse_points.end());
     }
 
+    const double support_clearance =
+        std::max(0.01, std::min(0.05, 0.05 * std::max(0.0, cfg.min_half_width)));
     for (const auto &obstacle : obstacle_points)
-        addSeparatingHalfPlane(a, b, obstacle, segment.half_planes);
+        addFiriLikeSupportHalfPlane(a, b, obstacle, support_clearance, segment.half_planes);
 
     segment.polygon = polygonFromHalfPlanes(segment.half_planes);
     if (segment.polygon.empty())

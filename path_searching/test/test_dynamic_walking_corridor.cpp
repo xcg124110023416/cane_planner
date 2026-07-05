@@ -397,6 +397,45 @@ TEST(DynamicWalkingCorridor, ExposesDynamicPedestriansAsTimedEllipses)
                               0.5, Eigen::Vector2d(1.0, 1.5)));
 }
 
+TEST(DynamicWalkingCorridor, FiriLikeCellExpandsTowardDynamicObstacleBoundary)
+{
+    DynamicWalkingCorridor corridor;
+    DynamicWalkingCorridor::Config cfg;
+    cfg.length = 4.0;
+    cfg.half_width = 1.0;
+    cfg.min_half_width = 0.25;
+    cfg.prediction_dt = 0.25;
+    cfg.robot_radius = 0.25;
+    cfg.dynamic_min_radius = 0.20;
+    cfg.dynamic_safety_margin = 0.10;
+    cfg.static_centerline_opt_enable = false;
+    corridor.setConfig(cfg);
+
+    TimedTrajectory nominal;
+    nominal.source = TimedTrajectorySource::PREVIOUS_MPPI;
+    TimedTrajectoryPoint p0;
+    p0.position = Eigen::Vector2d(0.0, 0.0);
+    p0.t_from_now = 0.0;
+    TimedTrajectoryPoint p1;
+    p1.position = Eigen::Vector2d(2.0, 0.0);
+    p1.t_from_now = 1.0;
+    nominal.points = {p0, p1};
+
+    std::vector<Eigen::Vector3d> obs_pos = {Eigen::Vector3d(1.0, 1.0, 0.0)};
+    std::vector<Eigen::Vector3d> obs_vel = {Eigen::Vector3d::Zero()};
+    std::vector<Eigen::Vector3d> obs_size = {Eigen::Vector3d(0.4, 0.4, 1.7)};
+
+    auto result = corridor.plan(nominal, obs_pos, obs_vel, obs_size);
+
+    ASSERT_TRUE(result.has_feasible);
+    ASSERT_TRUE(result.timed_corridor.valid());
+    EXPECT_DOUBLE_EQ(0.0, result.timed_corridor.outsideDistanceAtTime(
+                              0.5, Eigen::Vector2d(1.0, 0.35)));
+    EXPECT_GT(result.timed_corridor.outsideDistanceAtTime(
+                  0.5, Eigen::Vector2d(1.0, 0.48)),
+              0.0);
+}
+
 TEST(DynamicWalkingCorridor, KeepsCenterCorridorAsSingleDefaultCandidate)
 {
     DynamicWalkingCorridor corridor;
