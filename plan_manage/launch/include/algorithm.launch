@@ -257,13 +257,13 @@
         <param name="mpc/max_al" value="0.6" type="double"/>
         <param name="mpc/min_al" value="0.05" type="double"/>
         <param name="mpc/max_aw" value="0.15" type="double"/>
-        <param name="mpc/max_api" value="0.5236" type="double"/>
+        <param name="mpc/max_api" value="0.7854" type="double"/>
         <param name="mpc/sigma_al" value="0.10" type="double"/>
         <param name="mpc/sigma_aw" value="0.06" type="double"/>
         <param name="mpc/sigma_api" value="0.15" type="double"/>
         <!-- 代价权重。动态行人不再使用高斯势场惩罚，改由时变走廊几何约束处理。 -->
         <!-- 每步位移代价：惩罚绕路，保方向性 -->
-        <param name="mpc/w_move" value="1.0" type="double"/>
+        <param name="mpc/w_move" value="0.0" type="double"/>
         <!-- 转向幅度代价：惩罚|api|绝对值，越大越走直线 -->
         <param name="mpc/w_steer" value="0.5" type="double"/>
         <!-- 保留参数兼容旧实验；主线默认不使用动态势场惩罚。 -->
@@ -273,7 +273,7 @@
         <!-- goal已归一化：最终距离/horizon步数×权重 -->
         <param name="mpc/w_goal" value="25.0" type="double"/>
         <!-- 转向变化率惩罚权重：越大越平滑，越小越灵活（0=不限制） -->
-        <param name="mpc/w_dapi" value="1.0" type="double"/>
+        <param name="mpc/w_dapi" value="0.2" type="double"/>
         <!-- 旧动态势场阈值，仅用于兼容/可视化，不作为主线行人约束。 -->
         <param name="mpc/risk_hard_threshold_ratio" value="0.4" type="double"/>
         <!-- 静态障碍物碰撞惩罚（单点），总量级=w_static×n×penalty，巨大→几乎硬约束 -->
@@ -284,12 +284,13 @@
         <param name="mpc/dynamic_safety_margin" value="0.05" type="double"/>
         <param name="mpc/dynamic_min_radius" value="0.20" type="double"/>
         <!-- SDF排斥力权重、排斥生效距离(m)：距墙<margin时二次增长 -->
-        <param name="mpc/w_prox" value="4.0" type="double"/>
+        <param name="mpc/w_prox" value="0.0" type="double"/>
         <param name="mpc/prox_margin" value="0.3" type="double"/>
         <param name="mpc/corridor_enable" value="true" type="bool"/>
-        <param name="mpc/corridor_hard_reject_enable" value="false" type="bool"/>
+        <param name="mpc/corridor_hard_reject_enable" value="true" type="bool"/>
         <param name="mpc/w_corridor" value="20.0" type="double"/>
-        <param name="mpc/corridor_hard_margin" value="0.30" type="double"/>
+        <param name="mpc/w_corridor_dynamic" value="0.0" type="double"/>
+        <param name="mpc/corridor_hard_margin" value="0.50" type="double"/>
         <param name="mpc/convex_corridor_enable" value="$(arg mpc_convex_corridor_enable)" type="bool"/>
         <param name="mpc/convex_corridor_hard_reject_enable" value="$(arg mpc_convex_corridor_hard_reject_enable)" type="bool"/>
         <param name="mpc/w_convex_corridor" value="$(arg mpc_w_convex_corridor)" type="double"/>

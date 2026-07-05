@@ -73,6 +73,7 @@ public:
         bool corridor_enable = true;
         bool corridor_hard_reject_enable = true;
         double w_corridor = 20.0;
+        double w_corridor_dynamic = 20.0;
         double corridor_hard_margin = 0.30;
 
         // Optional convex corridor constraint. This is developed in parallel

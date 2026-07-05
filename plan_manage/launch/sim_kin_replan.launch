@@ -69,7 +69,7 @@
         <arg name="sensor_pose_topic" value="pose"/>
         <arg name="simulation" value="true"/>
         <arg name="slice_height" value="0.0"/>
-        <arg name="collision_margin" value="0.3"/>
+        <arg name="collision_margin" value="0.2"/>
         <arg name="kin_horizon" value="200.0"/>
         <arg name="global_wp_arrival_radius" value="$(arg global_wp_arrival_radius)"/>
         <arg name="map_size_x" value="40.0"/>

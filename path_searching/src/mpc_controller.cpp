@@ -54,6 +54,7 @@ void MpcController::setParam(ros::NodeHandle &nh)
     nh.param("mpc/corridor_enable", cfg_.corridor_enable, true);
     nh.param("mpc/corridor_hard_reject_enable", cfg_.corridor_hard_reject_enable, true);
     nh.param("mpc/w_corridor", cfg_.w_corridor, 20.0);
+    nh.param("mpc/w_corridor_dynamic", cfg_.w_corridor_dynamic, cfg_.w_corridor);
     nh.param("mpc/corridor_hard_margin", cfg_.corridor_hard_margin, 0.30);
     nh.param("mpc/convex_corridor_enable", cfg_.convex_corridor_enable, false);
     nh.param("mpc/convex_corridor_hard_reject_enable", cfg_.convex_corridor_hard_reject_enable, false);
@@ -583,9 +584,9 @@ void MpcController::rolloutBatch(
                         const double dyn_violation =
                             timed_walking_corridor_.dynamicObstacleViolationAtTime(
                                 point_t, point);
-                        if (dyn_violation > 0.0)
+                        if (dyn_violation > 0.0 && cfg_.w_corridor_dynamic > 0.0)
                         {
-                            corridor_cost += cfg_.w_corridor *
+                            corridor_cost += cfg_.w_corridor_dynamic *
                                              dyn_violation * dyn_violation;
                             if (!corridorDeviationFeasible(
                                     dyn_violation, cfg_.corridor_hard_margin))
