@@ -229,6 +229,115 @@ std::vector<Eigen::Vector2d> sampleDynamicEllipse(
     return points;
 }
 
+std::vector<Eigen::Vector2d> convexHull2D(std::vector<Eigen::Vector2d> points)
+{
+    if (points.size() < 3)
+        return points;
+
+    std::sort(points.begin(), points.end(),
+              [](const Eigen::Vector2d &a, const Eigen::Vector2d &b)
+              {
+                  if (std::abs(a.x() - b.x()) > 1e-9)
+                      return a.x() < b.x();
+                  return a.y() < b.y();
+              });
+    points.erase(std::unique(points.begin(), points.end(),
+                             [](const Eigen::Vector2d &a, const Eigen::Vector2d &b)
+                             {
+                                 return (a - b).norm() < 1e-6;
+                             }),
+                 points.end());
+    if (points.size() < 3)
+        return points;
+
+    std::vector<Eigen::Vector2d> hull;
+    hull.reserve(points.size() * 2);
+    for (const auto &p : points)
+    {
+        while (hull.size() >= 2 &&
+               cross2d(hull.back() - hull[hull.size() - 2],
+                       p - hull.back()) <= 1e-9)
+        {
+            hull.pop_back();
+        }
+        hull.push_back(p);
+    }
+
+    const size_t lower_size = hull.size();
+    for (int i = static_cast<int>(points.size()) - 2; i >= 0; --i)
+    {
+        const auto &p = points[static_cast<size_t>(i)];
+        while (hull.size() > lower_size &&
+               cross2d(hull.back() - hull[hull.size() - 2],
+                       p - hull.back()) <= 1e-9)
+        {
+            hull.pop_back();
+        }
+        hull.push_back(p);
+    }
+    if (!hull.empty())
+        hull.pop_back();
+    return hull;
+}
+
+std::vector<Eigen::Vector2d> buildDynamicObstacleFootprint(
+    const Eigen::Vector2d &center,
+    const Eigen::Vector2d &velocity,
+    const Eigen::Vector2d &fallback_forward,
+    const double base_radius,
+    const double prediction_extension)
+{
+    const double radius = std::max(1e-3, base_radius);
+    const double speed = velocity.norm();
+    const Eigen::Vector2d forward =
+        speed > 1e-3 ? velocity / speed : normalizedOrDefault(fallback_forward);
+    const Eigen::Vector2d left(-forward.y(), forward.x());
+
+    std::vector<Eigen::Vector2d> points;
+    points.reserve(5);
+
+    const double rear_offset = 1.25 * radius;
+    const double rear_half_width = 0.45 * radius;
+    const double shoulder_offset = -0.20 * radius;
+    const double shoulder_half_width = 1.10 * radius;
+    const double apex_offset =
+        std::max(2.75 * radius, 1.10 * radius + 1.35 * prediction_extension);
+
+    const Eigen::Vector2d rear_center = center - rear_offset * forward;
+    const Eigen::Vector2d shoulder_center = center + shoulder_offset * forward;
+    points.push_back(rear_center - rear_half_width * left);
+    points.push_back(rear_center + rear_half_width * left);
+    points.push_back(shoulder_center + shoulder_half_width * left);
+    points.push_back(shoulder_center - shoulder_half_width * left);
+    points.push_back(center + apex_offset * forward);
+
+    return convexHull2D(points);
+}
+
+std::vector<Eigen::Vector2d> sampleDynamicObstacleBoundary(
+    const TimedWalkingCorridorSegment::DynamicEllipseObstacle &obstacle,
+    const double ds = 0.15)
+{
+    if (obstacle.vertices.size() < 3)
+        return sampleDynamicEllipse(obstacle);
+
+    std::vector<Eigen::Vector2d> points;
+    for (size_t i = 0; i < obstacle.vertices.size(); ++i)
+    {
+        const Eigen::Vector2d a = obstacle.vertices[i];
+        const Eigen::Vector2d b = obstacle.vertices[(i + 1) % obstacle.vertices.size()];
+        points.push_back(a);
+        const double len = (b - a).norm();
+        const int steps = std::max(1, static_cast<int>(std::floor(len / std::max(0.05, ds))));
+        for (int k = 1; k < steps; ++k)
+        {
+            const double u = static_cast<double>(k) / static_cast<double>(steps);
+            points.push_back(a + u * (b - a));
+        }
+    }
+    return points;
+}
+
 Eigen::Vector2d closestPointOnSegment(const Eigen::Vector2d &a,
                                       const Eigen::Vector2d &b,
                                       const Eigen::Vector2d &point)
@@ -274,10 +383,18 @@ void addFiriLikeSupportHalfPlane(
         half_planes.push_back(hp);
 }
 
-double ellipseSupportRadius(
+double obstacleSupportMinimum(
     const TimedWalkingCorridorSegment::DynamicEllipseObstacle &obstacle,
     const Eigen::Vector2d &normal)
 {
+    if (obstacle.vertices.size() >= 3)
+    {
+        double min_proj = std::numeric_limits<double>::infinity();
+        for (const auto &v : obstacle.vertices)
+            min_proj = std::min(min_proj, normal.dot(v));
+        return min_proj;
+    }
+
     const Eigen::Vector2d f = normalizedOrDefault(obstacle.forward);
     const Eigen::Vector2d l = obstacle.left.norm() > 1e-6
                                   ? obstacle.left.normalized()
@@ -286,12 +403,13 @@ double ellipseSupportRadius(
     const double b = std::max(1e-3, obstacle.lateral_radius);
     const double nf = normal.dot(f);
     const double nl = normal.dot(l);
-    return std::sqrt(a * a * nf * nf + b * b * nl * nl);
+    return normal.dot(obstacle.center) -
+           std::sqrt(a * a * nf * nf + b * b * nl * nl);
 }
 
 double polygonArea(const std::vector<Eigen::Vector2d> &polygon);
 
-bool addDynamicEllipseSupportHalfPlane(
+bool addDynamicObstacleSupportHalfPlane(
     const TimedWalkingCorridorSegment::DynamicEllipseObstacle &obstacle,
     const Eigen::Vector2d &normal,
     const double clearance,
@@ -303,9 +421,8 @@ bool addDynamicEllipseSupportHalfPlane(
         return false;
     unit_normal /= normal_len;
 
-    const double support_radius = ellipseSupportRadius(obstacle, unit_normal);
     const double boundary =
-        unit_normal.dot(obstacle.center) - support_radius - std::max(0.0, clearance);
+        obstacleSupportMinimum(obstacle, unit_normal) - std::max(0.0, clearance);
 
     TimedWalkingCorridorSegment::HalfPlane2D hp;
     hp.normal = unit_normal;
@@ -314,7 +431,7 @@ bool addDynamicEllipseSupportHalfPlane(
     return true;
 }
 
-int addDynamicEllipseSupportHalfPlane(
+int addDynamicObstacleSupportHalfPlane(
     const Eigen::Vector2d &a,
     const Eigen::Vector2d &b,
     const TimedWalkingCorridorSegment::DynamicEllipseObstacle &obstacle,
@@ -329,8 +446,8 @@ int addDynamicEllipseSupportHalfPlane(
     if (center_normal.norm() > 1e-4)
         normals.push_back(center_normal);
 
-    const auto ellipse_points = sampleDynamicEllipse(obstacle, 32);
-    for (const auto &point : ellipse_points)
+    const auto boundary_points = sampleDynamicObstacleBoundary(obstacle);
+    for (const auto &point : boundary_points)
     {
         const Eigen::Vector2d n = point - closestPointOnSegment(a, b, point);
         if (n.norm() > 1e-4)
@@ -344,7 +461,9 @@ int addDynamicEllipseSupportHalfPlane(
     for (const auto &normal : normals)
     {
         std::vector<TimedWalkingCorridorSegment::HalfPlane2D> trial = half_planes;
-        if (!addDynamicEllipseSupportHalfPlane(obstacle, normal, clearance, trial))
+        if (!addDynamicObstacleSupportHalfPlane(obstacle, normal, clearance, trial))
+            continue;
+        if (trial.back().value(a) > 1e-5 || trial.back().value(b) > 1e-5)
             continue;
         const auto polygon = polygonFromHalfPlanes(trial);
         if (polygon.size() >= 3)
@@ -499,6 +618,58 @@ double polygonArea(const std::vector<Eigen::Vector2d> &polygon)
     for (size_t i = 0; i < polygon.size(); ++i)
         area += cross2d(polygon[i], polygon[(i + 1) % polygon.size()]);
     return 0.5 * std::abs(area);
+}
+
+bool projectionSeparated(
+    const std::vector<Eigen::Vector2d> &a,
+    const std::vector<Eigen::Vector2d> &b,
+    const Eigen::Vector2d &axis,
+    const double clearance)
+{
+    const double axis_norm = axis.norm();
+    if (axis_norm < 1e-9)
+        return false;
+    const Eigen::Vector2d unit_axis = axis / axis_norm;
+    double a_min = std::numeric_limits<double>::infinity();
+    double a_max = -std::numeric_limits<double>::infinity();
+    double b_min = std::numeric_limits<double>::infinity();
+    double b_max = -std::numeric_limits<double>::infinity();
+    for (const auto &p : a)
+    {
+        const double v = unit_axis.dot(p);
+        a_min = std::min(a_min, v);
+        a_max = std::max(a_max, v);
+    }
+    for (const auto &p : b)
+    {
+        const double v = unit_axis.dot(p);
+        b_min = std::min(b_min, v);
+        b_max = std::max(b_max, v);
+    }
+    return a_max + clearance < b_min || b_max + clearance < a_min;
+}
+
+bool convexPolygonsOverlap(
+    const std::vector<Eigen::Vector2d> &a,
+    const std::vector<Eigen::Vector2d> &b,
+    const double clearance = 0.0)
+{
+    if (a.size() < 3 || b.size() < 3)
+        return false;
+
+    auto hasSeparatingAxis = [&](const std::vector<Eigen::Vector2d> &poly)
+    {
+        for (size_t i = 0; i < poly.size(); ++i)
+        {
+            const Eigen::Vector2d edge = poly[(i + 1) % poly.size()] - poly[i];
+            const Eigen::Vector2d axis(-edge.y(), edge.x());
+            if (projectionSeparated(a, b, axis, clearance))
+                return true;
+        }
+        return false;
+    };
+
+    return !hasSeparatingAxis(a) && !hasSeparatingAxis(b);
 }
 
 double rayLimitInHalfPlanes(
@@ -747,9 +918,9 @@ void buildConvexCellForSegment(
 
     for (const auto &obstacle : segment.dynamic_obstacles)
     {
-        const auto ellipse_points = sampleDynamicEllipse(obstacle);
+        const auto boundary_points = sampleDynamicObstacleBoundary(obstacle);
         obstacle_points.insert(obstacle_points.end(),
-                               ellipse_points.begin(), ellipse_points.end());
+                               boundary_points.begin(), boundary_points.end());
     }
 
     if (cfg.firi_enable)
@@ -767,8 +938,8 @@ void buildConvexCellForSegment(
 
     for (const auto &obstacle : segment.dynamic_obstacles)
     {
-        if (addDynamicEllipseSupportHalfPlane(a, b, obstacle,
-                                              cfg.firi_clearance, segment.half_planes) == 0)
+        if (addDynamicObstacleSupportHalfPlane(a, b, obstacle,
+                                               cfg.firi_clearance, segment.half_planes) == 0)
         {
             segment.feasible = false;
             segment.blocked_dynamic = true;
@@ -780,6 +951,21 @@ void buildConvexCellForSegment(
     {
         segment.feasible = false;
         segment.blocked_dynamic = true;
+    }
+
+    if (!segment.polygon.empty())
+    {
+        for (const auto &obstacle : segment.dynamic_obstacles)
+        {
+            if (obstacle.vertices.size() >= 3 &&
+                convexPolygonsOverlap(segment.polygon, obstacle.vertices,
+                                      std::max(0.0, cfg.firi_clearance)))
+            {
+                segment.feasible = false;
+                segment.blocked_dynamic = true;
+                break;
+            }
+        }
     }
 }
 
@@ -851,9 +1037,12 @@ TimedWalkingCorridor toTimedWalkingCorridor(
             const double base_radius =
                 obstacleRadius(j, obs_size, cfg.dynamic_min_radius) +
                 cfg.robot_radius + cfg.dynamic_safety_margin;
+            const double prediction_extension =
+                speed * (0.5 * segment_dt + std::max(0.0, cfg.prediction_dt));
             obstacle.lateral_radius = base_radius;
-            obstacle.longitudinal_radius =
-                base_radius + speed * (0.5 * segment_dt + std::max(0.0, cfg.prediction_dt));
+            obstacle.longitudinal_radius = base_radius + prediction_extension;
+            obstacle.vertices = buildDynamicObstacleFootprint(
+                center, velocity, segment.forward, base_radius, prediction_extension);
             segment.dynamic_obstacles.push_back(obstacle);
         }
         buildConvexCellForSegment(segment, collision, cfg);

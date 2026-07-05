@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace cane_planner
@@ -46,9 +47,39 @@ struct TimedWalkingCorridorSegment
         Eigen::Vector2d left = Eigen::Vector2d::UnitY();
         double longitudinal_radius = 0.0;
         double lateral_radius = 0.0;
+        std::vector<Eigen::Vector2d> vertices;
 
         double penetrationDepth(const Eigen::Vector2d &point) const
         {
+            if (vertices.size() >= 3)
+            {
+                double signed_area = 0.0;
+                for (size_t i = 0; i < vertices.size(); ++i)
+                {
+                    const Eigen::Vector2d &a = vertices[i];
+                    const Eigen::Vector2d &b = vertices[(i + 1) % vertices.size()];
+                    signed_area += a.x() * b.y() - a.y() * b.x();
+                }
+                const double orientation = signed_area >= 0.0 ? 1.0 : -1.0;
+                double min_inside_dist = std::numeric_limits<double>::infinity();
+                for (size_t i = 0; i < vertices.size(); ++i)
+                {
+                    const Eigen::Vector2d &a = vertices[i];
+                    const Eigen::Vector2d &b = vertices[(i + 1) % vertices.size()];
+                    const Eigen::Vector2d edge = b - a;
+                    const double edge_len = std::max(1e-6, edge.norm());
+                    const double signed_dist =
+                        orientation *
+                        (edge.x() * (point.y() - a.y()) -
+                         edge.y() * (point.x() - a.x())) /
+                        edge_len;
+                    if (signed_dist < 0.0)
+                        return 0.0;
+                    min_inside_dist = std::min(min_inside_dist, signed_dist);
+                }
+                return std::isfinite(min_inside_dist) ? min_inside_dist : 0.0;
+            }
+
             const double a = std::max(1e-6, longitudinal_radius);
             const double b = std::max(1e-6, lateral_radius);
             const Eigen::Vector2d f =

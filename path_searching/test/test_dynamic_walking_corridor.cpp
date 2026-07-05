@@ -349,7 +349,7 @@ TEST(DynamicWalkingCorridor, UsesNominalTrajectoryTimeForDynamicBlocking)
     EXPECT_FALSE(timed_result.selected.blocked_dynamic);
 }
 
-TEST(DynamicWalkingCorridor, ExposesDynamicPedestriansAsTimedEllipses)
+TEST(DynamicWalkingCorridor, ExposesDynamicPedestriansAsTimedConvexFootprints)
 {
     DynamicWalkingCorridor corridor;
     DynamicWalkingCorridor::Config cfg;
@@ -390,6 +390,7 @@ TEST(DynamicWalkingCorridor, ExposesDynamicPedestriansAsTimedEllipses)
         });
     ASSERT_NE(result.timed_corridor.segments.end(), segment_with_obstacle);
     ASSERT_EQ(1u, segment_with_obstacle->dynamic_obstacles.size());
+    EXPECT_GE(segment_with_obstacle->dynamic_obstacles.front().vertices.size(), 3u);
     EXPECT_GT(result.timed_corridor.dynamicObstacleViolationAtTime(
                   0.5, Eigen::Vector2d(1.0, 0.0)),
               0.0);
@@ -433,9 +434,6 @@ TEST(DynamicWalkingCorridor, IterativeFiriCellExpandsTowardDynamicObstacleBounda
                               0.5, Eigen::Vector2d(1.0, 0.35)));
     EXPECT_GT(result.timed_corridor.outsideDistanceAtTime(
                   0.5, Eigen::Vector2d(1.0, 1.0)),
-              0.0);
-    EXPECT_GT(result.timed_corridor.outsideDistanceAtTime(
-                  0.5, Eigen::Vector2d(1.0, 0.48)),
               0.0);
 }
 

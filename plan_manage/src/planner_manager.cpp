@@ -899,6 +899,8 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
         for (size_t si = 0; si < result.timed_corridor.segments.size(); ++si)
         {
             const auto& segment = result.timed_corridor.segments[si];
+            if (!segment.feasible)
+                continue;
             if (segment.polygon.size() < 3)
                 continue;
 
@@ -925,6 +927,37 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
             }
             poly.points.push_back(poly.points.front());
             markers.markers.push_back(poly);
+
+            for (size_t oi = 0; oi < segment.dynamic_obstacles.size(); ++oi)
+            {
+                const auto& obstacle = segment.dynamic_obstacles[oi];
+                if (obstacle.vertices.size() < 3)
+                    continue;
+
+                visualization_msgs::Marker footprint;
+                footprint.header = clear.header;
+                footprint.ns = "mpc_walking_corridor_dynamic_footprints";
+                footprint.id = 4000 + static_cast<int>(si * 100 + oi);
+                footprint.type = visualization_msgs::Marker::LINE_STRIP;
+                footprint.action = visualization_msgs::Marker::ADD;
+                footprint.pose.orientation.w = 1.0;
+                footprint.scale.x = 0.025;
+                footprint.color.r = 1.0;
+                footprint.color.g = 0.55;
+                footprint.color.b = 0.05;
+                footprint.color.a = 0.85;
+                footprint.lifetime = ros::Duration(0.3);
+                for (const auto& v : obstacle.vertices)
+                {
+                    geometry_msgs::Point p;
+                    p.x = v.x();
+                    p.y = v.y();
+                    p.z = 0.17;
+                    footprint.points.push_back(p);
+                }
+                footprint.points.push_back(footprint.points.front());
+                markers.markers.push_back(footprint);
+            }
         }
 
         mpc_walking_corridor_pub_.publish(markers);
