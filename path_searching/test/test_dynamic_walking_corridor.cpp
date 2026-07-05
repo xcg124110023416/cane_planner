@@ -397,7 +397,7 @@ TEST(DynamicWalkingCorridor, ExposesDynamicPedestriansAsTimedEllipses)
                               0.5, Eigen::Vector2d(1.0, 1.5)));
 }
 
-TEST(DynamicWalkingCorridor, FiriLikeCellExpandsTowardDynamicObstacleBoundary)
+TEST(DynamicWalkingCorridor, IterativeFiriCellExpandsTowardDynamicObstacleBoundary)
 {
     DynamicWalkingCorridor corridor;
     DynamicWalkingCorridor::Config cfg;
@@ -431,6 +431,9 @@ TEST(DynamicWalkingCorridor, FiriLikeCellExpandsTowardDynamicObstacleBoundary)
     ASSERT_TRUE(result.timed_corridor.valid());
     EXPECT_DOUBLE_EQ(0.0, result.timed_corridor.outsideDistanceAtTime(
                               0.5, Eigen::Vector2d(1.0, 0.35)));
+    EXPECT_GT(result.timed_corridor.outsideDistanceAtTime(
+                  0.5, Eigen::Vector2d(1.0, 1.0)),
+              0.0);
     EXPECT_GT(result.timed_corridor.outsideDistanceAtTime(
                   0.5, Eigen::Vector2d(1.0, 0.48)),
               0.0);

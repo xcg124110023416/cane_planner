@@ -50,6 +50,10 @@ public:
         double front_pass_lateral = 1.8;
         double static_sample_ds = 0.4;
         double static_sample_dl = 0.3;
+        bool firi_enable = true;
+        int firi_iterations = 4;
+        double firi_clearance = 0.02;
+        double firi_ellipse_shrink = 0.85;
     };
 
     struct Candidate

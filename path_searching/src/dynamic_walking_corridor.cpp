@@ -208,7 +208,7 @@ std::vector<Eigen::Vector2d> polygonFromHalfPlanes(
 
 std::vector<Eigen::Vector2d> sampleDynamicEllipse(
     const TimedWalkingCorridorSegment::DynamicEllipseObstacle &obstacle,
-    const int samples = 16)
+    const int samples = 32)
 {
     std::vector<Eigen::Vector2d> points;
     points.reserve(samples);
@@ -229,6 +229,19 @@ std::vector<Eigen::Vector2d> sampleDynamicEllipse(
     return points;
 }
 
+Eigen::Vector2d closestPointOnSegment(const Eigen::Vector2d &a,
+                                      const Eigen::Vector2d &b,
+                                      const Eigen::Vector2d &point)
+{
+    const Eigen::Vector2d ab = b - a;
+    const double len_sq = ab.squaredNorm();
+    if (len_sq < 1e-9)
+        return a;
+    double u = (point - a).dot(ab) / len_sq;
+    u = std::max(0.0, std::min(1.0, u));
+    return a + u * ab;
+}
+
 void addFiriLikeSupportHalfPlane(
     const Eigen::Vector2d &a,
     const Eigen::Vector2d &b,
@@ -241,9 +254,7 @@ void addFiriLikeSupportHalfPlane(
     if (len_sq < 1e-9)
         return;
 
-    double u = (obstacle - a).dot(ab) / len_sq;
-    u = std::max(0.0, std::min(1.0, u));
-    const Eigen::Vector2d closest = a + u * ab;
+    const Eigen::Vector2d closest = closestPointOnSegment(a, b, obstacle);
     Eigen::Vector2d to_obstacle = obstacle - closest;
     const double dist = to_obstacle.norm();
     if (dist < 1e-4)
@@ -263,6 +274,433 @@ void addFiriLikeSupportHalfPlane(
         half_planes.push_back(hp);
 }
 
+double ellipseSupportRadius(
+    const TimedWalkingCorridorSegment::DynamicEllipseObstacle &obstacle,
+    const Eigen::Vector2d &normal)
+{
+    const Eigen::Vector2d f = normalizedOrDefault(obstacle.forward);
+    const Eigen::Vector2d l = obstacle.left.norm() > 1e-6
+                                  ? obstacle.left.normalized()
+                                  : Eigen::Vector2d(-f.y(), f.x());
+    const double a = std::max(1e-3, obstacle.longitudinal_radius);
+    const double b = std::max(1e-3, obstacle.lateral_radius);
+    const double nf = normal.dot(f);
+    const double nl = normal.dot(l);
+    return std::sqrt(a * a * nf * nf + b * b * nl * nl);
+}
+
+double polygonArea(const std::vector<Eigen::Vector2d> &polygon);
+
+bool addDynamicEllipseSupportHalfPlane(
+    const TimedWalkingCorridorSegment::DynamicEllipseObstacle &obstacle,
+    const Eigen::Vector2d &normal,
+    const double clearance,
+    std::vector<TimedWalkingCorridorSegment::HalfPlane2D> &half_planes)
+{
+    Eigen::Vector2d unit_normal = normal;
+    const double normal_len = unit_normal.norm();
+    if (normal_len < 1e-4)
+        return false;
+    unit_normal /= normal_len;
+
+    const double support_radius = ellipseSupportRadius(obstacle, unit_normal);
+    const double boundary =
+        unit_normal.dot(obstacle.center) - support_radius - std::max(0.0, clearance);
+
+    TimedWalkingCorridorSegment::HalfPlane2D hp;
+    hp.normal = unit_normal;
+    hp.offset = -boundary;
+    half_planes.push_back(hp);
+    return true;
+}
+
+int addDynamicEllipseSupportHalfPlane(
+    const Eigen::Vector2d &a,
+    const Eigen::Vector2d &b,
+    const TimedWalkingCorridorSegment::DynamicEllipseObstacle &obstacle,
+    const double clearance,
+    std::vector<TimedWalkingCorridorSegment::HalfPlane2D> &half_planes)
+{
+    std::vector<Eigen::Vector2d> normals;
+    normals.reserve(33);
+
+    const Eigen::Vector2d center_normal =
+        obstacle.center - closestPointOnSegment(a, b, obstacle.center);
+    if (center_normal.norm() > 1e-4)
+        normals.push_back(center_normal);
+
+    const auto ellipse_points = sampleDynamicEllipse(obstacle, 32);
+    for (const auto &point : ellipse_points)
+    {
+        const Eigen::Vector2d n = point - closestPointOnSegment(a, b, point);
+        if (n.norm() > 1e-4)
+            normals.push_back(n);
+    }
+
+    bool found = false;
+    double best_area = -1.0;
+    std::vector<TimedWalkingCorridorSegment::HalfPlane2D> best_half_planes;
+
+    for (const auto &normal : normals)
+    {
+        std::vector<TimedWalkingCorridorSegment::HalfPlane2D> trial = half_planes;
+        if (!addDynamicEllipseSupportHalfPlane(obstacle, normal, clearance, trial))
+            continue;
+        const auto polygon = polygonFromHalfPlanes(trial);
+        if (polygon.size() >= 3)
+        {
+            const double area = polygonArea(polygon);
+            if (!found || area > best_area)
+            {
+                found = true;
+                best_area = area;
+                best_half_planes.swap(trial);
+            }
+        }
+    }
+
+    if (!found)
+        return 0;
+
+    half_planes.swap(best_half_planes);
+    return 1;
+}
+
+struct FiriFrame2D
+{
+    Eigen::Vector2d center = Eigen::Vector2d::Zero();
+    Eigen::Matrix2d axes = Eigen::Matrix2d::Identity();
+    Eigen::Vector2d radii = Eigen::Vector2d::Ones();
+};
+
+Eigen::Vector2d transformToFiriFrame(const FiriFrame2D &frame,
+                                     const Eigen::Vector2d &point)
+{
+    Eigen::Vector2d y = frame.axes.transpose() * (point - frame.center);
+    y.x() /= std::max(1e-3, frame.radii.x());
+    y.y() /= std::max(1e-3, frame.radii.y());
+    return y;
+}
+
+TimedWalkingCorridorSegment::HalfPlane2D transformHalfPlaneToFiriFrame(
+    const FiriFrame2D &frame,
+    const TimedWalkingCorridorSegment::HalfPlane2D &hp)
+{
+    TimedWalkingCorridorSegment::HalfPlane2D out;
+    out.normal = frame.radii.asDiagonal() * frame.axes.transpose() * hp.normal;
+    out.offset = hp.normal.dot(frame.center) + hp.offset;
+    return out;
+}
+
+TimedWalkingCorridorSegment::HalfPlane2D transformHalfPlaneFromFiriFrame(
+    const FiriFrame2D &frame,
+    const TimedWalkingCorridorSegment::HalfPlane2D &hp)
+{
+    const Eigen::Matrix2d forward =
+        frame.radii.cwiseInverse().asDiagonal() * frame.axes.transpose();
+    TimedWalkingCorridorSegment::HalfPlane2D out;
+    out.normal = forward.transpose() * hp.normal;
+    out.offset = hp.offset - out.normal.dot(frame.center);
+    return out;
+}
+
+bool buildFiriObstacleTangent(
+    const Eigen::Vector2d &seed_a,
+    const Eigen::Vector2d &seed_b,
+    const Eigen::Vector2d &obstacle,
+    TimedWalkingCorridorSegment::HalfPlane2D &hp)
+{
+    const double eps = 1e-6;
+    const double obstacle_norm = obstacle.norm();
+    if (obstacle_norm < eps)
+        return false;
+
+    hp.normal = obstacle / obstacle_norm;
+    hp.offset = -obstacle_norm;
+
+    auto repairAgainstSeedPoint = [&](const Eigen::Vector2d &seed)
+    {
+        if (hp.value(seed) <= 1e-5)
+            return true;
+        const Eigen::Vector2d delta = obstacle - seed;
+        const double delta_sq = delta.squaredNorm();
+        if (delta_sq < eps)
+            return false;
+        Eigen::Vector2d tangent_normal =
+            seed - (delta.dot(seed) / delta_sq) * delta;
+        const double tangent_norm = tangent_normal.norm();
+        if (tangent_norm < eps)
+            return false;
+        hp.normal = tangent_normal / tangent_norm;
+        hp.offset = -tangent_norm;
+        return true;
+    };
+
+    if (!repairAgainstSeedPoint(seed_a))
+        return false;
+    if (!repairAgainstSeedPoint(seed_b))
+        return false;
+
+    if (hp.value(seed_a) <= 1e-5 && hp.value(seed_b) <= 1e-5)
+        return true;
+
+    const Eigen::Vector2d seed_delta = seed_b - seed_a;
+    if (seed_delta.norm() < eps)
+        return false;
+    hp.normal = Eigen::Vector2d(-seed_delta.y(), seed_delta.x()).normalized();
+    hp.offset = -hp.normal.dot(seed_a);
+    if (hp.value(obstacle) < 0.0)
+    {
+        hp.normal = -hp.normal;
+        hp.offset = -hp.offset;
+    }
+    return hp.value(seed_a) <= 1e-5 && hp.value(seed_b) <= 1e-5;
+}
+
+double halfPlaneDistanceToOrigin(
+    const TimedWalkingCorridorSegment::HalfPlane2D &hp)
+{
+    return std::abs(hp.offset) / std::max(1e-6, hp.normal.norm());
+}
+
+Eigen::Vector2d polygonCentroid(const std::vector<Eigen::Vector2d> &polygon)
+{
+    if (polygon.empty())
+        return Eigen::Vector2d::Zero();
+
+    double signed_area = 0.0;
+    Eigen::Vector2d centroid = Eigen::Vector2d::Zero();
+    for (size_t i = 0; i < polygon.size(); ++i)
+    {
+        const Eigen::Vector2d &p0 = polygon[i];
+        const Eigen::Vector2d &p1 = polygon[(i + 1) % polygon.size()];
+        const double cross = cross2d(p0, p1);
+        signed_area += cross;
+        centroid += (p0 + p1) * cross;
+    }
+
+    if (std::abs(signed_area) < 1e-9)
+    {
+        centroid.setZero();
+        for (const auto &p : polygon)
+            centroid += p;
+        return centroid / static_cast<double>(polygon.size());
+    }
+
+    return centroid / (3.0 * signed_area);
+}
+
+double polygonArea(const std::vector<Eigen::Vector2d> &polygon)
+{
+    if (polygon.size() < 3)
+        return 0.0;
+
+    double area = 0.0;
+    for (size_t i = 0; i < polygon.size(); ++i)
+        area += cross2d(polygon[i], polygon[(i + 1) % polygon.size()]);
+    return 0.5 * std::abs(area);
+}
+
+double rayLimitInHalfPlanes(
+    const std::vector<TimedWalkingCorridorSegment::HalfPlane2D> &half_planes,
+    const Eigen::Vector2d &origin,
+    const Eigen::Vector2d &direction)
+{
+    double limit = std::numeric_limits<double>::infinity();
+    for (const auto &hp : half_planes)
+    {
+        const double value = hp.value(origin);
+        const double denom = hp.normal.dot(direction);
+        if (denom > 1e-9)
+            limit = std::min(limit, -value / denom);
+    }
+    return std::isfinite(limit) ? std::max(1e-3, limit) : 1.0;
+}
+
+bool updateFiriFrameFromHalfPlanes(
+    const std::vector<TimedWalkingCorridorSegment::HalfPlane2D> &half_planes,
+    const double shrink,
+    FiriFrame2D &frame)
+{
+    const auto polygon = polygonFromHalfPlanes(half_planes);
+    if (polygon.size() < 3)
+        return false;
+
+    frame.center = polygonCentroid(polygon);
+
+    Eigen::Matrix2d cov = Eigen::Matrix2d::Zero();
+    for (const auto &p : polygon)
+    {
+        const Eigen::Vector2d d = p - frame.center;
+        cov += d * d.transpose();
+    }
+    cov /= static_cast<double>(polygon.size());
+
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> solver(cov);
+    if (solver.info() == Eigen::Success)
+    {
+        frame.axes.col(0) = solver.eigenvectors().col(1);
+        frame.axes.col(1) = solver.eigenvectors().col(0);
+        if (frame.axes.determinant() < 0.0)
+            frame.axes.col(1) = -frame.axes.col(1);
+    }
+
+    const double safe_shrink = std::max(0.2, std::min(1.0, shrink));
+    for (int i = 0; i < 2; ++i)
+    {
+        const Eigen::Vector2d axis = frame.axes.col(i);
+        const double positive = rayLimitInHalfPlanes(half_planes, frame.center, axis);
+        const double negative = rayLimitInHalfPlanes(half_planes, frame.center, -axis);
+        frame.radii(i) = safe_shrink * std::min(positive, negative);
+    }
+    frame.radii.x() = std::max(1e-3, frame.radii.x());
+    frame.radii.y() = std::max(1e-3, frame.radii.y());
+    return true;
+}
+
+std::vector<TimedWalkingCorridorSegment::HalfPlane2D> buildFiriHalfPlanes2D(
+    const Eigen::Vector2d &seed_a,
+    const Eigen::Vector2d &seed_b,
+    const std::vector<TimedWalkingCorridorSegment::HalfPlane2D> &boundary_half_planes,
+    const std::vector<Eigen::Vector2d> &obstacle_points,
+    const DynamicWalkingCorridor::Config &cfg)
+{
+    if (boundary_half_planes.empty())
+        return {};
+
+    const Eigen::Vector2d seed_delta = seed_b - seed_a;
+    FiriFrame2D frame;
+    frame.center = 0.5 * (seed_a + seed_b);
+    frame.axes.col(0) = normalizedOrDefault(seed_delta);
+    frame.axes.col(1) = Eigen::Vector2d(-frame.axes.col(0).y(), frame.axes.col(0).x());
+    frame.radii.x() = std::max(0.25, 0.5 * seed_delta.norm());
+    frame.radii.y() = std::max(0.10, cfg.half_width);
+
+    std::vector<TimedWalkingCorridorSegment::HalfPlane2D> h_poly = boundary_half_planes;
+    const int iterations = std::max(1, cfg.firi_iterations);
+    const double clearance = std::max(0.0, cfg.firi_clearance);
+
+    for (int loop = 0; loop < iterations; ++loop)
+    {
+        std::vector<TimedWalkingCorridorSegment::HalfPlane2D> forward_boundary;
+        forward_boundary.reserve(boundary_half_planes.size());
+        for (const auto &hp : boundary_half_planes)
+            forward_boundary.push_back(transformHalfPlaneToFiriFrame(frame, hp));
+
+        std::vector<Eigen::Vector2d> forward_obstacles;
+        forward_obstacles.reserve(obstacle_points.size());
+        std::vector<TimedWalkingCorridorSegment::HalfPlane2D> tangents;
+        std::vector<double> tangent_distances;
+        const Eigen::Vector2d forward_seed_a = transformToFiriFrame(frame, seed_a);
+        const Eigen::Vector2d forward_seed_b = transformToFiriFrame(frame, seed_b);
+        for (const auto &obstacle : obstacle_points)
+        {
+            const Eigen::Vector2d forward_obstacle = transformToFiriFrame(frame, obstacle);
+            TimedWalkingCorridorSegment::HalfPlane2D tangent;
+            if (!buildFiriObstacleTangent(forward_seed_a, forward_seed_b,
+                                          forward_obstacle, tangent))
+                continue;
+            forward_obstacles.push_back(forward_obstacle);
+            tangents.push_back(tangent);
+            tangent_distances.push_back(halfPlaneDistanceToOrigin(tangent));
+        }
+
+        std::vector<char> boundary_active(forward_boundary.size(), 1);
+        std::vector<char> obstacle_active(tangents.size(), 1);
+        std::vector<TimedWalkingCorridorSegment::HalfPlane2D> forward_selected;
+        std::vector<char> forward_selected_from_obstacle;
+        forward_selected.reserve(forward_boundary.size() + tangents.size());
+        forward_selected_from_obstacle.reserve(forward_boundary.size() + tangents.size());
+
+        for (size_t k = 0; k < forward_boundary.size() + tangents.size(); ++k)
+        {
+            int best_boundary = -1;
+            int best_obstacle = -1;
+            double best_boundary_dist = std::numeric_limits<double>::infinity();
+            double best_obstacle_dist = std::numeric_limits<double>::infinity();
+
+            for (size_t i = 0; i < forward_boundary.size(); ++i)
+            {
+                if (!boundary_active[i])
+                    continue;
+                const double dist = halfPlaneDistanceToOrigin(forward_boundary[i]);
+                if (dist < best_boundary_dist)
+                {
+                    best_boundary_dist = dist;
+                    best_boundary = static_cast<int>(i);
+                }
+            }
+
+            for (size_t i = 0; i < tangents.size(); ++i)
+            {
+                if (!obstacle_active[i])
+                    continue;
+                if (tangent_distances[i] < best_obstacle_dist)
+                {
+                    best_obstacle_dist = tangent_distances[i];
+                    best_obstacle = static_cast<int>(i);
+                }
+            }
+
+            if (best_boundary < 0 && best_obstacle < 0)
+                break;
+
+            TimedWalkingCorridorSegment::HalfPlane2D selected;
+            if (best_boundary >= 0 && best_boundary_dist < best_obstacle_dist)
+            {
+                selected = forward_boundary[best_boundary];
+                boundary_active[best_boundary] = 0;
+                forward_selected_from_obstacle.push_back(0);
+            }
+            else
+            {
+                selected = tangents[best_obstacle];
+                obstacle_active[best_obstacle] = 0;
+                forward_selected_from_obstacle.push_back(1);
+            }
+            forward_selected.push_back(selected);
+
+            for (size_t i = 0; i < tangents.size(); ++i)
+            {
+                if (obstacle_active[i] &&
+                    selected.value(forward_obstacles[i]) > -1e-6)
+                {
+                    obstacle_active[i] = 0;
+                }
+            }
+        }
+
+        h_poly.clear();
+        h_poly.reserve(forward_selected.size());
+        for (size_t i = 0; i < forward_selected.size(); ++i)
+        {
+            auto world_hp = transformHalfPlaneFromFiriFrame(frame, forward_selected[i]);
+            const double norm = world_hp.normal.norm();
+            if (forward_selected_from_obstacle[i] && norm > 1e-9)
+                world_hp.offset += clearance * norm;
+            if (world_hp.value(seed_a) <= 1e-5 && world_hp.value(seed_b) <= 1e-5)
+                h_poly.push_back(world_hp);
+        }
+
+        if (h_poly.size() < 3 || polygonFromHalfPlanes(h_poly).empty())
+        {
+            h_poly = boundary_half_planes;
+            for (const auto &obstacle : obstacle_points)
+                addFiriLikeSupportHalfPlane(seed_a, seed_b, obstacle,
+                                            clearance, h_poly);
+            break;
+        }
+
+        if (loop + 1 < iterations &&
+            !updateFiriFrameFromHalfPlanes(h_poly, cfg.firi_ellipse_shrink, frame))
+        {
+            break;
+        }
+    }
+
+    return h_poly;
+}
+
 void buildConvexCellForSegment(
     TimedWalkingCorridorSegment &segment,
     const CollisionDetection::Ptr &collision,
@@ -280,12 +718,13 @@ void buildConvexCellForSegment(
     const double min_y = std::min(a.y(), b.y()) - range;
     const double max_y = std::max(a.y(), b.y()) + range;
 
+    std::vector<TimedWalkingCorridorSegment::HalfPlane2D> boundary_half_planes;
     auto addHp = [&](double nx, double ny, double offset)
     {
         TimedWalkingCorridorSegment::HalfPlane2D hp;
         hp.normal = Eigen::Vector2d(nx, ny);
         hp.offset = offset;
-        segment.half_planes.push_back(hp);
+        boundary_half_planes.push_back(hp);
     };
     addHp(1.0, 0.0, -max_x);
     addHp(-1.0, 0.0, min_x);
@@ -313,14 +752,35 @@ void buildConvexCellForSegment(
                                ellipse_points.begin(), ellipse_points.end());
     }
 
-    const double support_clearance =
-        std::max(0.01, std::min(0.05, 0.05 * std::max(0.0, cfg.min_half_width)));
-    for (const auto &obstacle : obstacle_points)
-        addFiriLikeSupportHalfPlane(a, b, obstacle, support_clearance, segment.half_planes);
+    if (cfg.firi_enable)
+    {
+        segment.half_planes = buildFiriHalfPlanes2D(
+            a, b, boundary_half_planes, obstacle_points, cfg);
+    }
+    else
+    {
+        segment.half_planes = boundary_half_planes;
+        for (const auto &obstacle : obstacle_points)
+            addFiriLikeSupportHalfPlane(a, b, obstacle,
+                                        cfg.firi_clearance, segment.half_planes);
+    }
+
+    for (const auto &obstacle : segment.dynamic_obstacles)
+    {
+        if (addDynamicEllipseSupportHalfPlane(a, b, obstacle,
+                                              cfg.firi_clearance, segment.half_planes) == 0)
+        {
+            segment.feasible = false;
+            segment.blocked_dynamic = true;
+        }
+    }
 
     segment.polygon = polygonFromHalfPlanes(segment.half_planes);
     if (segment.polygon.empty())
-        segment.half_planes.clear();
+    {
+        segment.feasible = false;
+        segment.blocked_dynamic = true;
+    }
 }
 
 TimedWalkingCorridor toTimedWalkingCorridor(
@@ -569,6 +1029,10 @@ void DynamicWalkingCorridor::setParam(ros::NodeHandle &nh)
     nh.param("dwc/front_pass_lateral", cfg_.front_pass_lateral, 1.8);
     nh.param("dwc/static_sample_ds", cfg_.static_sample_ds, 0.4);
     nh.param("dwc/static_sample_dl", cfg_.static_sample_dl, 0.3);
+    nh.param("dwc/firi_enable", cfg_.firi_enable, true);
+    nh.param("dwc/firi_iterations", cfg_.firi_iterations, 4);
+    nh.param("dwc/firi_clearance", cfg_.firi_clearance, 0.02);
+    nh.param("dwc/firi_ellipse_shrink", cfg_.firi_ellipse_shrink, 0.85);
 }
 
 DynamicWalkingCorridor::Result DynamicWalkingCorridor::plan(
