@@ -45,7 +45,9 @@
     <arg name="global_esdf_safe_distance" default="0.15"/>
     <arg name="global_esdf_min_points_per_cell" default="1"/>
     <arg name="static_endpoint_clear_radius" default="0.25"/>
-    <arg name="astar_min_clearance" default="0.35"/>
+    <arg name="astar_w_clearance" default="0.25"/>
+    <arg name="astar_clearance_sigma" default="0.8"/>
+    <arg name="astar_min_clearance" default="0.0"/>
     <arg name="astar_traversable_radius" default="0.25"/>
     <arg name="publish_static_map_debug" default="true"/>
     <arg name="mpc_enable_cpa" default="false"/>
@@ -212,8 +214,8 @@
         <param name="astar/lambda_heu" value="0.2"/>
         <param name="astar/allocate_num" value="300000"/>
         <!-- A* keeps the global guide away from static narrow bands; MPPI handles local dynamics. -->
-        <param name="astar/w_clearance" value="3.0" type="double"/>
-        <param name="astar/clearance_sigma" value="1.2" type="double"/>
+        <param name="astar/w_clearance" value="$(arg astar_w_clearance)" type="double"/>
+        <param name="astar/clearance_sigma" value="$(arg astar_clearance_sigma)" type="double"/>
         <param name="astar/min_clearance" value="$(arg astar_min_clearance)" type="double"/>
         <param name="astar/traversable_radius" value="$(arg astar_traversable_radius)" type="double"/>
         <param name="astar/use_static_global_map" value="$(arg use_static_global_map)" type="bool"/>

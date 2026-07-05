@@ -789,29 +789,7 @@ namespace cane_planner
 
     // 修改后的 3D 碰撞检测函数
 bool CollisionDetection::isTraversable(double x, double y) {
-    // foot_z: 脚部高度，稍微抬高一点，容忍地面的微小不平整
-    double foot_z = slice_height_ - 0.8; 
-    // head_z: 头部高度，导盲杖系统的关键保护区域
-    double head_z = slice_height_ + 0.8; 
-    // check_step: 检查步长，建议设为分辨率的 2-3 倍 (0.2 - 0.3m)
-    double check_step = 0.3;        
-    // ===  身体圆柱体碰撞检测 (防止撞头/撞腰) ===
-    for (double z = foot_z; z <= head_z; z += check_step) {
-        Eigen::Vector3d check_pt(x, y, z);
-        
-        double dist = sdf_map_->getDistance(check_pt);
-        
-        if (dist < margin_) { 
-            return false; 
-        }
-    }
-    // 额外检查一下头顶 
-    // Eigen::Vector3d head_pt(x, y, head_z);
-    // if (sdf_map_->getDistance(head_pt) < margin_) {
-    //     return false;
-    // }
-
-    return true; // 所有检查都通过
+    return getCollisionDistance(Eigen::Vector2d(x, y)) >= margin_;
 }
 
     bool CollisionDetection::isTraversable(Eigen::Vector3d pos)
@@ -829,12 +807,18 @@ bool CollisionDetection::isTraversable(double x, double y) {
 
     double CollisionDetection::getCollisionDistance(Eigen::Vector2d pos)
     {
-        Eigen::Vector3d index;
-        index(0) = pos(0);
-        index(1) = pos(1);
-        index(2) = slice_height_;
-        double dis = sdf_map_->getDistance(index);
-        return dis;
+        const double foot_z = slice_height_ - 0.8;
+        const double head_z = slice_height_ + 0.8;
+        const double check_step = 0.3;
+        double min_dist = std::numeric_limits<double>::infinity();
+        for (double z = foot_z; z <= head_z + 1e-6; z += check_step)
+        {
+            min_dist = std::min(min_dist,
+                                sdf_map_->getDistance(Eigen::Vector3d(pos(0), pos(1), z)));
+        }
+        min_dist = std::min(min_dist,
+                            sdf_map_->getDistance(Eigen::Vector3d(pos(0), pos(1), head_z)));
+        return min_dist;
     }
 
     bool CollisionDetection::isStaticTraversable(double x, double y) const

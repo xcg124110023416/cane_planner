@@ -55,6 +55,9 @@
     <arg name="static_known_inflation" default="0.55"/>
     <arg name="static_known_boundary_inflation" default="0.35"/>
     <arg name="static_endpoint_clear_radius" default="0.25"/>
+    <arg name="astar_w_clearance" default="0.25"/>
+    <arg name="astar_clearance_sigma" default="0.8"/>
+    <arg name="astar_min_clearance" default="0.0"/>
     <arg name="astar_traversable_radius" default="0.25"/>
     <arg name="publish_static_map_debug" default="true"/>
     <!-- simulation -->
@@ -125,6 +128,9 @@
         <arg name="static_known_inflation" value="$(arg static_known_inflation)"/>
         <arg name="static_known_boundary_inflation" value="$(arg static_known_boundary_inflation)"/>
         <arg name="static_endpoint_clear_radius" value="$(arg static_endpoint_clear_radius)"/>
+        <arg name="astar_w_clearance" value="$(arg astar_w_clearance)"/>
+        <arg name="astar_clearance_sigma" value="$(arg astar_clearance_sigma)"/>
+        <arg name="astar_min_clearance" value="$(arg astar_min_clearance)"/>
         <arg name="astar_traversable_radius" value="$(arg astar_traversable_radius)"/>
         <arg name="publish_static_map_debug" value="$(arg publish_static_map_debug)"/>
     </include>

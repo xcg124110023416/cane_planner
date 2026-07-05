@@ -285,13 +285,14 @@ namespace cane_planner
           double tmp_g_score, tmp_f_score;
           tmp_g_score = d_pos.squaredNorm() + cur_node->g_score;
 
-          // SDF 接近惩罚：仅当距墙小于缓冲区时生效，距离越近代价二次增长
+          // Soft clearance bias: nudge the guide path toward the middle without
+          // overpowering path length enough to switch corridor topology.
           if (w_clearance_ > 1e-6)
           {
             if (sdf_dist < clearance_sigma_)
             {
               double t = 1.0 - sdf_dist / clearance_sigma_;
-              tmp_g_score += w_clearance_ * t * t;
+              tmp_g_score += w_clearance_ * d_pos.norm() * t * t;
             }
           }
           tmp_f_score = tmp_g_score + lambda_heu_ * getDiagHeu(pro_pos, end_pt);
@@ -371,7 +372,7 @@ namespace cane_planner
     nh.param("astar/allocate_num", allocate_num_, 1);
     // 搜索允许的最大范围（例如 10 米内）
     nh.param("astar/horizon", horizon_, -1.0);
-    // 靠近障碍物的代价权重（0=不惩罚，建议 0.05~0.2）
+    // 靠近障碍物的软代价权重（0=不惩罚，建议 0.05~0.3）
     nh.param("astar/w_clearance", w_clearance_, 0.0);
     // 安全距离尺度（m），小于此值代价显著上升
     nh.param("astar/clearance_sigma", clearance_sigma_, 0.5);
