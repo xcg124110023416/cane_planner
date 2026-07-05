@@ -304,6 +304,43 @@ TEST(DynamicWalkingCorridor, TimedCorridorSegmentsExposeConvexCells)
                               0.1, Eigen::Vector2d(0.5, 0.0)));
 }
 
+TEST(DynamicWalkingCorridor, SplitsDynamicallyBlockedTimedSegments)
+{
+    DynamicWalkingCorridor corridor;
+    DynamicWalkingCorridor::Config cfg;
+    cfg.length = 8.0;
+    cfg.half_width = 0.4;
+    cfg.static_centerline_opt_enable = false;
+    cfg.dynamic_safety_margin = 0.10;
+    cfg.dynamic_split_max_depth = 1;
+    cfg.dynamic_split_min_length = 0.4;
+    corridor.setConfig(cfg);
+
+    TimedTrajectory nominal;
+    nominal.source = TimedTrajectorySource::PREVIOUS_MPPI;
+    TimedTrajectoryPoint p0;
+    p0.position = Eigen::Vector2d(0.0, 0.0);
+    p0.t_from_now = 0.0;
+    TimedTrajectoryPoint p1;
+    p1.position = Eigen::Vector2d(2.0, 0.0);
+    p1.t_from_now = 1.0;
+    nominal.points = {p0, p1};
+
+    std::vector<Eigen::Vector3d> obs_pos = {Eigen::Vector3d(1.0, 0.0, 0.0)};
+    std::vector<Eigen::Vector3d> obs_vel = {Eigen::Vector3d::Zero()};
+    std::vector<Eigen::Vector3d> obs_size = {Eigen::Vector3d(0.4, 0.4, 1.7)};
+
+    auto result = corridor.plan(nominal, obs_pos, obs_vel, obs_size);
+
+    ASSERT_TRUE(result.has_feasible);
+    ASSERT_TRUE(result.timed_corridor.valid());
+    ASSERT_EQ(2u, result.timed_corridor.segments.size());
+    EXPECT_NEAR(0.0, result.timed_corridor.segments.front().t_start, 1e-9);
+    EXPECT_NEAR(0.5, result.timed_corridor.segments.front().t_end, 1e-9);
+    EXPECT_NEAR(0.5, result.timed_corridor.segments.back().t_start, 1e-9);
+    EXPECT_NEAR(1.0, result.timed_corridor.segments.back().t_end, 1e-9);
+}
+
 TEST(DynamicWalkingCorridor, UsesNominalTrajectoryTimeForDynamicBlocking)
 {
     DynamicWalkingCorridor corridor;

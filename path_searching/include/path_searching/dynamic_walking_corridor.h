@@ -54,6 +54,8 @@ public:
         int firi_iterations = 4;
         double firi_clearance = 0.02;
         double firi_ellipse_shrink = 0.85;
+        int dynamic_split_max_depth = 2;
+        double dynamic_split_min_length = 0.5;
     };
 
     struct Candidate

@@ -899,30 +899,30 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
         for (size_t si = 0; si < result.timed_corridor.segments.size(); ++si)
         {
             const auto& segment = result.timed_corridor.segments[si];
-            if (!segment.feasible)
-                continue;
             if (segment.polygon.size() < 3)
                 continue;
 
+            const bool rejected = !segment.feasible;
             visualization_msgs::Marker poly;
             poly.header = clear.header;
-            poly.ns = "mpc_walking_corridor_polygons";
-            poly.id = 2000 + static_cast<int>(si);
+            poly.ns = rejected ? "mpc_walking_corridor_rejected_polygons"
+                               : "mpc_walking_corridor_polygons";
+            poly.id = (rejected ? 3000 : 2000) + static_cast<int>(si);
             poly.type = visualization_msgs::Marker::LINE_STRIP;
             poly.action = visualization_msgs::Marker::ADD;
             poly.pose.orientation.w = 1.0;
-            poly.scale.x = 0.035;
-            poly.color.r = 0.05;
-            poly.color.g = 0.95;
-            poly.color.b = 0.95;
-            poly.color.a = 0.85;
+            poly.scale.x = rejected ? 0.025 : 0.035;
+            poly.color.r = rejected ? 1.0 : 0.05;
+            poly.color.g = rejected ? 0.08 : 0.95;
+            poly.color.b = rejected ? 0.05 : 0.95;
+            poly.color.a = rejected ? 0.45 : 0.85;
             poly.lifetime = ros::Duration(0.3);
             for (const auto& v : segment.polygon)
             {
                 geometry_msgs::Point p;
                 p.x = v.x();
                 p.y = v.y();
-                p.z = 0.13;
+                p.z = rejected ? 0.11 : 0.13;
                 poly.points.push_back(p);
             }
             poly.points.push_back(poly.points.front());
@@ -981,6 +981,11 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
             std::ostringstream ss;
             size_t half_plane_count = 0;
             size_t polygon_count = 0;
+            size_t feasible_segment_count = 0;
+            size_t rejected_segment_count = 0;
+            size_t dynamic_blocked_count = 0;
+            size_t static_blocked_count = 0;
+            size_t empty_polygon_count = 0;
             double polygon_area_sum = 0.0;
             double segment_length_sum = 0.0;
             size_t segment_length_count = 0;
@@ -990,6 +995,17 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
             for (size_t i = 0; i < segments.size(); ++i)
             {
                 const auto& segment = segments[i];
+                if (segment.feasible)
+                    feasible_segment_count++;
+                else
+                    rejected_segment_count++;
+                if (segment.blocked_dynamic)
+                    dynamic_blocked_count++;
+                if (segment.blocked_static)
+                    static_blocked_count++;
+                if (segment.polygon.size() < 3)
+                    empty_polygon_count++;
+
                 half_plane_count += segment.half_planes.size();
                 const double segment_length = (segment.end - segment.start).norm();
                 if (segment_length > 1e-6)
@@ -1026,6 +1042,11 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
             ss << "source=" << sourceName(result.timed_corridor.source)
                << " segments=" << result.timed_corridor.segments.size()
                << " feasible=" << (result.has_feasible ? 1 : 0)
+               << " feasible_segments=" << feasible_segment_count
+               << " rejected_segments=" << rejected_segment_count
+               << " dynamic_blocked=" << dynamic_blocked_count
+               << " static_blocked=" << static_blocked_count
+               << " empty_polygons=" << empty_polygon_count
                << " t_start=" << std::fixed << std::setprecision(3)
                << result.timed_corridor.tStart()
                << " t_end=" << result.timed_corridor.tEnd()

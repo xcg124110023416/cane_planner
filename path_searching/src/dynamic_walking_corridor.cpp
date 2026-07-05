@@ -523,6 +523,9 @@ TimedWalkingCorridorSegment::HalfPlane2D transformHalfPlaneFromFiriFrame(
     return out;
 }
 
+double halfPlaneDistanceToOrigin(
+    const TimedWalkingCorridorSegment::HalfPlane2D &hp);
+
 bool buildFiriObstacleTangent(
     const Eigen::Vector2d &seed_a,
     const Eigen::Vector2d &seed_b,
@@ -574,6 +577,81 @@ bool buildFiriObstacleTangent(
         hp.offset = -hp.offset;
     }
     return hp.value(seed_a) <= 1e-5 && hp.value(seed_b) <= 1e-5;
+}
+
+bool buildFiriPolygonObstacleTangent(
+    const Eigen::Vector2d &seed_a,
+    const Eigen::Vector2d &seed_b,
+    const std::vector<Eigen::Vector2d> &obstacle,
+    TimedWalkingCorridorSegment::HalfPlane2D &hp)
+{
+    if (obstacle.size() < 3)
+        return false;
+
+    Eigen::Vector2d centroid = Eigen::Vector2d::Zero();
+    for (const auto &v : obstacle)
+        centroid += v;
+    centroid /= static_cast<double>(obstacle.size());
+
+    std::vector<Eigen::Vector2d> normals;
+    normals.reserve(obstacle.size() + 1);
+    const Eigen::Vector2d center_normal =
+        centroid - closestPointOnSegment(seed_a, seed_b, centroid);
+    if (center_normal.norm() > 1e-5)
+        normals.push_back(center_normal);
+    for (const auto &v : obstacle)
+    {
+        const Eigen::Vector2d n = v - closestPointOnSegment(seed_a, seed_b, v);
+        if (n.norm() > 1e-5)
+            normals.push_back(n);
+    }
+
+    bool found = false;
+    double best_distance = std::numeric_limits<double>::infinity();
+    TimedWalkingCorridorSegment::HalfPlane2D best;
+    for (auto normal : normals)
+    {
+        const double normal_norm = normal.norm();
+        if (normal_norm < 1e-9)
+            continue;
+        normal /= normal_norm;
+
+        double obstacle_min = std::numeric_limits<double>::infinity();
+        for (const auto &v : obstacle)
+            obstacle_min = std::min(obstacle_min, normal.dot(v));
+
+        TimedWalkingCorridorSegment::HalfPlane2D candidate;
+        candidate.normal = normal;
+        candidate.offset = -obstacle_min;
+        if (candidate.value(seed_a) > 1e-5 || candidate.value(seed_b) > 1e-5)
+            continue;
+
+        bool excludes_obstacle = true;
+        for (const auto &v : obstacle)
+        {
+            if (candidate.value(v) < -1e-5)
+            {
+                excludes_obstacle = false;
+                break;
+            }
+        }
+        if (!excludes_obstacle)
+            continue;
+
+        const double distance = halfPlaneDistanceToOrigin(candidate);
+        if (!found || distance < best_distance)
+        {
+            found = true;
+            best_distance = distance;
+            best = candidate;
+        }
+    }
+
+    if (!found)
+        return false;
+
+    hp = best;
+    return true;
 }
 
 double halfPlaneDistanceToOrigin(
@@ -734,6 +812,7 @@ std::vector<TimedWalkingCorridorSegment::HalfPlane2D> buildFiriHalfPlanes2D(
     const Eigen::Vector2d &seed_b,
     const std::vector<TimedWalkingCorridorSegment::HalfPlane2D> &boundary_half_planes,
     const std::vector<Eigen::Vector2d> &obstacle_points,
+    const std::vector<std::vector<Eigen::Vector2d>> &obstacle_polygons,
     const DynamicWalkingCorridor::Config &cfg)
 {
     if (boundary_half_planes.empty())
@@ -759,7 +838,7 @@ std::vector<TimedWalkingCorridorSegment::HalfPlane2D> buildFiriHalfPlanes2D(
             forward_boundary.push_back(transformHalfPlaneToFiriFrame(frame, hp));
 
         std::vector<Eigen::Vector2d> forward_obstacles;
-        forward_obstacles.reserve(obstacle_points.size());
+        forward_obstacles.reserve(obstacle_points.size() + obstacle_polygons.size());
         std::vector<TimedWalkingCorridorSegment::HalfPlane2D> tangents;
         std::vector<double> tangent_distances;
         const Eigen::Vector2d forward_seed_a = transformToFiriFrame(frame, seed_a);
@@ -772,6 +851,30 @@ std::vector<TimedWalkingCorridorSegment::HalfPlane2D> buildFiriHalfPlanes2D(
                                           forward_obstacle, tangent))
                 continue;
             forward_obstacles.push_back(forward_obstacle);
+            tangents.push_back(tangent);
+            tangent_distances.push_back(halfPlaneDistanceToOrigin(tangent));
+        }
+        for (const auto &obstacle_polygon : obstacle_polygons)
+        {
+            if (obstacle_polygon.size() < 3)
+                continue;
+
+            std::vector<Eigen::Vector2d> forward_polygon;
+            forward_polygon.reserve(obstacle_polygon.size());
+            Eigen::Vector2d forward_centroid = Eigen::Vector2d::Zero();
+            for (const auto &v : obstacle_polygon)
+            {
+                const Eigen::Vector2d fv = transformToFiriFrame(frame, v);
+                forward_polygon.push_back(fv);
+                forward_centroid += fv;
+            }
+            forward_centroid /= static_cast<double>(forward_polygon.size());
+
+            TimedWalkingCorridorSegment::HalfPlane2D tangent;
+            if (!buildFiriPolygonObstacleTangent(forward_seed_a, forward_seed_b,
+                                                 forward_polygon, tangent))
+                continue;
+            forward_obstacles.push_back(forward_centroid);
             tangents.push_back(tangent);
             tangent_distances.push_back(halfPlaneDistanceToOrigin(tangent));
         }
@@ -916,17 +1019,18 @@ void buildConvexCellForSegment(
         }
     }
 
+    std::vector<std::vector<Eigen::Vector2d>> obstacle_polygons;
+    obstacle_polygons.reserve(segment.dynamic_obstacles.size());
     for (const auto &obstacle : segment.dynamic_obstacles)
     {
-        const auto boundary_points = sampleDynamicObstacleBoundary(obstacle);
-        obstacle_points.insert(obstacle_points.end(),
-                               boundary_points.begin(), boundary_points.end());
+        if (obstacle.vertices.size() >= 3)
+            obstacle_polygons.push_back(obstacle.vertices);
     }
 
     if (cfg.firi_enable)
     {
         segment.half_planes = buildFiriHalfPlanes2D(
-            a, b, boundary_half_planes, obstacle_points, cfg);
+            a, b, boundary_half_planes, obstacle_points, obstacle_polygons, cfg);
     }
     else
     {
@@ -969,6 +1073,98 @@ void buildConvexCellForSegment(
     }
 }
 
+TimedWalkingCorridorSegment buildTimedCorridorSegment(
+    const DynamicWalkingCorridor::Candidate &candidate,
+    const double start_s,
+    const double end_s,
+    const std::vector<Eigen::Vector3d> &obs_pos,
+    const std::vector<Eigen::Vector3d> &obs_vel,
+    const std::vector<Eigen::Vector3d> &obs_size,
+    const DynamicWalkingCorridor::Config &cfg,
+    const CollisionDetection::Ptr &collision)
+{
+    TimedWalkingCorridorSegment segment;
+    segment.t_start = interpolateTimeAtPolylineDistance(
+        candidate.centerline, candidate.centerline_times, start_s);
+    segment.t_end = interpolateTimeAtPolylineDistance(
+        candidate.centerline, candidate.centerline_times, end_s);
+    segment.start = interpolatePolyline(candidate.centerline, start_s);
+    segment.end = interpolatePolyline(candidate.centerline, end_s);
+    const Eigen::Vector2d delta = segment.end - segment.start;
+    segment.forward = normalizedOrDefault(delta);
+    segment.left = Eigen::Vector2d(-segment.forward.y(), segment.forward.x());
+    segment.centerline = {segment.start, segment.end};
+    segment.half_width = candidate.half_width;
+    segment.feasible = candidate.feasible;
+    segment.blocked_static = candidate.blocked_static;
+    segment.blocked_dynamic = candidate.blocked_dynamic;
+    const double tm = 0.5 * (segment.t_start + segment.t_end);
+    const double segment_dt = std::max(0.0, segment.t_end - segment.t_start);
+    segment.dynamic_obstacles.reserve(obs_pos.size());
+    for (size_t j = 0; j < obs_pos.size(); ++j)
+    {
+        Eigen::Vector2d center(obs_pos[j](0), obs_pos[j](1));
+        Eigen::Vector2d velocity = Eigen::Vector2d::Zero();
+        if (j < obs_vel.size())
+        {
+            velocity = Eigen::Vector2d(obs_vel[j](0), obs_vel[j](1));
+            center += velocity * tm;
+        }
+
+        TimedWalkingCorridorSegment::DynamicEllipseObstacle obstacle;
+        obstacle.center = center;
+        const double speed = velocity.norm();
+        obstacle.forward = speed > 1e-3 ? velocity / speed : segment.forward;
+        obstacle.left = Eigen::Vector2d(-obstacle.forward.y(), obstacle.forward.x());
+        const double base_radius =
+            obstacleRadius(j, obs_size, cfg.dynamic_min_radius) +
+            cfg.robot_radius + cfg.dynamic_safety_margin;
+        const double prediction_extension =
+            speed * (0.5 * segment_dt + std::max(0.0, cfg.prediction_dt));
+        obstacle.lateral_radius = base_radius;
+        obstacle.longitudinal_radius = base_radius + prediction_extension;
+        obstacle.vertices = buildDynamicObstacleFootprint(
+            center, velocity, segment.forward, base_radius, prediction_extension);
+        segment.dynamic_obstacles.push_back(obstacle);
+    }
+    buildConvexCellForSegment(segment, collision, cfg);
+    return segment;
+}
+
+void appendSegmentWithDynamicSplitting(
+    TimedWalkingCorridor &corridor,
+    const DynamicWalkingCorridor::Candidate &candidate,
+    const double start_s,
+    const double end_s,
+    const std::vector<Eigen::Vector3d> &obs_pos,
+    const std::vector<Eigen::Vector3d> &obs_vel,
+    const std::vector<Eigen::Vector3d> &obs_size,
+    const DynamicWalkingCorridor::Config &cfg,
+    const CollisionDetection::Ptr &collision,
+    const int depth)
+{
+    auto segment = buildTimedCorridorSegment(
+        candidate, start_s, end_s, obs_pos, obs_vel, obs_size, cfg, collision);
+
+    const double length = std::max(0.0, end_s - start_s);
+    const int max_depth = std::max(0, cfg.dynamic_split_max_depth);
+    const double min_length = std::max(0.05, cfg.dynamic_split_min_length);
+    if (segment.blocked_dynamic && !segment.blocked_static &&
+        depth < max_depth && length > 2.0 * min_length)
+    {
+        const double mid_s = 0.5 * (start_s + end_s);
+        appendSegmentWithDynamicSplitting(
+            corridor, candidate, start_s, mid_s,
+            obs_pos, obs_vel, obs_size, cfg, collision, depth + 1);
+        appendSegmentWithDynamicSplitting(
+            corridor, candidate, mid_s, end_s,
+            obs_pos, obs_vel, obs_size, cfg, collision, depth + 1);
+        return;
+    }
+
+    corridor.segments.push_back(segment);
+}
+
 TimedWalkingCorridor toTimedWalkingCorridor(
     const DynamicWalkingCorridor::Candidate &candidate,
     const TimedTrajectorySource source,
@@ -1001,52 +1197,9 @@ TimedWalkingCorridor toTimedWalkingCorridor(
             end_s = total_length;
         }
 
-        TimedWalkingCorridorSegment segment;
-        segment.t_start = interpolateTimeAtPolylineDistance(
-            candidate.centerline, candidate.centerline_times, start_s);
-        segment.t_end = interpolateTimeAtPolylineDistance(
-            candidate.centerline, candidate.centerline_times, end_s);
-        segment.start = interpolatePolyline(candidate.centerline, start_s);
-        segment.end = interpolatePolyline(candidate.centerline, end_s);
-        const Eigen::Vector2d delta = segment.end - segment.start;
-        segment.forward = normalizedOrDefault(delta);
-        segment.left = Eigen::Vector2d(-segment.forward.y(), segment.forward.x());
-        segment.centerline = {segment.start, segment.end};
-        segment.half_width = candidate.half_width;
-        segment.feasible = candidate.feasible;
-        segment.blocked_static = candidate.blocked_static;
-        segment.blocked_dynamic = candidate.blocked_dynamic;
-        const double tm = 0.5 * (segment.t_start + segment.t_end);
-        const double segment_dt = std::max(0.0, segment.t_end - segment.t_start);
-        segment.dynamic_obstacles.reserve(obs_pos.size());
-        for (size_t j = 0; j < obs_pos.size(); ++j)
-        {
-            Eigen::Vector2d center(obs_pos[j](0), obs_pos[j](1));
-            Eigen::Vector2d velocity = Eigen::Vector2d::Zero();
-            if (j < obs_vel.size())
-            {
-                velocity = Eigen::Vector2d(obs_vel[j](0), obs_vel[j](1));
-                center += velocity * tm;
-            }
-
-            TimedWalkingCorridorSegment::DynamicEllipseObstacle obstacle;
-            obstacle.center = center;
-            const double speed = velocity.norm();
-            obstacle.forward = speed > 1e-3 ? velocity / speed : segment.forward;
-            obstacle.left = Eigen::Vector2d(-obstacle.forward.y(), obstacle.forward.x());
-            const double base_radius =
-                obstacleRadius(j, obs_size, cfg.dynamic_min_radius) +
-                cfg.robot_radius + cfg.dynamic_safety_margin;
-            const double prediction_extension =
-                speed * (0.5 * segment_dt + std::max(0.0, cfg.prediction_dt));
-            obstacle.lateral_radius = base_radius;
-            obstacle.longitudinal_radius = base_radius + prediction_extension;
-            obstacle.vertices = buildDynamicObstacleFootprint(
-                center, velocity, segment.forward, base_radius, prediction_extension);
-            segment.dynamic_obstacles.push_back(obstacle);
-        }
-        buildConvexCellForSegment(segment, collision, cfg);
-        corridor.segments.push_back(segment);
+        appendSegmentWithDynamicSplitting(
+            corridor, candidate, start_s, end_s,
+            obs_pos, obs_vel, obs_size, cfg, collision, 0);
     }
     return corridor;
 }
@@ -1222,6 +1375,8 @@ void DynamicWalkingCorridor::setParam(ros::NodeHandle &nh)
     nh.param("dwc/firi_iterations", cfg_.firi_iterations, 4);
     nh.param("dwc/firi_clearance", cfg_.firi_clearance, 0.02);
     nh.param("dwc/firi_ellipse_shrink", cfg_.firi_ellipse_shrink, 0.85);
+    nh.param("dwc/dynamic_split_max_depth", cfg_.dynamic_split_max_depth, 2);
+    nh.param("dwc/dynamic_split_min_length", cfg_.dynamic_split_min_length, 0.5);
 }
 
 DynamicWalkingCorridor::Result DynamicWalkingCorridor::plan(
