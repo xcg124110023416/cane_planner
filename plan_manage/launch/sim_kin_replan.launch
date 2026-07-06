@@ -31,6 +31,7 @@
     <arg name="mpc_interaction_post_yield_grace_time" default="0.6"/>
     <arg name="mpc_corridor_stop_valid_ratio_threshold" default="0.2"/>
     <arg name="convex_corridor_enable" default="false"/>
+    <arg name="map_odom_override_topic" default="/sim_odom"/>
     <arg name="convex_corridor_segment_length" default="0.8"/>
     <arg name="convex_corridor_half_width" default="0.45"/>
     <arg name="convex_corridor_min_half_width" default="0.25"/>
@@ -105,6 +106,7 @@
         <arg name="mpc_interaction_post_yield_grace_time" value="$(arg mpc_interaction_post_yield_grace_time)"/>
         <arg name="mpc_corridor_stop_valid_ratio_threshold" value="$(arg mpc_corridor_stop_valid_ratio_threshold)"/>
         <arg name="convex_corridor_enable" value="$(arg convex_corridor_enable)"/>
+        <arg name="map_odom_override_topic" value="$(arg map_odom_override_topic)"/>
         <arg name="convex_corridor_segment_length" value="$(arg convex_corridor_segment_length)"/>
         <arg name="convex_corridor_half_width" value="$(arg convex_corridor_half_width)"/>
         <arg name="convex_corridor_min_half_width" value="$(arg convex_corridor_min_half_width)"/>

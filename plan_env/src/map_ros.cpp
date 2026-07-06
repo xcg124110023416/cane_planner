@@ -67,6 +67,7 @@ namespace fast_planner
     node_.param("map_ros/show_occ_time", show_occ_time_, false);
     node_.param("map_ros/show_esdf_time", show_esdf_time_, false);
     node_.param("map_ros/show_all_map", show_all_map_, false);
+    node_.param<std::string>("map_ros/odom_override_topic", odom_override_topic_, "");
     node_.param("map_ros/frame_id", frame_id_, std::string("world"));  //基于雷达坐标系发布的点云信息
 
     node_.param("map_ros/is_simulation", map_->is_simulation_, false);
@@ -80,6 +81,7 @@ namespace fast_planner
     esdf_need_update_ = false;
     map_inflate_ = false;
     local_map_ready_ = false;
+    has_odom_override_ = false;
     fuse_time_ = 0.0;
     esdf_time_ = 0.0;
     max_fuse_time_ = 0.0;
@@ -103,6 +105,13 @@ namespace fast_planner
 
     // subscribe dynamic obstacles from external detector node
     dynamic_bbox_sub_ = node_.subscribe("/onboard_detector/dynamic_bboxes", 1,&MapROS::dynamicBBoxesCallback, this);
+    if (!odom_override_topic_.empty())
+    {
+      odom_override_sub_ = node_.subscribe<nav_msgs::Odometry>(
+          odom_override_topic_, 20, &MapROS::odomOverrideCallback, this);
+      ROS_INFO("[SDFMap] Using odom override topic for local map center: %s",
+               odom_override_topic_.c_str());
+    }
 
     // sub init
     depth_sub_.reset(new message_filters::Subscriber<sensor_msgs::Image>(node_, "/map_ros/depth", 5));
@@ -406,6 +415,16 @@ namespace fast_planner
     camera_pos_(0) = pose_world.pose.position.x;
     camera_pos_(1) = pose_world.pose.position.y;
     camera_pos_(2) = pose_world.pose.position.z;
+    camera_q_ = Eigen::Quaterniond(pose_world.pose.orientation.w,
+                                   pose_world.pose.orientation.x,
+                                   pose_world.pose.orientation.y,
+                                   pose_world.pose.orientation.z);
+    if (has_odom_override_ &&
+        (ros::Time::now() - odom_override_stamp_).toSec() < 0.5)
+    {
+      camera_pos_ = odom_override_pos_;
+      camera_q_ = odom_override_q_;
+    }
 
     pcl::PointCloud<pcl::PointXYZ> cloud_temp;
     pcl::fromROSMsg(*msg, cloud_temp);//转换为pcl类型cloud，点云意味着障碍物
@@ -423,10 +442,6 @@ namespace fast_planner
     point_cloud_.height = 1;
     point_cloud_.is_dense = cloud_temp.is_dense;
     point_cloud_.header = cloud_temp.header;
-    camera_q_ = Eigen::Quaterniond( pose_cam.pose.orientation.w,
-                                    pose_cam.pose.orientation.x,
-                                    pose_cam.pose.orientation.y,
-                                    pose_cam.pose.orientation.z);
 
     if (map_->isInMap(camera_pos_))// exceed mapped region
     {
@@ -485,6 +500,19 @@ namespace fast_planner
     // return;
 
     has_odom_ = true;
+  }
+
+  void MapROS::odomOverrideCallback(const nav_msgs::OdometryConstPtr& odom) {
+    std::lock_guard<std::mutex> lock(map_mutex_);
+    odom_override_pos_(0) = odom->pose.pose.position.x;
+    odom_override_pos_(1) = odom->pose.pose.position.y;
+    odom_override_pos_(2) = odom->pose.pose.position.z;
+    odom_override_q_ = Eigen::Quaterniond(odom->pose.pose.orientation.w,
+                                          odom->pose.pose.orientation.x,
+                                          odom->pose.pose.orientation.y,
+                                          odom->pose.pose.orientation.z);
+    odom_override_stamp_ = odom->header.stamp.isZero() ? ros::Time::now() : odom->header.stamp;
+    has_odom_override_ = true;
   }
 
 

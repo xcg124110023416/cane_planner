@@ -60,6 +60,7 @@ private:
   void freeMapCallback(const ros::WallTimerEvent& /*event*/);
 
   void odomCallback(const nav_msgs::OdometryConstPtr& odom);
+  void odomOverrideCallback(const nav_msgs::OdometryConstPtr& odom);
   void cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img);
 
   // publishmap
@@ -105,7 +106,7 @@ private:
 
   ros::Publisher map_local_pub_, map_local_inflate_pub_, esdf_pub_, map_all_pub_, unknown_pub_,
       update_range_pub_, depth_pub_;
-  ros::Subscriber indep_depth_sub_, indep_odom_sub_, indep_pose_sub_, indep_cloud_sub_;
+  ros::Subscriber indep_depth_sub_, indep_odom_sub_, indep_pose_sub_, indep_cloud_sub_, odom_override_sub_;
     ros::Subscriber dynamic_bbox_sub_;
   ros::WallTimer esdf_timer_, vis_timer_, freeMapTimer_, local_update_timer_, inflateTimer_;
 
@@ -128,6 +129,11 @@ private:
   // input
   Eigen::Vector3d camera_pos_;
   Eigen::Quaterniond camera_q_;
+  std::string odom_override_topic_;
+  bool has_odom_override_;
+  Eigen::Vector3d odom_override_pos_;
+  Eigen::Quaterniond odom_override_q_;
+  ros::Time odom_override_stamp_;
   unique_ptr<cv::Mat> depth_image_;
   vector<Eigen::Vector3d> proj_points_;
   int proj_points_cnt;
