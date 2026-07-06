@@ -608,7 +608,7 @@ Visualization Manager:
       Marker Topic: /mpc/best_traj
       Name: MPC_BestTraj
       Namespaces:
-        {}
+        mpc_best: true
       Queue Size: 10
       Value: true
     - Class: rviz/Marker
@@ -616,7 +616,7 @@ Visualization Manager:
       Marker Topic: /mpc/current_waypoint
       Name: MPC_current_waypoint
       Namespaces:
-        {}
+        mpc_curr_wp: true
       Queue Size: 10
       Value: true
     - Class: rviz/Marker
@@ -624,7 +624,8 @@ Visualization Manager:
       Marker Topic: /mpc/waypoints
       Name: MPC_waypoints
       Namespaces:
-        {}
+        mpc_waypoint_polyline: true
+        mpc_waypoints: true
       Queue Size: 10
       Value: true
     - Alpha: 1
@@ -802,7 +803,9 @@ Visualization Manager:
       Marker Topic: /mpc/walking_corridors
       Name: walking_corridors
       Namespaces:
-        {}
+        mpc_walking_corridor_dynamic_footprints: true
+        mpc_walking_corridor_polygons: true
+        mpc_walking_corridor_rejected_polygons: true
       Queue Size: 100
       Value: true
   Enabled: true

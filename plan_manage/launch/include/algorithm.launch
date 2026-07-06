@@ -293,7 +293,7 @@
         <param name="mpc/corridor_enable" value="true" type="bool"/>
         <param name="mpc/corridor_hard_reject_enable" value="true" type="bool"/>
         <param name="mpc/w_corridor" value="20.0" type="double"/>
-        <param name="mpc/w_corridor_dynamic" value="0.0" type="double"/>
+        <param name="mpc/w_corridor_dynamic" value="20.0" type="double"/>
         <param name="mpc/corridor_hard_margin" value="0.50" type="double"/>
         <param name="mpc/convex_corridor_enable" value="$(arg mpc_convex_corridor_enable)" type="bool"/>
         <param name="mpc/convex_corridor_hard_reject_enable" value="$(arg mpc_convex_corridor_hard_reject_enable)" type="bool"/>
