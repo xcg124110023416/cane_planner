@@ -750,6 +750,101 @@ bool convexPolygonsOverlap(
     return !hasSeparatingAxis(a) && !hasSeparatingAxis(b);
 }
 
+std::vector<Eigen::Vector2d> buildHumanCaneFootprintRelative(
+    const Eigen::Vector2d &forward,
+    const DynamicWalkingCorridor::Config &cfg)
+{
+    std::vector<Eigen::Vector2d> samples_world;
+    if (!cfg.human_cane_footprint_enable)
+        return samples_world;
+
+    const Eigen::Vector2d f = normalizedOrDefault(forward);
+    const Eigen::Vector2d l(-f.y(), f.x());
+    const int samples = std::max(4, cfg.human_cane_footprint_samples);
+    const double body_radius = std::max(
+        0.0, cfg.human_cane_body_radius + cfg.human_cane_safety_margin);
+    const double front_radius = std::max(
+        0.0, cfg.human_cane_front_radius + cfg.human_cane_safety_margin);
+    const double cane_length = std::max(0.0, cfg.human_cane_cane_length);
+
+    auto appendDisk = [&](const Eigen::Vector2d &center, const double radius)
+    {
+        if (radius < 1e-6)
+        {
+            samples_world.push_back(center);
+            return;
+        }
+        for (int i = 0; i < samples; ++i)
+        {
+            const double theta =
+                2.0 * std::acos(-1.0) *
+                static_cast<double>(i) / static_cast<double>(samples);
+            samples_world.push_back(
+                center + radius * (std::cos(theta) * f + std::sin(theta) * l));
+        }
+    };
+
+    appendDisk(Eigen::Vector2d::Zero(), body_radius);
+    appendDisk(cane_length * f, front_radius);
+    if (samples_world.size() <= 3)
+        return samples_world;
+
+    std::sort(samples_world.begin(), samples_world.end(),
+              [](const Eigen::Vector2d &a, const Eigen::Vector2d &b)
+              {
+                  if (std::abs(a.x() - b.x()) > 1e-9)
+                      return a.x() < b.x();
+                  return a.y() < b.y();
+              });
+
+    std::vector<Eigen::Vector2d> hull;
+    hull.reserve(samples_world.size());
+    for (const auto &p : samples_world)
+    {
+        while (hull.size() >= 2 &&
+               cross2d(hull.back() - hull[hull.size() - 2],
+                       p - hull.back()) <= 1e-9)
+        {
+            hull.pop_back();
+        }
+        hull.push_back(p);
+    }
+    const size_t lower_size = hull.size();
+    for (int i = static_cast<int>(samples_world.size()) - 2; i >= 0; --i)
+    {
+        const auto &p = samples_world[static_cast<size_t>(i)];
+        while (hull.size() > lower_size &&
+               cross2d(hull.back() - hull[hull.size() - 2],
+                       p - hull.back()) <= 1e-9)
+        {
+            hull.pop_back();
+        }
+        hull.push_back(p);
+    }
+    if (!hull.empty())
+        hull.pop_back();
+    return hull;
+}
+
+void erodeHalfPlanesForHumanCaneFootprint(
+    std::vector<TimedWalkingCorridorSegment::HalfPlane2D> &half_planes,
+    const Eigen::Vector2d &forward,
+    const DynamicWalkingCorridor::Config &cfg)
+{
+    const auto footprint = buildHumanCaneFootprintRelative(forward, cfg);
+    if (footprint.empty())
+        return;
+
+    for (auto &hp : half_planes)
+    {
+        double support = -std::numeric_limits<double>::infinity();
+        for (const auto &v : footprint)
+            support = std::max(support, hp.normal.dot(v));
+        if (std::isfinite(support))
+            hp.offset += support;
+    }
+}
+
 double rayLimitInHalfPlanes(
     const std::vector<TimedWalkingCorridorSegment::HalfPlane2D> &half_planes,
     const Eigen::Vector2d &origin,
@@ -1050,11 +1145,25 @@ void buildConvexCellForSegment(
         }
     }
 
+    erodeHalfPlanesForHumanCaneFootprint(
+        segment.half_planes, segment.forward, cfg);
+
     segment.polygon = polygonFromHalfPlanes(segment.half_planes);
     if (segment.polygon.empty())
     {
         segment.feasible = false;
         segment.blocked_dynamic = true;
+    }
+
+    if (!segment.polygon.empty() &&
+        (!insideHalfPlanes(segment.half_planes, segment.start, 1e-5) ||
+         !insideHalfPlanes(segment.half_planes, segment.end, 1e-5)))
+    {
+        segment.feasible = false;
+        if (!segment.dynamic_obstacles.empty())
+            segment.blocked_dynamic = true;
+        else
+            segment.blocked_static = true;
     }
 
     if (!segment.polygon.empty())
@@ -1377,6 +1486,12 @@ void DynamicWalkingCorridor::setParam(ros::NodeHandle &nh)
     nh.param("dwc/firi_ellipse_shrink", cfg_.firi_ellipse_shrink, 0.85);
     nh.param("dwc/dynamic_split_max_depth", cfg_.dynamic_split_max_depth, 2);
     nh.param("dwc/dynamic_split_min_length", cfg_.dynamic_split_min_length, 0.5);
+    nh.param("dwc/human_cane_footprint_enable", cfg_.human_cane_footprint_enable, true);
+    nh.param("dwc/human_cane_body_radius", cfg_.human_cane_body_radius, 0.25);
+    nh.param("dwc/human_cane_cane_length", cfg_.human_cane_cane_length, 0.65);
+    nh.param("dwc/human_cane_front_radius", cfg_.human_cane_front_radius, 0.12);
+    nh.param("dwc/human_cane_safety_margin", cfg_.human_cane_safety_margin, 0.03);
+    nh.param("dwc/human_cane_footprint_samples", cfg_.human_cane_footprint_samples, 8);
 }
 
 DynamicWalkingCorridor::Result DynamicWalkingCorridor::plan(

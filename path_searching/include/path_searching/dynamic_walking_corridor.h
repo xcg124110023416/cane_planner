@@ -56,6 +56,12 @@ public:
         double firi_ellipse_shrink = 0.85;
         int dynamic_split_max_depth = 2;
         double dynamic_split_min_length = 0.5;
+        bool human_cane_footprint_enable = true;
+        double human_cane_body_radius = 0.25;
+        double human_cane_cane_length = 0.65;
+        double human_cane_front_radius = 0.12;
+        double human_cane_safety_margin = 0.03;
+        int human_cane_footprint_samples = 8;
     };
 
     struct Candidate

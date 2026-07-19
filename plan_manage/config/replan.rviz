@@ -804,6 +804,8 @@ Visualization Manager:
       Name: walking_corridors
       Namespaces:
         mpc_walking_corridor_dynamic_footprints: true
+        mpc_human_cane_footprint: true
+        mpc_human_cane_forward: true
         mpc_walking_corridor_polygons: true
         mpc_walking_corridor_rejected_polygons: true
       Queue Size: 100

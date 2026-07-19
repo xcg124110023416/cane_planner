@@ -367,6 +367,12 @@
         <param name="dwc/static_opt_lateral_range" value="1.0" type="double"/>
         <param name="dwc/static_opt_lateral_step" value="0.1" type="double"/>
         <param name="dwc/static_opt_smooth_weight" value="2.0" type="double"/>
+        <param name="dwc/human_cane_footprint_enable" value="true" type="bool"/>
+        <param name="dwc/human_cane_body_radius" value="0.25" type="double"/>
+        <param name="dwc/human_cane_cane_length" value="0.65" type="double"/>
+        <param name="dwc/human_cane_front_radius" value="0.12" type="double"/>
+        <param name="dwc/human_cane_safety_margin" value="0.03" type="double"/>
+        <param name="dwc/human_cane_footprint_samples" value="8" type="int"/>
 
         <!-- Convex corridor diagnostics: generated and published only; MPPI enforcement is a later stage. -->
         <param name="convex_corridor/enable" value="$(arg convex_corridor_enable)" type="bool"/>

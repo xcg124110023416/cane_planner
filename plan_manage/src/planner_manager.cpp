@@ -6,6 +6,7 @@
 #include <std_msgs/String.h>
 #include <path_searching/trajectory_feasibility.h>
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <iomanip>
@@ -78,6 +79,101 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
             break;
     }
     return polygon;
+}
+
+double cross2d(const Eigen::Vector2d& a, const Eigen::Vector2d& b)
+{
+    return a.x() * b.y() - a.y() * b.x();
+}
+
+std::vector<Eigen::Vector2d> convexHull2D(std::vector<Eigen::Vector2d> points)
+{
+    if (points.size() <= 3)
+        return points;
+
+    std::sort(points.begin(), points.end(),
+              [](const Eigen::Vector2d& a, const Eigen::Vector2d& b)
+              {
+                  if (std::abs(a.x() - b.x()) > 1e-9)
+                      return a.x() < b.x();
+                  return a.y() < b.y();
+              });
+
+    std::vector<Eigen::Vector2d> hull;
+    hull.reserve(points.size());
+    for (const auto& p : points)
+    {
+        while (hull.size() >= 2 &&
+               cross2d(hull.back() - hull[hull.size() - 2],
+                       p - hull.back()) <= 1e-9)
+        {
+            hull.pop_back();
+        }
+        hull.push_back(p);
+    }
+
+    const size_t lower_size = hull.size();
+    for (int i = static_cast<int>(points.size()) - 2; i >= 0; --i)
+    {
+        const auto& p = points[static_cast<size_t>(i)];
+        while (hull.size() > lower_size &&
+               cross2d(hull.back() - hull[hull.size() - 2],
+                       p - hull.back()) <= 1e-9)
+        {
+            hull.pop_back();
+        }
+        hull.push_back(p);
+    }
+    if (!hull.empty())
+        hull.pop_back();
+    return hull;
+}
+
+std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
+    const Eigen::Vector2d& center,
+    const Eigen::Vector2d& forward,
+    const DynamicWalkingCorridor::Config& cfg)
+{
+    std::vector<Eigen::Vector2d> vertices;
+    if (!cfg.human_cane_footprint_enable)
+        return vertices;
+
+    Eigen::Vector2d f = forward;
+    if (f.norm() < 1e-6)
+        f = Eigen::Vector2d::UnitX();
+    else
+        f.normalize();
+    const Eigen::Vector2d l(-f.y(), f.x());
+
+    const int samples = std::max(4, cfg.human_cane_footprint_samples);
+    const double body_radius = std::max(
+        0.0, cfg.human_cane_body_radius + cfg.human_cane_safety_margin);
+    const double front_radius = std::max(
+        0.0, cfg.human_cane_front_radius + cfg.human_cane_safety_margin);
+    const double cane_length = std::max(0.0, cfg.human_cane_cane_length);
+
+    auto appendDisk = [&](const Eigen::Vector2d& disk_center,
+                          const double radius)
+    {
+        if (radius < 1e-6)
+        {
+            vertices.push_back(disk_center);
+            return;
+        }
+        for (int i = 0; i < samples; ++i)
+        {
+            const double theta =
+                2.0 * std::acos(-1.0) *
+                static_cast<double>(i) / static_cast<double>(samples);
+            vertices.push_back(
+                disk_center + radius *
+                (std::cos(theta) * f + std::sin(theta) * l));
+        }
+    };
+
+    appendDisk(center, body_radius);
+    appendDisk(center + cane_length * f, front_radius);
+    return convexHull2D(vertices);
 }
 
 }  // namespace
@@ -896,6 +992,7 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
             mpc_walking_corridor_pub_.publish(markers);
             return;
         }
+        const auto dwc_cfg = dynamic_walking_corridor_->getConfig();
         for (size_t si = 0; si < result.timed_corridor.segments.size(); ++si)
         {
             const auto& segment = result.timed_corridor.segments[si];
@@ -957,6 +1054,75 @@ std::vector<Eigen::Vector2d> segmentPolygon(const ConvexCorridor::Segment& segme
                 }
                 footprint.points.push_back(footprint.points.front());
                 markers.markers.push_back(footprint);
+            }
+
+            if (dwc_cfg.human_cane_footprint_enable)
+            {
+                const std::vector<Eigen::Vector2d> poses = {
+                    0.5 * (segment.start + segment.end)
+                };
+                for (size_t pi = 0; pi < poses.size(); ++pi)
+                {
+                    const auto footprint_vertices =
+                        buildHumanCaneFootprintWorld(
+                            poses[pi], segment.forward, dwc_cfg);
+                    if (footprint_vertices.size() < 3)
+                        continue;
+
+                    visualization_msgs::Marker footprint;
+                    footprint.header = clear.header;
+                    footprint.ns = "mpc_human_cane_footprint";
+                    footprint.id = 5000 + static_cast<int>(si * 10 + pi);
+                    footprint.type = visualization_msgs::Marker::LINE_STRIP;
+                    footprint.action = visualization_msgs::Marker::ADD;
+                    footprint.pose.orientation.w = 1.0;
+                    footprint.scale.x = 0.016;
+                    footprint.color.r = 0.95;
+                    footprint.color.g = 0.15;
+                    footprint.color.b = 1.0;
+                    footprint.color.a = 0.55;
+                    footprint.lifetime = ros::Duration(0.3);
+                    for (const auto& v : footprint_vertices)
+                    {
+                        geometry_msgs::Point p;
+                        p.x = v.x();
+                        p.y = v.y();
+                        p.z = 0.21;
+                        footprint.points.push_back(p);
+                    }
+                    footprint.points.push_back(footprint.points.front());
+                    markers.markers.push_back(footprint);
+
+                    visualization_msgs::Marker direction;
+                    direction.header = clear.header;
+                    direction.ns = "mpc_human_cane_forward";
+                    direction.id = 6000 + static_cast<int>(si * 10 + pi);
+                    direction.type = visualization_msgs::Marker::LINE_STRIP;
+                    direction.action = visualization_msgs::Marker::ADD;
+                    direction.pose.orientation.w = 1.0;
+                    direction.scale.x = 0.012;
+                    direction.color.r = 1.0;
+                    direction.color.g = 0.85;
+                    direction.color.b = 0.05;
+                    direction.color.a = 0.55;
+                    direction.lifetime = ros::Duration(0.3);
+                    geometry_msgs::Point a;
+                    a.x = poses[pi].x();
+                    a.y = poses[pi].y();
+                    a.z = 0.23;
+                    const Eigen::Vector2d tip =
+                        poses[pi] + 0.65 * std::max(0.0, dwc_cfg.human_cane_cane_length) *
+                        (segment.forward.norm() > 1e-6
+                             ? segment.forward.normalized()
+                             : Eigen::Vector2d::UnitX());
+                    geometry_msgs::Point b;
+                    b.x = tip.x();
+                    b.y = tip.y();
+                    b.z = 0.23;
+                    direction.points.push_back(a);
+                    direction.points.push_back(b);
+                    markers.markers.push_back(direction);
+                }
             }
         }
 

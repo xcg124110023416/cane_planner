@@ -447,6 +447,7 @@ TEST(DynamicWalkingCorridor, IterativeFiriCellExpandsTowardDynamicObstacleBounda
     cfg.dynamic_min_radius = 0.20;
     cfg.dynamic_safety_margin = 0.10;
     cfg.static_centerline_opt_enable = false;
+    cfg.human_cane_footprint_enable = false;
     corridor.setConfig(cfg);
 
     TimedTrajectory nominal;
@@ -471,6 +472,51 @@ TEST(DynamicWalkingCorridor, IterativeFiriCellExpandsTowardDynamicObstacleBounda
                               0.5, Eigen::Vector2d(1.0, 0.35)));
     EXPECT_GT(result.timed_corridor.outsideDistanceAtTime(
                   0.5, Eigen::Vector2d(1.0, 1.0)),
+              0.0);
+}
+
+TEST(DynamicWalkingCorridor, HumanCaneFootprintErodesConvexCell)
+{
+    TimedTrajectory nominal;
+    nominal.source = TimedTrajectorySource::PREVIOUS_MPPI;
+    TimedTrajectoryPoint p0;
+    p0.position = Eigen::Vector2d(0.0, 0.0);
+    p0.t_from_now = 0.0;
+    TimedTrajectoryPoint p1;
+    p1.position = Eigen::Vector2d(2.0, 0.0);
+    p1.t_from_now = 1.0;
+    nominal.points = {p0, p1};
+
+    DynamicWalkingCorridor::Config point_cfg;
+    point_cfg.length = 4.0;
+    point_cfg.half_width = 1.0;
+    point_cfg.static_opt_lateral_range = 1.0;
+    point_cfg.static_centerline_opt_enable = false;
+    point_cfg.human_cane_footprint_enable = false;
+
+    DynamicWalkingCorridor point_corridor;
+    point_corridor.setConfig(point_cfg);
+    const auto point_result = point_corridor.plan(nominal, {}, {}, {});
+
+    DynamicWalkingCorridor::Config footprint_cfg = point_cfg;
+    footprint_cfg.human_cane_footprint_enable = true;
+    footprint_cfg.human_cane_body_radius = 0.25;
+    footprint_cfg.human_cane_cane_length = 0.65;
+    footprint_cfg.human_cane_front_radius = 0.12;
+    footprint_cfg.human_cane_safety_margin = 0.03;
+
+    DynamicWalkingCorridor footprint_corridor;
+    footprint_corridor.setConfig(footprint_cfg);
+    const auto footprint_result = footprint_corridor.plan(nominal, {}, {}, {});
+
+    ASSERT_TRUE(point_result.has_feasible);
+    ASSERT_TRUE(footprint_result.has_feasible);
+    ASSERT_TRUE(point_result.timed_corridor.valid());
+    ASSERT_TRUE(footprint_result.timed_corridor.valid());
+    EXPECT_DOUBLE_EQ(0.0, point_result.timed_corridor.outsideDistanceAtTime(
+                              0.5, Eigen::Vector2d(1.0, 0.85)));
+    EXPECT_GT(footprint_result.timed_corridor.outsideDistanceAtTime(
+                  0.5, Eigen::Vector2d(1.0, 0.85)),
               0.0);
 }
 
