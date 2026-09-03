@@ -51,6 +51,12 @@ struct MpcCandidateSnapshot
 struct HumanSafetyConfig
 {
     double corridor_tolerance = 0.02;
+    // Count a candidate as safe only if MPPI also found it collision free.
+    // The corridor test is blind to the static map, so without this the layer
+    // reports every rollout safe while every one of them walks into a wall
+    // (ours_pilot17: eta 1.00, state FREE, 200/200 static rejected, frozen).
+    // Set false to restore the corridor-only judgement.
+    bool require_native_valid = true;
     double p_safe = 0.8;
     double min_candidate_margin = 0.0;
     double eta_warn = 0.25;
@@ -70,6 +76,20 @@ struct HumanSafetyConfig
     // ours_pilot9.bag). A chord over ~2-3 steps of path is stable enough to act
     // as a setpoint the human can converge onto.
     double guide_lookahead_dist = 1.0;
+    // Weight, per metre, on how far a candidate's lookahead point sits from the
+    // corridor centreline when choosing which safe candidate the cue points at.
+    //
+    // Without it the choice is "least steering", which is measured from the
+    // robot's *current* heading and therefore has no anchor: a heading a few
+    // degrees off the route makes the straightest candidate the one that
+    // continues off the route, the cue confirms it, and the next frame starts
+    // further out. Measured on ours_pilot18, the setpoint walked from -91 to
+    // -124 deg against a route whose bearing was -90 deg throughout, off a
+    // straight route into the obstacle beside it. mean_abs_api is radians and
+    // typically 0.01-0.1, so a weight near 1 lets a decimetre of offset outrank
+    // straightness and leaves straightness to break near ties. 0 restores the
+    // unanchored behaviour.
+    double guide_route_weight = 1.0;
     double T_stop = 0.1;
     double stop_entry_window = 0.5;
     double stop_release_window = 1.0;
@@ -131,8 +151,15 @@ public:
                                       const std::vector<double> &times,
                                       const std::vector<double> &api,
                                       const TimedWalkingCorridor &corridor) const;
+    // True when candidate `index` has a usable lookahead point, which it writes
+    // to `point`; the arc length used is guide_lookahead_dist.
+    bool lookaheadPoint(const MpcCandidateSnapshot &snapshot, int index,
+                        Eigen::Vector2d *point) const;
+
+    // The corridor supplies the anchor for the choice; see guide_route_weight.
     int selectGuidanceCandidate(const MpcCandidateSnapshot &snapshot,
-                                const HumanSafetyResult &result) const;
+                                const HumanSafetyResult &result,
+                                const TimedWalkingCorridor &corridor) const;
     // Absolute heading the human should converge onto, taken from the candidate's
     // own CoM path. See guide_lookahead_dist for why this must not be a per-step
     // increment.

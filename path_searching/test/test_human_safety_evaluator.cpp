@@ -96,6 +96,154 @@ TEST(InterventionPolicy, B0RemainsUnassisted)
     EXPECT_FALSE(decision.stop_advice);
 }
 
+namespace
+{
+MpcCandidateSnapshot threeCorridorSafeCandidates()
+{
+    MpcCandidateSnapshot snapshot;
+    snapshot.rollout_horizon = 2.0;
+    // All three sit inside the corridor with the same margin; they differ only
+    // in how much steering they ask for.
+    snapshot.candidates = {{0, true, true, 2.0, 0.4, 0.2, 0.0, ""},
+                           {1, true, true, 2.0, 0.4, 0.3, 0.0, ""},
+                           {2, true, true, 2.0, 0.4, 0.4, 0.0, ""}};
+    return snapshot;
+}
+}
+
+// The corridor test cannot see the static map, so a rollout can sit inside the
+// corridor and still walk into a wall. MPPI already knows which ones do.
+TEST(HumanSafetyEvaluator, StaticallyBlockedCandidatesDoNotCountAsSafe)
+{
+    HumanSafetyEvaluator evaluator(HumanSafetyConfig{});
+    MpcCandidateSnapshot snapshot = threeCorridorSafeCandidates();
+    snapshot.native_valid = {false, false, true};
+
+    const HumanSafetyResult result = evaluator.evaluate(snapshot, corridor());
+
+    EXPECT_EQ(3u, result.total_count);
+    EXPECT_EQ(1u, result.safe_count);
+    EXPECT_NEAR(1.0 / 3.0, result.eta, 1e-9);
+    // Straightest is candidate 0, but it is blocked; the cue must not point there.
+    EXPECT_EQ(2, result.selected_candidate);
+    EXPECT_NEAR(0.4, result.J_safe_star, 1e-9);
+}
+
+// ours_pilot17: eta stayed 1.00 and the state stayed FREE while all 200 rollouts
+// were static rejected and the robot could not take a step.
+TEST(HumanSafetyEvaluator, EveryCandidateBlockedCollapsesEtaAndAutonomy)
+{
+    HumanSafetyEvaluator evaluator(HumanSafetyConfig{});
+    MpcCandidateSnapshot snapshot = threeCorridorSafeCandidates();
+    snapshot.native_valid = {false, false, false};
+
+    const HumanSafetyResult result = evaluator.evaluate(snapshot, corridor());
+
+    EXPECT_EQ(0u, result.safe_count);
+    EXPECT_NEAR(0.0, result.eta, 1e-9);
+    EXPECT_NEAR(0.0, result.T_autonomy, 1e-9);
+    EXPECT_EQ(-1, result.selected_candidate);
+}
+
+TEST(HumanSafetyEvaluator, DisablingTheNativeCheckRestoresCorridorOnlyJudgement)
+{
+    HumanSafetyConfig config;
+    config.require_native_valid = false;
+    HumanSafetyEvaluator evaluator(config);
+    MpcCandidateSnapshot snapshot = threeCorridorSafeCandidates();
+    snapshot.native_valid = {false, false, false};
+
+    EXPECT_EQ(3u, evaluator.evaluate(snapshot, corridor()).safe_count);
+}
+
+// A snapshot that does not carry per-candidate validity must not be read as
+// "everything is blocked".
+TEST(HumanSafetyEvaluator, NativeValidityIsIgnoredWhenItsSizeDoesNotMatch)
+{
+    HumanSafetyEvaluator evaluator(HumanSafetyConfig{});
+    MpcCandidateSnapshot snapshot = threeCorridorSafeCandidates();
+    snapshot.native_valid = {false};
+
+    EXPECT_EQ(3u, evaluator.evaluate(snapshot, corridor()).safe_count);
+}
+
+// The anchor: with two safe candidates, the cue must point at the one that ends
+// up nearer the centreline, not the one that needs least steering. Unanchored,
+// "least steering" is measured from the robot's own heading, so a drifting human
+// is told to keep drifting (ours_pilot18: setpoint walked to 34 deg off a
+// straight route).
+TEST(HumanSafetyEvaluator, GuidancePrefersTheCandidateNearerTheCentreline)
+{
+    HumanSafetyConfig config;
+    config.guide_lookahead_dist = 1.0;
+    HumanSafetyEvaluator evaluator(config);
+
+    MpcCandidateSnapshot snapshot;
+    snapshot.rollout_horizon = 2.0;
+    // Candidate 0 needs less steering but leaves the centreline (y = 0);
+    // candidate 1 costs more steering and comes back to it.
+    snapshot.candidates = {{0, true, true, 2.0, 0.4, 0.05, 0.0, ""},
+                           {1, true, true, 2.0, 0.4, 0.30, 0.0, ""}};
+    snapshot.com_paths = {{Eigen::Vector2d(0.0, 0.30), Eigen::Vector2d(1.0, 0.45)},
+                          {Eigen::Vector2d(0.0, 0.30), Eigen::Vector2d(1.0, 0.02)}};
+
+    EXPECT_EQ(1, evaluator.evaluate(snapshot, corridor()).selected_candidate);
+
+    // Weight 0 is the old, unanchored rule: straightness wins.
+    config.guide_route_weight = 0.0;
+    EXPECT_EQ(0, HumanSafetyEvaluator(config).evaluate(snapshot, corridor()).selected_candidate);
+}
+
+// Without CoM paths there is no lookahead point, so the anchor is inert and the
+// selection must still work rather than reject every candidate.
+TEST(HumanSafetyEvaluator, GuidanceStillSelectsWithoutComPaths)
+{
+    HumanSafetyEvaluator evaluator(HumanSafetyConfig{});
+    MpcCandidateSnapshot snapshot;
+    snapshot.rollout_horizon = 2.0;
+    snapshot.candidates = {{0, true, true, 2.0, 0.4, 0.30, 0.0, ""},
+                           {1, true, true, 2.0, 0.4, 0.05, 0.0, ""}};
+
+    EXPECT_EQ(1, evaluator.evaluate(snapshot, corridor()).selected_candidate);
+}
+
+// Regression: filtering the survival numerator by viability while dividing by
+// the whole sample budget made the fraction unreachable for p_safe, so
+// T_autonomy came out 0 on every frame and `dangerous` was asserted even with
+// safe options in hand -- STOP then latched for good (ours_pilot18/19).
+TEST(HumanSafetyEvaluator, AutonomyTimeIsNormalisedByTheOptionsThatExist)
+{
+    HumanSafetyConfig config;
+    config.p_safe = 0.8;
+    HumanSafetyEvaluator evaluator(config);
+
+    MpcCandidateSnapshot snapshot = threeCorridorSafeCandidates();
+    // One of three viable, and it survives the whole horizon.
+    snapshot.native_valid = {true, false, false};
+
+    const HumanSafetyResult result = evaluator.evaluate(snapshot, corridor());
+
+    EXPECT_EQ(1u, result.safe_count);
+    ASSERT_EQ(1u, result.survival_fraction.size());
+    EXPECT_NEAR(1.0, result.survival_fraction.front(), 1e-9);
+    EXPECT_NEAR(result.evaluation_horizon, result.T_autonomy, 1e-9);
+    EXPECT_GT(result.T_autonomy, 0.0);
+}
+
+// With nothing viable there is genuinely no autonomy left; that must still read
+// as 0 rather than as a full horizon.
+TEST(HumanSafetyEvaluator, AutonomyTimeIsZeroWhenNothingIsViable)
+{
+    HumanSafetyEvaluator evaluator(HumanSafetyConfig{});
+    MpcCandidateSnapshot snapshot = threeCorridorSafeCandidates();
+    snapshot.native_valid = {false, false, false};
+
+    const HumanSafetyResult result = evaluator.evaluate(snapshot, corridor());
+
+    EXPECT_TRUE(result.survival_fraction.empty());
+    EXPECT_NEAR(0.0, result.T_autonomy, 1e-9);
+}
+
 int main(int argc, char **argv)
 {
     testing::InitGoogleTest(&argc, argv);

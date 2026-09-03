@@ -82,6 +82,8 @@
          change is p90 5.7 deg. Release is not rate limited: with no active cue
          the design requires api to be exactly 0. -->
     <arg name="intervention_heading_rate_limit" default="0.1"/>
+    <arg name="intervention_require_native_valid" default="true"/>
+    <arg name="intervention_guide_route_weight" default="1.0"/>
     <arg name="intervention_stop_reaction_delay" default="0.35"/>
     <arg name="convex_corridor_enable" default="false"/>
     <arg name="map_odom_override_topic" default="/sim_odom"/>
@@ -181,6 +183,8 @@
         <arg name="intervention_heading_compliance" value="$(arg intervention_heading_compliance)"/>
         <arg name="intervention_max_heading_correction" value="$(arg intervention_max_heading_correction)"/>
         <arg name="intervention_heading_rate_limit" value="$(arg intervention_heading_rate_limit)"/>
+        <arg name="intervention_require_native_valid" value="$(arg intervention_require_native_valid)"/>
+        <arg name="intervention_guide_route_weight" value="$(arg intervention_guide_route_weight)"/>
         <arg name="intervention_stop_reaction_delay" value="$(arg intervention_stop_reaction_delay)"/>
         <arg name="convex_corridor_enable" value="$(arg convex_corridor_enable)"/>
         <arg name="map_odom_override_topic" value="$(arg map_odom_override_topic)"/>

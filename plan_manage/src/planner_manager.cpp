@@ -256,6 +256,8 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         nh.param("intervention/J_guide", intervention_config_.J_guide, 0.15);
         nh.param("intervention/guide_hold_time", intervention_config_.guide_hold_time, 1.0);
         nh.param("intervention/guide_lookahead", intervention_config_.guide_lookahead_dist, 1.0);
+        nh.param("intervention/require_native_valid", intervention_config_.require_native_valid, true);
+        nh.param("intervention/guide_route_weight", intervention_config_.guide_route_weight, 1.0);
         nh.param("intervention/T_stop", intervention_config_.T_stop, 0.1);
         // Walk-clock seconds: 1.75 = 5 gait decisions, 3.5 = 10, matching the
         // frame counts these windows were originally validated at.
@@ -2723,7 +2725,15 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
                               std::isfinite(dbg.min_dynamic_clearance) ? dbg.min_dynamic_clearance : -1.0,
                               std::isfinite(dbg.min_cpa_time) ? dbg.min_cpa_time : -1.0,
                               dbg.valid_sample_ratio);
-            mpc_stuck_steps_ = 0;
+            // Deliberately NOT resetting mpc_stuck_steps_ here. The watchdog
+            // above increments it whenever the robot has not moved and replans
+            // after STUCK_THRESHOLD ticks, which is the only way out of a stop
+            // that cannot clear: an enforced stop freezes the robot, a frozen
+            // robot leaves the geometry unchanged, and unchanged geometry keeps
+            // the stop enforced. Resetting here zeroed the counter on the same
+            // tick that incremented it, so it never passed 1 and the escape
+            // never fired (ours_pilot18: STOP_ADVICE on 78 of 84 ticks, frozen
+            // for the whole 7.8 s recording).
             publishFovRange();
             publishCurrentWaypoint();
             publishWaypointsList();

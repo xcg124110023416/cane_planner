@@ -8,6 +8,43 @@ namespace cane_planner
 
 namespace
 {
+// Distance from `point` to the corridor's centreline, over every segment. The
+// anchor for guidance selection: unlike the robot's own heading it does not move
+// when the robot drifts, and dwc/spine_route_deviation bounds how far the
+// centreline itself may sit from the global route.
+double distanceToCentreline(const TimedWalkingCorridor &corridor,
+                            const Eigen::Vector2d &point,
+                            bool *found)
+{
+    double best = std::numeric_limits<double>::infinity();
+    auto accumulate = [&](const Eigen::Vector2d &a, const Eigen::Vector2d &b) {
+        const Eigen::Vector2d ab = b - a;
+        const double len_sq = ab.squaredNorm();
+        if (len_sq < 1e-12)
+        {
+            best = std::min(best, (point - a).norm());
+            return;
+        }
+        double u = (point - a).dot(ab) / len_sq;
+        u = std::max(0.0, std::min(1.0, u));
+        best = std::min(best, (point - (a + u * ab)).norm());
+    };
+    for (const auto &segment : corridor.segments)
+    {
+        if (segment.centerline.size() >= 2)
+            for (std::size_t k = 1; k < segment.centerline.size(); ++k)
+                accumulate(segment.centerline[k - 1], segment.centerline[k]);
+        else
+            accumulate(segment.start, segment.end);
+    }
+    if (found != nullptr)
+        *found = std::isfinite(best);
+    return std::isfinite(best) ? best : 0.0;
+}
+}
+
+namespace
+{
 const double kEpsilon = 1e-9;
 
 bool finite(const double value) { return std::isfinite(value); }
@@ -75,13 +112,27 @@ HumanSafetyResult HumanSafetyEvaluator::evaluate(const MpcCandidateSnapshot &sna
         result.evaluation_horizon = std::min(result.coverage_end, snapshot.com_times.front().empty() ? 0.0 : snapshot.com_times.front().back());
     }
 
+    // MPPI already knows which rollouts hit the static map: it hard-infs their
+    // cost and reports them as native_valid == false. The corridor test cannot
+    // see static obstacles at all -- the corridor is a certificate built around
+    // an earlier prediction, so a rollout can sit well inside it and still walk
+    // into a wall. Counting those as safe is what let ours_pilot17 report
+    // eta = 1.00 with all 200 candidates "safe" while all 200 were static
+    // rejected and the robot could not take a single step.
+    const bool have_native = snapshot.native_valid.size() == snapshot.candidates.size();
+    const auto viable = [&](const std::size_t i) {
+        return !config_.require_native_valid || !have_native || snapshot.native_valid[i];
+    };
+
     result.survival_times.clear();
     result.survival_fraction.clear();
-    for (const auto &candidate : snapshot.candidates)
+    for (std::size_t i = 0; i < snapshot.candidates.size(); ++i)
     {
-        if (candidate.evaluated && candidate.safe)
-            ++result.safe_count;
-        if (candidate.evaluated && candidate.safe && finite(candidate.mean_abs_api))
+        const auto &candidate = snapshot.candidates[i];
+        if (!candidate.evaluated || !candidate.safe || !viable(i))
+            continue;
+        ++result.safe_count;
+        if (finite(candidate.mean_abs_api))
             result.J_safe_star = std::min(result.J_safe_star, candidate.mean_abs_api);
     }
     result.native_best_candidate = -1;
@@ -98,17 +149,35 @@ HumanSafetyResult HumanSafetyEvaluator::evaluate(const MpcCandidateSnapshot &sna
     result.eta = result.total_count == 0 ? 0.0 : static_cast<double>(result.safe_count) / result.total_count;
     result.valid_evidence = result.total_count > 0;
 
+    // Survival feeds T_autonomy, which gates the cue. A statically blocked
+    // rollout is not an option the human still has, so it is dead at t = 0
+    // rather than alive until it leaves the corridor; otherwise T_autonomy stays
+    // at the full horizon while the free choices are disappearing.
     std::vector<double> times;
-    for (const auto &candidate : snapshot.candidates)
-        if (candidate.evaluated) times.push_back(candidate.first_exit_time);
+    std::size_t viable_count = 0;
+    for (std::size_t i = 0; i < snapshot.candidates.size(); ++i)
+        if (snapshot.candidates[i].evaluated && viable(i))
+        {
+            ++viable_count;
+            times.push_back(snapshot.candidates[i].first_exit_time);
+        }
     std::sort(times.begin(), times.end());
     for (const double t : times)
     {
         result.survival_times.push_back(t);
         std::size_t alive = 0;
-        for (const auto &candidate : snapshot.candidates)
-            if (candidate.evaluated && candidate.first_exit_time + kEpsilon >= t) ++alive;
-        result.survival_fraction.push_back(result.total_count == 0 ? 0.0 : static_cast<double>(alive) / result.total_count);
+        for (std::size_t i = 0; i < snapshot.candidates.size(); ++i)
+            if (snapshot.candidates[i].evaluated && viable(i) &&
+                snapshot.candidates[i].first_exit_time + kEpsilon >= t) ++alive;
+        // Normalised by the options that exist, not by the whole sample budget.
+        // Dividing by total_count once the numerator was filtered made the
+        // fraction unreachable for p_safe whenever a minority of samples were
+        // viable, so the assignment below never ran and T_autonomy was
+        // identically 0 -- which asserts danger on every frame and latches STOP
+        // for good (ours_pilot18/19: T_autonomy 0 on every frame, 56 of them
+        // with safe candidates still available).
+        result.survival_fraction.push_back(
+            viable_count == 0 ? 0.0 : static_cast<double>(alive) / static_cast<double>(viable_count));
     }
     result.T_autonomy = 0.0;
     if (result.total_count > 0)
@@ -116,7 +185,7 @@ HumanSafetyResult HumanSafetyEvaluator::evaluate(const MpcCandidateSnapshot &sna
         for (std::size_t i = 0; i < result.survival_times.size(); ++i)
             if (result.survival_fraction[i] + kEpsilon >= config_.p_safe)
                 result.T_autonomy = std::min(result.evaluation_horizon, result.survival_times[i]);
-        if (result.safe_count == result.total_count)
+        if (viable_count > 0 && result.safe_count == viable_count)
             result.T_autonomy = result.evaluation_horizon;
     }
     std::vector<double> margins;
@@ -154,7 +223,7 @@ HumanSafetyResult HumanSafetyEvaluator::evaluate(const MpcCandidateSnapshot &sna
         result.median_lateral_margin = lateral[lateral.size() / 2];
     }
 
-    result.selected_candidate = selectGuidanceCandidate(snapshot, result);
+    result.selected_candidate = selectGuidanceCandidate(snapshot, result, corridor);
     result.robust_selected_candidate = result.selected_candidate;
     const int heading_source =
         result.selected_candidate >= 0 ? result.selected_candidate : result.native_best_candidate;
@@ -164,6 +233,35 @@ HumanSafetyResult HumanSafetyEvaluator::evaluate(const MpcCandidateSnapshot &sna
         result.selected_heading = headingSetpoint(snapshot, heading_source);
     }
     return result;
+}
+
+bool HumanSafetyEvaluator::lookaheadPoint(const MpcCandidateSnapshot &snapshot,
+                                          const int index,
+                                          Eigen::Vector2d *point) const
+{
+    if (index < 0 || point == nullptr)
+        return false;
+    const std::size_t i = static_cast<std::size_t>(index);
+    if (i >= snapshot.com_paths.size())
+        return false;
+    const auto &path = snapshot.com_paths[i];
+    if (path.size() < 2)
+        return false;
+
+    const double lookahead = std::max(0.0, config_.guide_lookahead_dist);
+    double travelled = 0.0;
+    std::size_t target = path.size() - 1;
+    for (std::size_t k = 1; k < path.size(); ++k)
+    {
+        travelled += (path[k] - path[k - 1]).norm();
+        if (travelled >= lookahead)
+        {
+            target = k;
+            break;
+        }
+    }
+    *point = path[target];
+    return true;
 }
 
 double HumanSafetyEvaluator::headingSetpoint(const MpcCandidateSnapshot &snapshot,
@@ -177,50 +275,56 @@ double HumanSafetyEvaluator::headingSetpoint(const MpcCandidateSnapshot &snapsho
     // matter how far the human has already turned. That is a rate command with no
     // setpoint, and it is what let the response hold a saturated turn until the
     // corridor ran out of free space.
-    if (i < snapshot.com_paths.size())
+    Eigen::Vector2d target;
+    if (lookaheadPoint(snapshot, index, &target))
     {
-        const auto &path = snapshot.com_paths[i];
-        if (path.size() >= 2)
-        {
-            const double lookahead = std::max(0.0, config_.guide_lookahead_dist);
-            double travelled = 0.0;
-            std::size_t target = path.size() - 1;
-            for (std::size_t k = 1; k < path.size(); ++k)
-            {
-                travelled += (path[k] - path[k - 1]).norm();
-                if (travelled >= lookahead)
-                {
-                    target = k;
-                    break;
-                }
-            }
-            const Eigen::Vector2d chord = path[target] - path.front();
-            if (chord.norm() > kEpsilon)
-                return std::atan2(chord.y(), chord.x());
-        }
+        const Eigen::Vector2d chord = target - snapshot.com_paths[i].front();
+        if (chord.norm() > kEpsilon)
+            return std::atan2(chord.y(), chord.x());
     }
     return snapshot.candidates[i].first_step_heading;
 }
 
 int HumanSafetyEvaluator::selectGuidanceCandidate(const MpcCandidateSnapshot &snapshot,
-                                                  const HumanSafetyResult &) const
+                                                  const HumanSafetyResult &,
+                                                  const TimedWalkingCorridor &corridor) const
 {
     int fallback = -1;
     int robust = -1;
     double fallback_cost = std::numeric_limits<double>::infinity();
     double robust_cost = std::numeric_limits<double>::infinity();
+    // Same viability rule as evaluate(): never point the human down a rollout
+    // MPPI already rejected for hitting the static map.
+    const bool have_native = snapshot.native_valid.size() == snapshot.candidates.size();
     for (std::size_t i = 0; i < snapshot.candidates.size(); ++i)
     {
         const auto &candidate = snapshot.candidates[i];
         if (!candidate.evaluated || !candidate.safe || !finite(candidate.mean_abs_api))
             continue;
-        if (candidate.mean_abs_api < fallback_cost ||
-            (candidate.mean_abs_api == fallback_cost && static_cast<int>(i) < fallback))
-        { fallback = static_cast<int>(i); fallback_cost = candidate.mean_abs_api; }
+        if (config_.require_native_valid && have_native && !snapshot.native_valid[i])
+            continue;
+
+        // Anchored score: how far this candidate ends up from the centreline,
+        // then how much steering it costs. Straightness alone is measured from
+        // the robot's own heading and so cannot pull a drifting human back.
+        double cost = candidate.mean_abs_api;
+        Eigen::Vector2d target;
+        if (config_.guide_route_weight > 0.0 &&
+            lookaheadPoint(snapshot, static_cast<int>(i), &target))
+        {
+            bool anchored = false;
+            const double offset = distanceToCentreline(corridor, target, &anchored);
+            if (anchored)
+                cost += config_.guide_route_weight * offset;
+        }
+
+        if (cost < fallback_cost ||
+            (cost == fallback_cost && static_cast<int>(i) < fallback))
+        { fallback = static_cast<int>(i); fallback_cost = cost; }
         if (candidate.minimum_signed_margin + kEpsilon >= config_.min_candidate_margin &&
-            (candidate.mean_abs_api < robust_cost ||
-             (candidate.mean_abs_api == robust_cost && (robust < 0 || static_cast<int>(i) < robust))))
-        { robust = static_cast<int>(i); robust_cost = candidate.mean_abs_api; }
+            (cost < robust_cost ||
+             (cost == robust_cost && (robust < 0 || static_cast<int>(i) < robust))))
+        { robust = static_cast<int>(i); robust_cost = cost; }
     }
     return robust >= 0 ? robust : fallback;
 }

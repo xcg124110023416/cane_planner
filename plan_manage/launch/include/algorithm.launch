@@ -131,6 +131,14 @@
          change is p90 5.7 deg. Release is not rate limited: with no active cue
          the design requires api to be exactly 0. -->
     <arg name="intervention_heading_rate_limit" default="0.1"/>
+    <!-- Only candidates MPPI also found collision free count as safe. false
+         restores the corridor-only judgement, which cannot see static
+         obstacles. -->
+    <arg name="intervention_require_native_valid" default="true"/>
+    <!-- Weight per metre on the guidance candidate's offset from the corridor
+         centreline. 0 restores "pick the straightest safe candidate", which has
+         no anchor and walks the cue off the route. -->
+    <arg name="intervention_guide_route_weight" default="1.0"/>
     <arg name="intervention_stop_reaction_delay" default="0.35"/>
     <arg name="convex_corridor_enable" default="false"/>
     <arg name="convex_corridor_segment_length" default="0.8"/>
@@ -399,6 +407,8 @@
         <param name="intervention/heading_compliance" value="$(arg intervention_heading_compliance)" type="double"/>
         <param name="intervention/max_heading_correction" value="$(arg intervention_max_heading_correction)" type="double"/>
         <param name="intervention/heading_rate_limit" value="$(arg intervention_heading_rate_limit)" type="double"/>
+        <param name="intervention/require_native_valid" value="$(arg intervention_require_native_valid)" type="bool"/>
+        <param name="intervention/guide_route_weight" value="$(arg intervention_guide_route_weight)" type="double"/>
         <param name="intervention/stop_reaction_delay" value="$(arg intervention_stop_reaction_delay)" type="double"/>
         <!-- Stage 2 crossing interaction. ST yield supervises crossing priority; MPPI social cost is not used. -->
         <param name="mpc/interaction_enable" value="$(arg mpc_enable_interaction)" type="bool"/>
