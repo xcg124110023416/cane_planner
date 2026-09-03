@@ -204,6 +204,27 @@ namespace cane_planner
         enum InteractionScene { SCENE_NONE = 0, SCENE_CROSSING = 1 };
         enum InteractionMode { MODE_CONTINUE = 0, MODE_YIELD = 2 };
         std::vector<Eigen::Vector3d> last_corridor_feasible_mppi_path_;
+        // Always seed the walking corridor from the global route. Pins the
+        // corridor hardest, but a route-shaped centreline through a sharp corner
+        // is one no rollout can hold: measured on ours_pilot13, STOP_ADVICE took
+        // 32-39% of the steps, and the collapse frame had valid_ratio 1.00 with
+        // nothing rejected, i.e. the planner was healthy and only the corridor
+        // geometry disagreed. Kept for reproducing that run.
+        bool corridor_spine_prefer_global_ = false;
+        // The rule used instead: keep the previous prediction as the centreline
+        // only while it still describes the route. The prediction moves with the
+        // robot, so a corridor around a prediction that has wandered never
+        // shrinks its margin and the intervention layer has nothing to trigger
+        // on; but the prediction is also the only centreline the robot can
+        // actually hold through a corner.
+        //
+        // Floor is dwc/half_width (0.45): below it the two corridors still
+        // overlap, so there is nothing to choose between. Rounding a 70 deg
+        // route fold at the intervention-limited turn radius leaves the polyline
+        // by roughly 0.4 m, so the limit has to sit above that or every corner
+        // falls back to the route -- the false alarm measured above. The drift
+        // worth catching is the p90 cross-track of about 1.0 m.
+        double corridor_spine_route_deviation_ = 0.6;
         struct InteractionDebug
         {
             bool candidate_valid = false;

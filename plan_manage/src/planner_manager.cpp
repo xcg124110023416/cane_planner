@@ -338,6 +338,8 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             dynamic_walking_corridor_.reset(new DynamicWalkingCorridor);
             dynamic_walking_corridor_->setParam(nh);
             dynamic_walking_corridor_->setCollision(collision_);
+            nh.param("dwc/spine_prefer_global", corridor_spine_prefer_global_, false);
+            nh.param("dwc/spine_route_deviation", corridor_spine_route_deviation_, 0.6);
         }
         bool convex_corridor_enable = false;
         nh.param("convex_corridor/enable", convex_corridor_enable, false);
@@ -875,9 +877,11 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         const auto reference_path = buildWalkingCorridorReferencePath(current_pose);
         const auto cfg = dynamic_walking_corridor_->getConfig();
 
-        // Only the part of the previous prediction that is still ahead of the
-        // robot may seed the corridor. Anything else falls back to the global
-        // (A*) reference inside buildNominal().
+        // Still pruned even when the global route is preferred: the prediction
+        // remains the fallback for the frames where the route is unusable (no
+        // global plan yet, or less than two points left near the goal), and a
+        // prediction folded back over ground already walked is no better a
+        // fallback than no fallback at all.
         const auto previous_mppi_path = pruneMppiPathForward(
             current_pose,
             last_corridor_feasible_mppi_path_,
@@ -890,7 +894,9 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             reference_path,
             std::max(0.01, lfpc_delta_t_),
             std::max(0.1, cfg.robot_speed),
-            std::max(0.5, cfg.length));
+            std::max(0.5, cfg.length),
+            corridor_spine_prefer_global_,
+            corridor_spine_route_deviation_);
     }
 
     // Reusing the previous MPPI prediction is only valid for the part that is
