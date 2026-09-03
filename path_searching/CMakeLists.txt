@@ -52,6 +52,7 @@ add_library( path_searching
     src/timed_trajectory_builder.cpp
     src/path_smoother.cpp
     src/mpc_controller.cpp
+    src/human_safety_evaluator.cpp
     src/kinematic_mppi_controller.cpp
     )
 target_link_libraries( path_searching
@@ -85,6 +86,13 @@ if(CATKIN_ENABLE_TESTING)
     test/test_timed_trajectory.cpp
   )
   target_link_libraries(test_timed_trajectory
+    path_searching
+    ${catkin_LIBRARIES}
+  )
+  catkin_add_gtest(test_human_safety_evaluator
+    test/test_human_safety_evaluator.cpp
+  )
+  target_link_libraries(test_human_safety_evaluator
     path_searching
     ${catkin_LIBRARIES}
   )
