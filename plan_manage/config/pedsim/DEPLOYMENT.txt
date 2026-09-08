@@ -1,0 +1,131 @@
+For the normal single-entry workflow and owned-round reset, use USAGE.txt.
+The manual source/unpause commands below are low-level deployment/debug steps,
+not needed by start_pedsim_navigation.sh.
+
+Optional single-pedestrian pedsim validation
+==========================================
+Planner baseline: 1d16286. Upstream: srl-freiburg/pedsim_ros revision
+de3772630ae174b278da00bcf26e5cf6c2db5ab2. System package installation is not
+part of this integration. Default deterministic source and planning algorithms
+are unchanged. Use one source only; do not launch a detector/truth bridge too.
+
+UPSTREAM PREPARATION (dedicated source checkout, never modify an installed copy)
+1. Obtain the exact revision above in a dedicated catkin source workspace.
+2. Compare SHA256 of the three source files with upstream-manifest.json.
+   Refuse any mismatch. Apply upstream-startup-guard.patch only after verifying.
+   Example from that dedicated checkout:
+     git apply --check /ABS/plan_manage/config/pedsim/upstream-startup-guard.patch
+     git apply /ABS/plan_manage/config/pedsim/upstream-startup-guard.patch
+   Verify result SHA256 against patched_sha256. Default guard parameters false
+   preserve upstream behavior. No planner source is included in this patch.
+3. Build pedsim_simulator with catkin_tools, extending /opt/ros/noetic and using
+   -DCMAKE_BUILD_TYPE=Release -DPYTHON_EXECUTABLE=/usr/bin/python3.
+   Core package dependencies: 3rdparty/libpedsim, pedsim_msgs, pedsim_srvs,
+   pedsim_utils and pedsim_simulator. Existing Qt5/Eigen/Boost/Noetic suffice on
+   the verified machine. Optional sensors/Gazebo/visualizer are not needed.
+4. Source the pedsim workspace setup and reviewed planner workspace setup in
+   EVERY runtime terminal. Confirm rospack find pedsim_simulator and plan_manage
+   select the intended workspaces; do not mix other pedestrian simulator forks.
+
+WORLD GEOMETRY GENERATION
+Run after reviewed integration:
+  rosrun plan_manage export_pedsim_office.py \
+    /home/xcg/ws/src/cane_planner/Utils/map_generator/resource/office2_modify.pcd \
+    /tmp/pedsim-office-world.xml
+Requires the existing pcl_convert_pcd_ascii_binary tool and numpy, not a new
+PCD parser. The exact source PCD SHA256 validated here is
+70927e2747f97cb8f6eab37dfb04f635457549b62e018bd22206f966ee18c75f.
+The simulation generator loads coordinates unchanged into world. Projection
+uses z=[0.45,1.8] m, 0.1 m whole cells; all selected points are retained, no
+smoothing/dilation/connect-the-dots. Only exposed unit edges are merged when
+collinear and contiguous. At most a cell diagonal of geometric expansion;
+small openings can narrow by grid quantization. This band excludes low and
+ceiling points and DOES NOT represent low obstacles below 0.45 m or guarantee
+all body heights. The map is simulation world geometry, not local SDF known/
+unknown/inflation classification. Planner map defaults remain unchanged.
+Verified 228217 points, 100299 selected, 6149 occupied cells,348 wall segments;
+world bounds x[-9.868,10.067],y[-9.983,10.003],z[-0.501,2.4]. Overlay visual
+check confirms walls follow this PCD and no line bridges the selected corridor.
+Pedestrian (-2.5,-3) -> (-2.5,3) endpoints connect after conservative 0.4 m
+square grid expansion. This is a centreline feasibility check, not a continuous
+pedestrian simulation collision certificate. Initial velocity is upstream zero;
+preferred/max speed remains upstream distribution, not a hidden planner input.
+There is one person and one type2 controlled robot. Upstream normally excludes
+robot from AgentStates; bridge also filters it. Physical full size is explicitly
+0.5x0.5x1.7m. Random-force weight is set zero; upstream speed initialization can
+still vary, so use the old constant-velocity tool for deterministic regressions.
+
+USER VALIDATION (not executed as navigation by implementer)
+Terminal 1, after sourcing both workspaces:
+  roslaunch plan_manage sim_kin_replan.launch planner:=3 use_pedestrians:=true pedestrian_source:=pedsim
+Terminal 2:
+  roslaunch plan_manage pedsim_single_source.launch scene_file:=/tmp/pedsim-office-world.xml
+Set an initial pose and goal in RViz. Enabled planner initially STOPs on missing
+pedestrian data but keeps /sim_odom heartbeat; this supplies original-stamped
+world->pedsim_user TF. Check /sim_odom is fresh and world-frame, then:
+  rosservice call /pedsim_simulator/unpause_simulation "{}"
+Unpause before TF readiness is harmless: upstream guard prevents integration.
+Bridge waits for exactly paired used-TF evidence and original /sim_odom before
+forwarding observations. See EXACT STEP PAIRING below. It never turns missing dependencies into fresh empty.
+The single-person AgentState header is retained exactly, outer/inner header
+skew must be <=0.05s. No goals/social state/internal forces go to the planner.
+
+LOSS/RESET CONTRACT
+The opt-in upstream guard instantiates agents without moving them, reads and
+validates robot TF before each move, and uses that SAME transform to update the
+robot. Missing initial TF waits. After a valid robot has been seen, missing,
+older-than0.5s, future TF or ROS rollback latches a pre-integration stop until
+simulator restart. This checks each step, not asynchronous/preemptive braking:
+a step already begun with fresh validated input may finish before later loss.
+No pure sleep/post-hoc pause race is used. start_paused and require_fresh_robot
+must both be true; do not bypass the guard through another simulator binary.
+Bridge likewise latches after dependency loss and suppresses output; planner
+expires last real observation and STOPs. Restart BOTH simulator and bridge to
+recover/reset; restore fresh user state, then unpause. New navigation goals do
+not reset pedsim. Missed interactions cannot be reconstructed by fresh stamping.
+
+VERIFICATION AND LIMITS
+Fixed upstream unchanged build succeeded; patched build succeeded. Private
+master startup tests passed: startup pause, missing initial TF, valid TF,
+stale latch, fresh-after-loss cannot resume, and simulated-clock rollback latch.
+Four offline bridge/boundary tests passed. No user navigation, RViz closed-loop,
+wall collision safety, continuous user footprint or long-duration timing claim.
+Robot TF velocity derives from actual pose/time differences; /sim_odom twist
+is not assumed to equal walking velocity. Static geometry does not track map
+edits while running: regenerate XML and restart after changing the world PCD.
+
+REVIEW CORRECTION: EXACT STEP PAIRING
+robot_position is NOT an authorization input. Upstream robot_input carries
+header.stamp=actual used TF stamp, pose=used TF pose, child_frame_id=decimal
+AgentStates batch stamp nanoseconds. Bridge matches that evidence to exact
+original sim_odom stamp/pose/quaternion with bounded32-entry queues. Agent,
+evidence and odom may arrive in any order; unmatched fresh data waits, not
+permanent failure. Expired/illegal/overflow/clock rollback still latches until
+both processes restart. Five offline tests pass; private end-to-end moving
+0.12m/100ms odometry produced24 paired frames then correctly stopped on loss.
+
+GUARD V2 CORRECTION (requires separately authorized restart)
+Candidate built workspace /tmp/pedsim-guard-v2/ws, setup /tmp/pedsim-guard-v2/ws/devel/setup.bash.
+Do NOT overwrite/restart current running upstream automatically. After user approves
+stopping/relaunching, source candidate setup --extend after primary setup. Full
+upstream patch/manifest supersedes old patch: apply to exact pristine pinned source,
+not atop old patch; validate baseline and patched hashes.
+TF comparison now sampled AFTER lookup of the same transform, so normal concurrent
+TF publication cannot falsely appear future. No tolerance added: actual future and
+>0.5s old input still reject. Before first actual integration, ready/lost/recovered
+TF while paused only waits; it cannot permanently latch. After first integration,
+loss remains latched including deliberate re-pause; pause is not reset. Clock rollback
+before first integration waits for valid input, after integration latches.
+/pedsim_simulator/guard_status is a latched String of real internal state:
+PAUSED_READY, PAUSED_WAITING_<reason>, WAITING_INITIAL_<reason>, RUNNING,
+LATCHED_<reason>. Includes started/paused/sample_time/tf_stamp/age at TRANSITION;
+it is not a live heartbeat and is emitted only on state transition. A RUNNING
+transition denotes the immediately following integration boundary, not prior motion.
+Bridge initial-wait audit: started is set only after a complete paired publication;
+empty queues while paused do not latch. Already-enqueued invalid/expired observations
+still latch intentionally. No bridge implementation change needed for these defects.
+Verified separate candidate build, real private-master moving paired test after
+paused valid->missing->valid probes (24 paired frames), true running-loss non-recovery,
+private-clock rollback, and extracted actual guard function with deterministic lookup
+race plus true future/stale/rollback. No live11311 node touched. Await user-authorized
+restart and RViz closed-loop check; no navigation/safety certification.

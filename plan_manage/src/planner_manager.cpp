@@ -1828,6 +1828,12 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             }
             case WAIT_TARGET:
             {
+                std::lock_guard<std::mutex> lock(dynObsMutex_);
+                // LFPC is the lightweight plant authority. After arrival its
+                // stationary state remains real, even without another plan.
+                if (planner_==3 && simulation_ && !gazebo_sim_ &&
+                    have_odom_ && mpc_reached_goal_ && lfpc_model_ && !have_target_)
+                    publishSimOdom(true);
                 if (!have_target_)
                     return;
                 changeFSMExecState(GEN_NEW_TRAJ);
@@ -2567,6 +2573,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         if (dist_to_final < global_wp_arrival_radius_)
         {
             mpc_reached_goal_ = true;
+            if (simulation_ && !gazebo_sim_) publishSimOdom(true);
             ROS_WARN("[MPC] Reached final goal at (%.2f, %.2f), %d steps",
                      current_com(0), current_com(1), mpc_step_count_);
             if (gazebo_sim_)

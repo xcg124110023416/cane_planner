@@ -30,6 +30,7 @@
     <arg name="map_odom_override_topic" default="/sim_odom"/>
     <arg name="convex_corridor_local_radius" default="3.0"/>
     <arg name="convex_corridor_max_segment_length" default="1.0"/>
+    <arg name="pedestrian_source" default="deterministic"/> <!-- deterministic|pedsim; optional pedsim source launched separately -->
     <arg name="use_pedestrians" default="$(eval arg('planner') != 3)"/>
     <arg name="pedestrian_scenario" default="$(eval 'dwcg_crossing' if arg('planner') == 3 else 'mixed')"/>
     <arg name="use_static_global_map" default="false"/>
@@ -133,7 +134,7 @@
     <node pkg="tf2_ros" type="static_transform_publisher" name="body2cane_base" args="0 0 0 0 0 0 /base_link /cane_base" />
 
     <!-- Disabled source retains static mode; enabled requires fresh valid frames. -->
-    <group if="$(arg use_pedestrians)">
+    <group if="$(eval arg('use_pedestrians') and arg('pedestrian_source') == 'deterministic')">
         <node pkg="plan_manage" type="pedestrian_sim.py" name="pedestrian_sim" output="screen">
             <!-- trigger mode: pedestrian stays at start, walks once on goal, then disappears.
                  loop mode repeats continuously. -->

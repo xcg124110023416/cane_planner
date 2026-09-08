@@ -1,3 +1,13 @@
+# Single-entry workflow design
+
+Launcher owns private master via roslaunch port, loads primary then optional dependency --extend, checks pinned source hashes, generates exact world XML, composes existing launch and bridge. Bridge startup requires goal, fresh post-goal odom and actual PAUSED_READY status; unpause once only, latch is never cleared. Status transitions latched, no separate control state machine.
+
+# Optional pedsim adapter design
+
+Upstream guarded step publishes robot_input Odometry: header.stamp is actual used TF stamp, pose is actual used TF pose, child_frame_id is decimal AgentStates batch stamp nanoseconds. Header.seq is not used (ROS owns publication sequence). Bridge uses bounded32-entry queues, pairing batch->input evidence->exact original sim_odom stamp/pose/quaternion. Latest odom/latest robot_position comparison removed. Reordering waits up to original0.5s freshness; stale/illegal/overflow/rollback latches until both restart. No restamping, no planner changes. World exporter merges contiguous exposed0.1m cell boundaries of actual office PCD z0.45–1.8m. Low obstacles and full collision safety remain unclaimed. Details and pinned deployment in DEPLOYMENT.txt.
+
+Baseline architecture preserved:
+
 # Diagnostic design follow-up
 
 Current approved increment is profiling and ROS/steady transaction diagnostics against actual dirty primary124-test recovery. Preserve safety/route behavior. No cache or optimization is delivered: measured soft query bottleneck does not justify unsafe map reuse or broader snapshot architecture. One dedicated33-field topic records source identity, callback wait, transaction intervals/stages/skips; NaN resets prevent stale-stage data. Grid extraction timing nests within hard/soft query timing. Existing recorder gains raw source,clock,goals,odoms,rosout,paths/corridor/sample/debug/stop. Original2.1second all-topic gap cause remains unknown. No user recording/navigation launched. Detailed schema is in current-frame-pedestrian-corridor.md. Historical recovery requirements below remain preserved functionality, not new work.

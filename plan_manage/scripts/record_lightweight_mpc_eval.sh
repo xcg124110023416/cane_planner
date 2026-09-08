@@ -7,6 +7,10 @@ import sys
 
 TOPICS = [
     "/clock",
+    "/pedsim_simulator/guard_status",
+    "/pedsim_simulator/robot_input",
+    "/pedsim_simulator/simulated_agents",
+    "/pedsim_single_bridge/status",
     "/mpc/transaction_diagnostics",
     "/move_base_simple/goal",
     "/initialpose",

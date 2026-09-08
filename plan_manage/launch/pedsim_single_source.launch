@@ -1,0 +1,23 @@
+<launch>
+  <!-- Optional standalone source; start existing planner with use_pedestrians=true,
+       but DO NOT start its deterministic source at the same time. -->
+  <arg name="scene_file"/>
+  <arg name="pedestrian_speed" default="-1"/>
+  <arg name="auto_start" default="false"/>
+  <node pkg="pedsim_simulator" type="pedsim_simulator" name="pedsim_simulator" output="screen" required="true">
+    <param name="scene_file" value="$(arg scene_file)"/>
+    <param name="frame_id" value="world"/>
+    <param name="robot_base_frame_id" value="pedsim_user"/>
+    <param name="single_pedestrian_speed" value="$(arg pedestrian_speed)"/>
+    <param name="robot_mode" value="1"/>
+    <param name="enable_groups" value="false"/>
+    <param name="update_rate" value="10.0"/>
+    <param name="simulation_factor" value="1.0"/>
+    <param name="force_random" value="0.0"/>
+    <param name="start_paused" value="true"/>
+    <param name="require_fresh_robot" value="true"/>
+  </node>
+  <node pkg="plan_manage" type="pedsim_single_bridge.py" name="pedsim_single_bridge" output="screen" required="true">
+    <param name="auto_start" value="$(arg auto_start)"/>
+  </node>
+</launch>

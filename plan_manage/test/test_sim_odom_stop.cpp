@@ -120,6 +120,8 @@ public:
     static uint64_t attempts(PlannerManager&m) {return m.dynamic_recovery_attempts_;}
     static std::string recoveryReason(PlannerManager&m) {return m.dynamic_recovery_reason_;}
     static std::vector<Eigen::Vector2d> route(PlannerManager&m) {return m.global_waypoints_;}
+    static void arriveSetup(PlannerManager&m) {m.have_odom_=m.have_target_=true;m.exec_state_=PlannerManager::MPC_STEP;m.end_pt_=m.lfpc_model_->getCOMPos().head<2>();}
+    static void idleSetup(PlannerManager&m,bool initialized) {m.have_odom_=initialized;m.have_target_=false;m.mpc_reached_goal_=initialized;m.exec_state_=PlannerManager::WAIT_TARGET;}
     static void initialSetup(PlannerManager&m) {m.have_odom_=m.have_target_=true;m.exec_state_=PlannerManager::GEN_NEW_TRAJ;}
     static void fsm(PlannerManager&m) {m.execFSMCallback(ros::TimerEvent());}
     static bool active(PlannerManager&m) {return m.exec_state_==PlannerManager::MPC_STEP && m.initial_route_active_;}
@@ -666,6 +668,38 @@ TEST_F(SimOdomTest, TransactionDiagnosticIdentityClockAndSkippedStageReset)
     SimOdomTestAccess::enabled(manager_,false);queuedFrameStep(clear);waitForDecision(3,false);wait(3);
     ASSERT_EQ(3u,records.size());EXPECT_EQ(0.,records[2].data[5]);EXPECT_TRUE(std::isnan(records[2].data[7]));
     EXPECT_NE(std::string::npos,records[2].layout.dim[0].label.find("source_frame=DISABLED"));
+}
+TEST_F(SimOdomTest, ActualArrivalIdleHeartbeatAndNewGoalKeepPlantState)
+{
+    ros::Time::setNow(ros::Time(700));SimOdomTestAccess::dynamicSetup(manager_);
+    SimOdomTestAccess::recoverySetup(manager_,nh_);SimOdomTestAccess::astarSetup(manager_,nh_);
+    SimOdomTestAccess::arriveSetup(manager_);
+    const auto state=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
+    const auto pos=SimOdomTestAccess::model(manager_).getCOMPos();
+    std::atomic<bool> done{false};
+    std::thread clock([&]{double t=700.;while(!done){t+=.001;ros::Time::setNow(ros::Time(t));ros::WallDuration(.002).sleep();}});
+    SimOdomTestAccess::fsm(manager_);done=true;clock.join();waitForOdom(1);
+    for(int i=0;i<12;++i) {
+        ros::Time::setNow(ros::Time(700.1+.1*i));SimOdomTestAccess::fsm(manager_);waitForOdom(i+2);
+        EXPECT_EQ(state,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
+        EXPECT_EQ(pos,SimOdomTestAccess::model(manager_).getCOMPos());
+        EXPECT_EQ(geometry_msgs::Twist(),odom_.back().twist.twist);
+        EXPECT_EQ(ros::Time::now(),odom_.back().header.stamp);
+    }
+    SimOdomTestAccess::goalB(manager_);SimOdomTestAccess::fsm(manager_); // WAIT -> GEN
+    EXPECT_EQ(13u,odom_.size());EXPECT_FALSE(SimOdomTestAccess::active(manager_));
+    SimOdomTestAccess::fsm(manager_);EXPECT_TRUE(SimOdomTestAccess::active(manager_));
+    EXPECT_EQ(Eigen::Vector2d(4,1),SimOdomTestAccess::route(manager_).back());
+    EXPECT_EQ(pos,SimOdomTestAccess::model(manager_).getCOMPos());
+}
+TEST_F(SimOdomTest, IdleHeartbeatModeAndInitializationGuards)
+{
+    for(int mode=0;mode<3;++mode) {
+        SimOdomTestAccess::idleSetup(manager_,mode!=0);
+        SimOdomTestAccess::mode(manager_,mode!=1,mode==2);
+        SimOdomTestAccess::fsm(manager_);
+    }
+    ros::WallDuration(.1).sleep();ros::spinOnce();EXPECT_TRUE(odom_.empty());
 }
 }  // namespace cane_planner
 

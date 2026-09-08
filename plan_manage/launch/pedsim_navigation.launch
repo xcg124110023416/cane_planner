@@ -1,0 +1,14 @@
+<launch>
+  <arg name="scene_file"/>
+  <arg name="pedestrian_speed" default="-1"/>
+  <include file="$(find plan_manage)/launch/sim_kin_replan.launch">
+    <arg name="planner" value="3"/>
+    <arg name="use_pedestrians" value="true"/>
+    <arg name="pedestrian_source" value="pedsim"/>
+  </include>
+  <include file="$(find plan_manage)/launch/pedsim_single_source.launch">
+    <arg name="scene_file" value="$(arg scene_file)"/>
+    <arg name="auto_start" value="true"/>
+    <arg name="pedestrian_speed" value="$(arg pedestrian_speed)"/>
+  </include>
+</launch>

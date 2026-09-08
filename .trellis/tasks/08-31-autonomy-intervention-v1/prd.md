@@ -1,3 +1,13 @@
+# Single-entry pedsim workflow requirements
+
+Optional dedicated home dependency, one command, no pre-goal movement, first ready input automatic release only, explicit failure/reset, unchanged algorithms/default deterministic flow. No live-session intervention.
+
+# Optional pedsim slice requirements
+
+Fixed upstream de3772630ae174b278da00bcf26e5cf6c2db5ab2. Default deterministic source and all existing recovery/transaction/diagnostic/pruning behavior remain unchanged. Same world PCD geometry, not identical SDF classification. One pedestrian, explicit body dimensions, no hidden goals/forces. Startup gates integration; real loss/rollback requires simulator+bridge restart. Ordinary asynchronous reorder must wait, not fail permanently. Exact per-step robot input evidence is required. No primary writes/install/navigation; user replan.rviz excluded. Independent review and user RViz validation remain pending.
+
+Baseline requirements preserved:
+
 # Profiling and recording follow-up
 
 Current approved increment is profiling and ROS/steady transaction diagnostics against actual dirty primary124-test recovery. Preserve safety/route behavior. No cache or optimization is delivered: measured soft query bottleneck does not justify unsafe map reuse or broader snapshot architecture. One dedicated33-field topic records source identity, callback wait, transaction intervals/stages/skips; NaN resets prevent stale-stage data. Grid extraction timing nests within hard/soft query timing. Existing recorder gains raw source,clock,goals,odoms,rosout,paths/corridor/sample/debug/stop. Original2.1second all-topic gap cause remains unknown. No user recording/navigation launched. Detailed schema is in current-frame-pedestrian-corridor.md. Historical recovery requirements below remain preserved functionality, not new work.

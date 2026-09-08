@@ -1,0 +1,203 @@
+--- a/pedsim_simulator/src/simulator.cpp
++++ b/pedsim_simulator/src/simulator.cpp
+@@ -31,6 +31,9 @@
+
+ #include <QApplication>
+ #include <algorithm>
++#include <sstream>
++#include <iomanip>
++#include <limits>
+
+ #include <pedsim_simulator/element/agentcluster.h>
+ #include <pedsim_simulator/scene.h>
+@@ -52,6 +55,8 @@
+   pub_agent_states_.shutdown();
+   pub_agent_groups_.shutdown();
+   pub_robot_position_.shutdown();
++  pub_robot_input_.shutdown();
++  pub_guard_status_.shutdown();
+   pub_waypoints_.shutdown();
+
+   srv_pause_simulation_.shutdown();
+@@ -127,7 +132,12 @@
+   nh_.param<std::string>("robot_base_frame_id", robot_base_frame_id_,
+       "base_footprint");
+
+-  paused_ = false;
++  nh_.param<bool>("start_paused", paused_, false);
++  nh_.param<bool>("require_fresh_robot", require_fresh_robot_, false);
++  if (require_fresh_robot_) {
++    pub_robot_input_ = nh_.advertise<nav_msgs::Odometry>("robot_input", 10);
++    pub_guard_status_ = nh_.advertise<std_msgs::String>("guard_status", 1, true);
++  }
+
+   spawn_timer_ =
+       nh_.createTimer(ros::Duration(spawn_period), &Simulator::spawnCallback, this);
+@@ -138,6 +148,22 @@
+ void Simulator::runSimulation() {
+   ros::Rate r(CONFIG.updateRate);
+
++  if (require_fresh_robot_) SCENE.dissolveClusters(); // instantiate robot without integrating agents
++  double single_speed;
++  nh_.param<double>("single_pedestrian_speed", single_speed, -1.);
++  if (single_speed != -1.) {
++    if (!require_fresh_robot_ || !std::isfinite(single_speed) || single_speed <= 0. || single_speed > 3.) {
++      ROS_ERROR("Invalid single_pedestrian_speed or missing guarded mode"); return;
++    }
++    Agent* pedestrian = nullptr;
++    for (Agent* a : SCENE.getAgents()) if (a->getType() != Ped::Tagent::ROBOT) {
++      if (pedestrian || a->getType() != Ped::Tagent::ADULT) { ROS_ERROR("Speed setting requires one ordinary pedestrian"); return; }
++      pedestrian = a;
++    }
++    if (!pedestrian) { ROS_ERROR("Missing single pedestrian"); return; }
++    pedestrian->setVmax(single_speed);
++    ROS_INFO_STREAM("Single pedestrian desired/max speed=" << single_speed << " m/s; initial speed=0");
++  }
+   while (ros::ok()) {
+     if (!robot_) {
+       // setup the robot
+@@ -150,8 +176,10 @@
+       }
+     }
+
+-    if (!paused_) {
++    const bool input_ready = !require_fresh_robot_ || robotInputReady();
++    if (!paused_ && input_ready) {
+       updateRobotPositionFromTF();
++      if (require_fresh_robot_) robot_started_ = true;
+       SCENE.moveAllAgents();
+
+       publishAgents();
+@@ -218,6 +246,58 @@
+   }
+ }
+
++// Status updates are latched and emitted on transition only, never every cycle.
++// Times describe the sample at that transition, not a continuously fresh heartbeat.
++void Simulator::reportGuard(const std::string& status, const ros::Time& now,
++                            const ros::Time& stamp, double age) {
++  if (status == guard_status_) return;
++  guard_status_ = status;
++  std::ostringstream text;
++  text << std::setprecision(12) << "state=" << status << " started=" << robot_started_
++       << " paused=" << paused_ << " sample_time=" << now.toSec()
++       << " tf_stamp=" << stamp.toSec() << " age=" << age;
++  std_msgs::String msg; msg.data = text.str();
++  pub_guard_status_.publish(msg);
++  ROS_INFO_STREAM("[robot_guard] " << msg.data);
++}
++
++bool Simulator::robotInputReady() {
++  // Use the SAME lookup result for comparison and later integration. Sampling
++  // now before lookup falsely labels a concurrent, valid TF update as future.
++  tf::StampedTransform transform;
++  bool found = true;
++  try {
++    transform_listener_->lookupTransform(frame_id_, robot_base_frame_id_, ros::Time(0), transform);
++  } catch (const tf::TransformException&) { found = false; }
++  const ros::Time now = ros::Time::now();
++  const double age = found ? (now-transform.stamp_).toSec() : std::numeric_limits<double>::quiet_NaN();
++  std::string reason;
++  if (!last_guard_time_.isZero() && now < last_guard_time_) reason = "CLOCK_ROLLBACK";
++  else if (!robot_) reason = "ROBOT_MISSING";
++  else if (now.isZero() || !found || transform.stamp_.isZero()) reason = "TF_MISSING";
++  else if (!std::isfinite(transform.getOrigin().x()) || !std::isfinite(transform.getOrigin().y())) reason = "TF_INVALID";
++  else if (age < 0.) reason = "TF_FUTURE";
++  else if (age > .5) reason = "TF_STALE";
++  last_guard_time_ = now;
++  // Before the first actual integration, paused/readiness probes cannot start
++  // the running-loss contract. After starting, even a deliberate re-pause does
++  // not erase history: loss while paused remains latched until restart.
++  if (!reason.empty() && robot_started_ && !robot_failed_) {
++    robot_failed_ = true; guard_latch_reason_ = reason;
++  }
++  if (robot_failed_) {
++    reportGuard("LATCHED_"+guard_latch_reason_,now,found?transform.stamp_:ros::Time(),age);
++    return false;
++  }
++  if (!reason.empty()) {
++    reportGuard((paused_?"PAUSED_WAITING_":"WAITING_INITIAL_")+reason,now,found?transform.stamp_:ros::Time(),age);
++    return false;
++  }
++  guarded_robot_transform_ = transform;
++  reportGuard(paused_?"PAUSED_READY":"RUNNING",now,transform.stamp_,age);
++  return true;
++}
++
+ void Simulator::updateRobotPositionFromTF() {
+   if (!robot_) return;
+
+@@ -229,7 +309,8 @@
+     // Get robot position via TF
+     tf::StampedTransform tfTransform;
+     try {
+-      transform_listener_->lookupTransform(frame_id_, robot_base_frame_id_,
++      if (require_fresh_robot_) tfTransform = guarded_robot_transform_;
++      else transform_listener_->lookupTransform(frame_id_, robot_base_frame_id_,
+                                            ros::Time(0), tfTransform);
+     } catch (tf::TransformException& e) {
+       ROS_WARN_STREAM_THROTTLE(
+@@ -345,6 +426,16 @@
+     all_status.agent_states.push_back(state);
+   }
+
++  if (require_fresh_robot_) {
++    // Exact evidence for THIS AgentStates batch: input TF stamp and pose,
++    // keyed by the batch stamp (header.seq is owned by ROS publication).
++    nav_msgs::Odometry input;
++    input.header.frame_id = frame_id_;
++    input.header.stamp = guarded_robot_transform_.stamp_;
++    input.child_frame_id = std::to_string(all_status.header.stamp.toNSec());
++    tf::poseTFToMsg(guarded_robot_transform_, input.pose.pose);
++    pub_robot_input_.publish(input);
++  }
+   pub_agent_states_.publish(all_status);
+ }
+
+--- a/pedsim_simulator/include/pedsim_simulator/simulator.h
++++ b/pedsim_simulator/include/pedsim_simulator/simulator.h
+@@ -54,6 +54,7 @@
+ #include <geometry_msgs/TwistWithCovariance.h>
+ #include <nav_msgs/Odometry.h>
+ #include <std_msgs/Header.h>
++#include <std_msgs/String.h>
+ #include <std_srvs/Empty.h>
+
+ #include <pedsim_simulator/agentstatemachine.h>
+@@ -105,6 +106,16 @@
+  private:
+   ros::NodeHandle nh_;
+   bool paused_;
++  bool require_fresh_robot_ = false;
++  bool robot_started_ = false; // set only at actual integration boundary
++  std::string guard_status_;
++  std::string guard_latch_reason_;
++  ros::Publisher pub_guard_status_;
++  void reportGuard(const std::string&, const ros::Time&, const ros::Time&, double);
++  bool robot_failed_ = false;
++  ros::Time last_guard_time_;
++  bool robotInputReady();
++  tf::StampedTransform guarded_robot_transform_;
+   ros::Timer spawn_timer_;
+
+   // publishers
+@@ -112,6 +123,7 @@
+   ros::Publisher pub_agent_states_;
+   ros::Publisher pub_agent_groups_;
+   ros::Publisher pub_robot_position_;
++  ros::Publisher pub_robot_input_;
+   ros::Publisher pub_waypoints_;
+
+   // provided services
+--- a/pedsim_simulator/include/pedsim_simulator/scene.h
++++ b/pedsim_simulator/include/pedsim_simulator/scene.h
+@@ -61,7 +61,9 @@
+       : x{xx}, y{yy}, n{nn}, dx{dxi}, dy{dyi} {}
+ };
+
++class Simulator;
+ class Scene : public QObject, protected Ped::Tscene {
++  friend class Simulator;
+   Q_OBJECT
+
+  public:

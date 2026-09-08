@@ -102,6 +102,9 @@ install(DIRECTORY launch urdf worlds scripts config maps models plugins
 
 # 安装 Python 脚本并赋予执行权限
 catkin_install_python(PROGRAMS
+  scripts/pedsim_round.py
+  scripts/pedsim_single_bridge.py
+  scripts/export_pedsim_office.py
   scripts/pedestrian_sim.py
   scripts/cmd_vel_to_state.py
   scripts/imu_from_state.py
@@ -121,3 +124,5 @@ catkin_install_python(PROGRAMS
   scripts/global_path_corridor_demo.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
+
+install(PROGRAMS scripts/start_pedsim_navigation.sh DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})

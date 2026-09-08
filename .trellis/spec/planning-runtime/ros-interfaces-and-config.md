@@ -38,3 +38,18 @@ The existing MapROS simulated-pose override expires after 0.5 s: suppressing odo
 - Do not silently rename a topic, frame, or parameter without updating launch files, callbacks, and RViz.
 - Do not add a second ad-hoc message shape when an existing ROS message already carries the data.
 - Do not move parameter defaults into an undocumented global constant; the current code makes runtime defaults visible at the parameter boundary.
+
+## Authoritative lightweight plant heartbeat after arrival
+Planner-3 lightweight simulation (simulation && !gazebo_sim) publishes stopped
+sim_odom on the actual arrival return and in existing WAIT_TARGET ticks while
+have_odom, reached_goal, LFPC exists, and no new target is pending. WAIT_TARGET
+reads the authoritative LFPC state under dynObsMutex and reuses publishSimOdom(true).
+No timer, LFPC integration/reset/control change, bridge restamping, generator-odom
+substitution or .5s freshness change. New goal pending suppresses this idle branch;
+normal startup/search/active-plan/STOP behavior remains, and uninitialized idle,
+hardware, Gazebo and other planners acquire no heartbeat. If the owning manager
+actually stops executing/publishing, TF/bridge guards still expire normally.
+This heartbeat certifies current simulator stationary state, not sensor freshness
+or real-world braking. It is limited to after-arrival WAIT_TARGET, not arbitrary
+long initial-search freezes. Existing node/pedsim restarts require user permission;
+changing source/build elsewhere does not unlock current latched pedsim.

@@ -1,0 +1,87 @@
+SCENARIO SELECTION
+  bash /home/xcg/ws/src/cane_planner/plan_manage/scripts/start_pedsim_navigation.sh start --scenario headon
+  bash /home/xcg/ws/src/cane_planner/plan_manage/scripts/start_pedsim_navigation.sh start --scenario overtake
+  bash /home/xcg/ws/src/cane_planner/plan_manage/scripts/start_pedsim_navigation.sh start --scenario crossing
+Default headon keeps prior (-2.5,-3)->(-2.5,3) geometry. YAML source of truth:
+plan_manage/config/pedsim/scenarios.yaml. Overtake (0,-4.5)->(4,-4.5),0.3m/s;
+crossing (1,2.5)->(1,5),0.5m/s; headon desired/max0.5m/s. Initial speed0.
+The value drives original SFM desired force AND caps speed via setVmax; actual
+speed may be lower/deflected, not fixed constant velocity. Former randomized
+headon speed is intentionally replaced by explicit0.5; only geometry default
+is unchanged. User sets own start/goal/timing in RViz to arrange encounters.
+No automatic encounter timing or user goals are generated. Three endpoints
+passed actual office projection connectivity with0.4m square clearance.
+
+SPEED DEPENDENCY UPDATE REQUIRED BEFORE USING THIS CANDIDATE
+Upstream optional single_pedestrian_speed parameter requires the updated pinned
+full patch/manifest. It defaults -1 (original random speed untouched); only
+require_fresh_robot plus exactly one ordinary pedestrian allows positive speed.
+Unknown XML attributes are NOT used. Built/tested candidate dependency is
+/tmp/pedsim-scenes-candidate/ws; permanent dependency and running binary were
+NOT overwritten. Main review and user-authorized dependency rebuild/restart
+are required; launcher rejects old dependency source hashes. Apply complete
+upstream patch only to pristine fixed revision, not atop prior patch.
+Record subcommand still needs no scenario, and port/label behavior is unchanged.
+
+SINGLE-ENTRY PEDSIM NAVIGATION
+=============================
+Optional dependency already built at /home/xcg/cane-pedsim-ws, fixed upstream
+revision de3772630ae174b278da00bcf26e5cf6c2db5ab2 plus manifest-checked guard-v2.
+No shell rc/system package changes. Do not remove old live workspaces while used.
+
+After review/integration and user-authorized fresh round, ONE command:
+  bash /home/xcg/ws/src/cane_planner/plan_manage/scripts/start_pedsim_navigation.sh
+No manual source is required. Script loads primary and optional setup --extend,
+checks patched upstream source hashes, rejects occupied private port11551,
+exports the actual office PCD to a per-round temporary XML and runs one roslaunch
+parent containing existing navigation+pedsim+bridge. It never attaches to11311.
+An alternate unused private port uses start --port PORT. Do not launch two
+rounds together: while masters differ, RViz windows/physical operator intent can
+be confused. Script does not kill anything or auto-retry occupied ports.
+
+In RViz set initial pose then a navigation goal. No goal means WAIT_GOAL; fresh
+post-goal LFPC sim_odom plus actual upstream PAUSED_READY permit ONE automatic
+unpause call. A* may initially STOP while waiting; existing STOP heartbeat
+supplies true plant state. WAIT_PLANT/WAIT_INPUT means waiting for this evidence;
+WAIT_PAIRED_OUTPUT means released and waiting for exact step pairing. RUNNING
+means valid paired source, including stationary user after arrival. No hidden
+pedestrian goal is sent to planner. Default deterministic launch remains unchanged.
+
+FAULT_RESTART_ROUND: true stale/illegal/rollback/latch remains fail-closed and is
+NEVER auto-unpaused again. Read /pedsim_single_bridge/status and upstream
+/pedsim_simulator/guard_status on this round's master. Status publishes only on
+transition. The .5s freshness and upstream guards are unchanged.
+
+RESET: Ctrl+C in the single entry terminal, wait for its owned processes to exit,
+then rerun the SAME command and set initial pose/goal. This restarts navigation,
+simulator and bridge together. Do not manually unpause a fault or kill other ROS
+nodes. Script intentionally leaves small per-round generated files for evidence.
+
+ONE-COMMAND RECORDING (another terminal; no manual source/export):
+  bash /home/xcg/ws/src/cane_planner/plan_manage/scripts/start_pedsim_navigation.sh record --label pedsim_round
+Alternate port must match on both commands:
+  bash /home/xcg/ws/src/cane_planner/plan_manage/scripts/start_pedsim_navigation.sh start --port 11552
+  bash /home/xcg/ws/src/cane_planner/plan_manage/scripts/start_pedsim_navigation.sh record --port 11552 --label trial2
+Recording verifies held round lock, master PID and random round token. Missing,
+external or replaced master fails, never falls back to11311. Ctrl+C recording
+stops only its recorder; Ctrl+C start stops only its launched round children.
+Original recorder remains usable separately and unchanged except topic additions.
+
+OWNERSHIP: persistent per-port flock is held by Python supervisor from port
+check through map generation and round cleanup. Lock-file existence alone means
+nothing and files are never deleted. Direct owned rosmaster is created and PID
+verified before setting token/launching --wait navigation. External port takeover
+during map generation is rejected without touching external master. PID/token
+are monitored throughout round and recording. Private process groups isolate
+SIGINT/TERM cleanup. No claim of authentication against a hostile same-user
+process spoofing ROS XMLRPC identity; arbitrary normal external port racers are
+not attached. No navigation UI used in ownership tests.
+
+Verification: dedicated dependency compiled; six offline startup/pairing tests;
+private11543 actual simulator+candidate bridge waits through paused fresh/lost/
+fresh TF with no goal, automatically releases after goal+fresh odom, continues
+through1.5s stationary heartbeats, then true source loss stays faulted despite
+fresh odom returning. Two independent test rounds clean their owned processes.
+No navigation UI launched in validation. User still verifies RViz/full trajectory
+and full-round restart. Static world height-band/quantization and safety limits
+remain as described in DEPLOYMENT.txt; no new collision guarantee.
