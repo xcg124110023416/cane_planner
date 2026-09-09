@@ -46,21 +46,18 @@ public:
         return c;
     }
 
-    static void configure(MpcController &c, bool use_best = false)
+    static void configure(MpcController &c, bool = false)
     {
         c.cfg_.horizon_steps = 1;
-        c.cfg_.num_samples = 128;
-        c.cfg_.fix_step_params = true;
         c.cfg_.nominal_al = 0.25;
-        c.cfg_.sigma_api = 0.7;
         c.cfg_.max_api = 0.7854;
-        c.cfg_.use_best = use_best;
         c.cfg_.w_goal = c.cfg_.w_steer = c.cfg_.w_dapi = 0.0;
-        c.warm_start_ = c.makeNominalSequence(1);
-        c.rng_.seed(7);
-        c.normal_dist_.reset();
     }
 
+    static void beam(MpcController& c,int horizon,int width) {c.cfg_.horizon_steps=horizon;c.cfg_.beam_width=width;c.cfg_.w_goal=10.;c.cfg_.goal_arrival_threshold=0.;}
+    static void angleLimit(MpcController& c,double limit) {c.cfg_.max_api=limit;}
+    static CollisionDetection::Ptr wideMap() {auto c=map();c->static_origin_=Eigen::Vector2d(-10,-10);c->static_map_resolution_=.025;c->static_map_inv_resolution_=40.;return c;}
+    static void suffixCost(MpcController& c) {c.cfg_.horizon_steps=10;c.cfg_.beam_width=8;c.cfg_.w_steer=.5;c.cfg_.w_dapi=.7;c.cfg_.w_goal=10.;c.cfg_.goal_arrival_threshold=.2;}
     static void steeringCost(MpcController &c) { c.cfg_.w_steer = 0.5; }
 
     static void corridorGrid(CollisionDetection& c)
@@ -196,7 +193,7 @@ TEST(StaticMpcRuntime, MissingInvalidAndClearedCorridorStop)
     EXPECT_TRUE(c.getBestPath().empty());
 }
 
-TEST(StaticMpcRuntime, WeightedSuccessDisplaysExecutedPath)
+TEST(StaticMpcRuntime, DiscreteSelectedPathMatchesExecutedAction)
 {
     MpcController c;
     StaticMpcTestAccess::configure(c);
@@ -206,15 +203,15 @@ TEST(StaticMpcRuntime, WeightedSuccessDisplaysExecutedPath)
     const auto command = c.plan(m, Eigen::Vector3d(2, 0, 0));
     ASSERT_TRUE(c.lastPlanValid());
     const auto d = c.getDebugMetrics();
-    EXPECT_TRUE(d.weighted_checked);
+    EXPECT_FALSE(d.weighted_checked);
     EXPECT_FALSE(d.weighted_fallback);
-    EXPECT_EQ(d.valid_trajectory_count, 128);
-    EXPECT_EQ(d.num_samples, 128);
+    EXPECT_EQ(d.valid_trajectory_count, 5);
+    EXPECT_EQ(d.num_samples, 5);
     EXPECT_DOUBLE_EQ(d.executed_total_cost, 0.0);
     expectExecutedPath(c, m, command);
 }
 
-TEST(StaticMpcRuntime, WeightedFootCollisionFallsBackToCheckedBest)
+TEST(StaticMpcRuntime, DiscreteFootCollisionRejectsAndSelectionIsDeterministic)
 {
     MpcController weighted, best;
     StaticMpcTestAccess::configure(weighted);
@@ -231,8 +228,8 @@ TEST(StaticMpcRuntime, WeightedFootCollisionFallsBackToCheckedBest)
     const auto actual = weighted.plan(m, goal);
     ASSERT_TRUE(best.lastPlanValid());
     ASSERT_TRUE(weighted.lastPlanValid());
-    EXPECT_TRUE(weighted.getDebugMetrics().weighted_checked);
-    EXPECT_TRUE(weighted.getDebugMetrics().weighted_fallback);
+    EXPECT_FALSE(weighted.getDebugMetrics().weighted_checked);
+    EXPECT_FALSE(weighted.getDebugMetrics().weighted_fallback);
     EXPECT_NEAR((actual - expected).norm(), 0.0, 1e-12);
     EXPECT_GT(weighted.getDebugMetrics().static_reject_count, 0);
     EXPECT_EQ(weighted.getDebugMetrics().static_reject_count,
@@ -240,7 +237,7 @@ TEST(StaticMpcRuntime, WeightedFootCollisionFallsBackToCheckedBest)
     expectExecutedPath(weighted, m, actual);
 }
 
-TEST(StaticMpcRuntime, WeightedOutputCostDoesNotOverwriteBestSampleCost)
+TEST(StaticMpcRuntime, DiscreteSelectedCostMatchesExecutedCost)
 {
     MpcController weighted, best;
     auto m = StaticMpcTestAccess::model();
@@ -255,11 +252,11 @@ TEST(StaticMpcRuntime, WeightedOutputCostDoesNotOverwriteBestSampleCost)
     }
     EXPECT_DOUBLE_EQ(weighted.getDebugMetrics().best_total_cost,
                      best.getDebugMetrics().best_total_cost);
-    EXPECT_GT(weighted.getDebugMetrics().executed_total_cost,
+    EXPECT_DOUBLE_EQ(weighted.getDebugMetrics().executed_total_cost,
               weighted.getDebugMetrics().best_total_cost);
 }
 
-TEST(StaticMpcRuntime, WeightedUnionExitFallsBackToCheckedBest)
+TEST(StaticMpcRuntime, DiscreteUnionChecksPreservedWithoutAveraging)
 {
     MpcController weighted, best;
     auto m = StaticMpcTestAccess::model();
@@ -277,7 +274,7 @@ TEST(StaticMpcRuntime, WeightedUnionExitFallsBackToCheckedBest)
     const auto actual = weighted.plan(m, Eigen::Vector3d(2, 0, 0));
     ASSERT_TRUE(best.lastPlanValid());
     ASSERT_TRUE(weighted.lastPlanValid());
-    EXPECT_TRUE(weighted.getDebugMetrics().weighted_fallback);
+    EXPECT_FALSE(weighted.getDebugMetrics().weighted_fallback);
     EXPECT_GT(weighted.getDebugMetrics().convex_corridor_reject_count, 0);
     EXPECT_GT(weighted.getDebugMetrics().max_convex_corridor_violation, 0.0);
     EXPECT_NEAR((actual - expected).norm(), 0.0, 1e-12);
@@ -292,7 +289,7 @@ TEST(StaticMpcRuntime, EverySampleOutsideUnionStops)
     c.setConvexCorridor({box(-0.001, 0.001)});
     EXPECT_TRUE(c.plan(StaticMpcTestAccess::model(), Eigen::Vector3d(2, 0, 0)).isZero());
     EXPECT_FALSE(c.lastPlanValid());
-    EXPECT_EQ(c.getDebugMetrics().convex_corridor_reject_count, 128);
+    EXPECT_EQ(c.getDebugMetrics().convex_corridor_reject_count, 5);
     EXPECT_FALSE(c.getDebugMetrics().weighted_checked);
     EXPECT_TRUE(c.getBestPath().empty());
 }
@@ -305,10 +302,87 @@ TEST(StaticMpcRuntime, EverySampleComCollisionStops)
     c.setConvexCorridor({box()});
     EXPECT_TRUE(c.plan(StaticMpcTestAccess::model(), Eigen::Vector3d(2, 0, 0)).isZero());
     EXPECT_FALSE(c.lastPlanValid());
-    EXPECT_EQ(c.getDebugMetrics().static_reject_count, 128);
+    EXPECT_EQ(c.getDebugMetrics().static_reject_count, 5);
     EXPECT_TRUE(c.getBestPath().empty());
 }
 
+TEST(StaticMpcRuntime, BeamFullHorizonCopiesAncestryDiversityAndPruningUnknown)
+{
+    MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::beam(c,5,2);
+    c.setCollision(StaticMpcTestAccess::map());c.setConvexCorridor({box(-10,10,-10,10)});
+    auto model=StaticMpcTestAccess::model();const auto original=model->getState();
+    const auto position=model->getCOMPos();const auto control=c.plan(model,Eigen::Vector3d(1,1,0));
+    ASSERT_TRUE(c.lastPlanValid());EXPECT_EQ(original,model->getState());EXPECT_EQ(position,model->getCOMPos());
+    const auto evidence=c.beamEvidence();ASSERT_GE(evidence.selected_leaf,0);
+    EXPECT_LE(c.tree().size(),size_t(1+5+25*2*4));EXPECT_EQ(5,c.tree()[evidence.selected_leaf].depth);
+    EXPECT_TRUE(evidence.reroll_valid);int found=0,pruned=0;for(int i=0;i<5;++i){found+=evidence.found[i];pruned+=evidence.pruned[i];}
+    EXPECT_EQ(5,found);EXPECT_GT(pruned,0);
+    std::vector<int> chain;for(int id=evidence.selected_leaf;id>0;id=c.tree()[id].parent){chain.push_back(id);EXPECT_TRUE(c.tree()[id].continuation_found);}
+    std::reverse(chain.begin(),chain.end());EXPECT_DOUBLE_EQ(control.z(),c.tree()[chain.front()].action);
+    LFPC replay;replay.copyState(*model);bool changed=false;
+    for(size_t i=0;i<chain.size();++i) {
+        const auto& n=c.tree()[chain[i]];replay.SetCtrlParams(Eigen::Vector3d(control.x(),control.y(),n.action));replay.updateOneStep();replay.prepareNextStep();
+        EXPECT_EQ(replay.getCOMPos(),const_cast<LFPC&>(n.state).getCOMPos());
+        EXPECT_EQ(replay.getFootPosition(),const_cast<LFPC&>(n.state).getFootPosition());
+        EXPECT_EQ(replay.getState(),const_cast<LFPC&>(n.state).getState());
+        if(i && n.action!=c.tree()[chain[i-1]].action)changed=true;
+    }
+    EXPECT_TRUE(changed); // candidate can change steering at successive nodes
+    const auto again=c.plan(model,Eigen::Vector3d(1,1,0));EXPECT_EQ(control,again);
+    EXPECT_EQ(evidence.evaluated,c.beamEvidence().evaluated);EXPECT_EQ(evidence.selected_leaf,c.beamEvidence().selected_leaf);
+    std::cout<<"BEAM horizon=5 width_per_root=2 evaluated="<<evidence.evaluated<<" ms="<<c.lastPlanTimeMs()<<std::endl;
+}
+TEST(StaticMpcRuntime, BeamActionLimitsAndNoFullContinuation)
+{
+    MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::beam(c,4,2);StaticMpcTestAccess::angleLimit(c,0.);
+    c.setCollision(StaticMpcTestAccess::map());c.setConvexCorridor({box(-.1,.2,-1,1)});
+    const auto result=c.plan(StaticMpcTestAccess::model(),Eigen::Vector3d(3,0,0));
+    EXPECT_FALSE(c.lastPlanValid());EXPECT_TRUE(result.isZero());EXPECT_EQ(0,c.beamEvidence().full_leaves);
+    EXPECT_FALSE(c.beamEvidence().available[0]);EXPECT_TRUE(c.beamEvidence().available[2]);
+    EXPECT_FALSE(c.beamEvidence().found[2]);
+    StaticMpcTestAccess::beam(c,33,2);EXPECT_TRUE(c.plan(StaticMpcTestAccess::model(),Eigen::Vector3d(3,0,0)).isZero());
+    EXPECT_TRUE(c.tree().empty());
+}
+TEST(StaticMpcRuntime, FinalArrivalIsSafeTerminalButLocalGoalIsNot)
+{
+    MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::beam(c,10,8);StaticMpcTestAccess::steeringCost(c);
+    c.setCollision(StaticMpcTestAccess::map());c.setConvexCorridor({box(-.5,.7,-.3,.3)});
+    auto model=StaticMpcTestAccess::model();const Eigen::Vector2d final(.30,0);
+    c.plan(model,Eigen::Vector3d(.30,0,0));EXPECT_FALSE(c.lastPlanValid()); // local-only: no invented idle
+    const auto cmd=c.plan(model,Eigen::Vector3d(.30,0,0),&final,.2);
+    ASSERT_TRUE(c.lastPlanValid());ASSERT_GE(c.beamEvidence().selected_leaf,0);
+    EXPECT_TRUE(c.tree()[c.beamEvidence().selected_leaf].terminal);
+    EXPECT_LT(c.tree()[c.beamEvidence().selected_leaf].depth,10);EXPECT_TRUE(c.beamEvidence().reroll_valid);
+    LFPC state;state.copyState(*model);state.SetCtrlParams(cmd);state.updateOneStep();
+    EXPECT_LT((state.getCOMPos().head<2>()-final).norm(),.2);
+    c.setConvexCorridor({box(-.001,.001,-.3,.3)});
+    EXPECT_TRUE(c.plan(model,Eigen::Vector3d(.30,0,0),&final,.2).isZero());EXPECT_FALSE(c.lastPlanValid());
+}
+TEST(StaticMpcRuntime, LocalArrivalStillChargesEveryWalkingSuffixEdge)
+{
+    MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::suffixCost(c);
+    c.setCollision(StaticMpcTestAccess::wideMap());c.setConvexCorridor({box(-10,10,-10,10)});
+    auto model=StaticMpcTestAccess::model();
+    const auto command=c.plan(model,Eigen::Vector3d(.30,0,0));ASSERT_TRUE(c.lastPlanValid());
+    const auto& nodes=c.tree();const auto& leaf=nodes[c.beamEvidence().selected_leaf];
+    EXPECT_EQ(10,leaf.depth);EXPECT_FALSE(leaf.terminal);EXPECT_TRUE(leaf.arrived);
+    EXPECT_DOUBLE_EQ(0.,command.z());EXPECT_DOUBLE_EQ(0.,leaf.motion_cost);
+    int suffix_turns=0;
+    for(const auto& n:nodes)if(n.safe && n.parent>=0) {
+        const auto& parent=nodes[n.parent];
+        const double increment=.5*std::abs(n.action)+(n.depth>1?.7*std::abs(n.action-parent.action):0.);
+        EXPECT_DOUBLE_EQ(parent.motion_cost+increment,n.motion_cost);
+        if(parent.arrived && n.action!=0.){++suffix_turns;EXPECT_GT(n.motion_cost,parent.motion_cost);}
+    }
+    EXPECT_GT(suffix_turns,0);
+    for(int id=leaf.id;id>0;id=nodes[id].parent)EXPECT_DOUBLE_EQ(0.,nodes[id].action);
+    EXPECT_TRUE(c.beamEvidence().reroll_valid);
+    EXPECT_DOUBLE_EQ(leaf.objective,c.getDebugMetrics().executed_total_cost);
+    const Eigen::Vector2d final(.30,0);
+    c.plan(model,Eigen::Vector3d(.30,0,0),&final,.2);ASSERT_TRUE(c.lastPlanValid());
+    EXPECT_TRUE(c.tree()[c.beamEvidence().selected_leaf].terminal);
+    EXPECT_EQ(1,c.tree()[c.beamEvidence().selected_leaf].depth);
+}
 TEST(StaticMpcRuntime, QueryResolutionTracksSelectedStaticBackend)
 {
     auto c = StaticMpcTestAccess::map();

@@ -1,0 +1,207 @@
+{
+  "bag": "/home/xcg/ws/records/20260909_002529_pedsim_round/mpc_eval.bag",
+  "start_epoch": 1788884729.8607972,
+  "end_epoch": 1788884759.7755098,
+  "duration_s": 29.91471266746521,
+  "topic_counts": {
+    "/astar/path": 4,
+    "/pedsim_simulator/guard_status": 1,
+    "/pedsim_single_bridge/status": 2,
+    "/pedsim_simulator/robot_input": 276,
+    "/pedsim_simulator/simulated_agents": 276,
+    "/onboard_detector/dynamic_obstacles_info": 13,
+    "/sim_odom": 266,
+    "/initialpose": 3,
+    "/move_base_simple/goal": 3,
+    "/mpc/beam_evidence": 210,
+    "/mpc/debug_metrics": 207,
+    "/mpc/stop_reason": 207,
+    "/mpc/transaction_diagnostics": 207
+  },
+  "bridge_status": [
+    {
+      "epoch": 1788884730.4802678,
+      "relative_s": 0.6194705963134766,
+      "state": "RUNNING"
+    },
+    {
+      "epoch": 1788884733.671077,
+      "relative_s": 3.8102798461914062,
+      "state": "FAULT_RESTART_ROUND"
+    }
+  ],
+  "guard_status": [
+    {
+      "epoch": 1788884730.4693465,
+      "state": "state=RUNNING started=0 paused=0 sample_time=1788884701.79 tf_stamp=1788884701.73 age=0.054910898"
+    }
+  ],
+  "planner": {
+    "cycles": 207,
+    "integrations": 0,
+    "valid_plans": 0,
+    "stop_reasons": {
+      "DYNAMIC_DATA_INVALID": 207
+    },
+    "first_stop_epoch": 1788884738.8348372,
+    "last_source_stamp": 1788884731.6854818,
+    "first_source_age_s": 7.148728847503662,
+    "last_source_age_s": 28.054544687271118,
+    "beam_plan_records": 207,
+    "evaluated_edges_total": 0.0,
+    "first_beam_24_fields": [
+      1.0,
+      10.0,
+      8.0,
+      0.0,
+      0.0,
+      -1.0,
+      -1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "stage13_firi_count": 0,
+    "stage14_recovery_count": 0,
+    "max_transaction_steady_s": 0.0015284
+  },
+  "clock_evidence": {
+    "clock_topic_present": false,
+    "first_entry_epoch": 1788884738.8342106,
+    "prior_entry_ros_delta_s": 15.604020833969116,
+    "prior_entry_steady_delta_s": 13.714398143,
+    "excess_ros_over_steady_s": 1.8896226909691158,
+    "inferred_previous_entry_epoch": 1788884723.2301898,
+    "later_max_abs_clock_delta_difference_s": 3.975576171877382e-07
+  },
+  "goals": [
+    {
+      "epoch": 1788884738.4425848,
+      "relative_s": 8.581787586212158,
+      "xy": [
+        -6.630475044250488,
+        -5.7609100341796875
+      ]
+    },
+    {
+      "epoch": 1788884751.466665,
+      "relative_s": 21.605867862701416,
+      "xy": [
+        -6.625866413116455,
+        -5.721036434173584
+      ]
+    },
+    {
+      "epoch": 1788884755.4144213,
+      "relative_s": 25.553624153137207,
+      "xy": [
+        -6.572704315185547,
+        -5.130664825439453
+      ]
+    }
+  ],
+  "paths": [
+    {
+      "epoch": 1788884730.0878751,
+      "relative_s": 0.22707796096801758,
+      "header_epoch": 1788884718.926306,
+      "points": 155,
+      "start": [
+        4.557671546936035,
+        5.731333255767822
+      ],
+      "goal": [
+        -6.457500457763672,
+        -5.671626091003418
+      ]
+    },
+    {
+      "epoch": 1788884738.8347921,
+      "relative_s": 8.973994970321655,
+      "header_epoch": 1788884738.8339686,
+      "points": 156,
+      "start": [
+        4.569055557250977,
+        5.821558475494385
+      ],
+      "goal": [
+        -6.630475044250488,
+        -5.7609100341796875
+      ]
+    },
+    {
+      "epoch": 1788884751.7318096,
+      "relative_s": 21.871012449264526,
+      "header_epoch": 1788884751.7311044,
+      "points": 156,
+      "start": [
+        4.615776538848877,
+        5.820088863372803
+      ],
+      "goal": [
+        -6.625866413116455,
+        -5.721036434173584
+      ]
+    },
+    {
+      "epoch": 1788884755.6412773,
+      "relative_s": 25.78048014640808,
+      "header_epoch": 1788884755.6397696,
+      "points": 158,
+      "start": [
+        4.780453205108643,
+        5.206008434295654
+      ],
+      "goal": [
+        -6.572704315185547,
+        -5.130664825439453
+      ]
+    }
+  ],
+  "gaps": {
+    "/sim_odom": [
+      {
+        "previous_epoch": 1788884731.6307113,
+        "next_epoch": 1788884733.6202831,
+        "receipt_gap_s": 1.9895718097686768,
+        "header_gap_s": 1.9896736879999999
+      }
+    ],
+    "/pedsim_simulator/simulated_agents": [
+      {
+        "previous_epoch": 1788884731.6858807,
+        "next_epoch": 1788884733.6754653,
+        "receipt_gap_s": 1.9895846843719482,
+        "header_gap_s": 1.9896049630000001
+      }
+    ],
+    "/pedsim_simulator/robot_input": [
+      {
+        "previous_epoch": 1788884731.6858528,
+        "next_epoch": 1788884733.6754284,
+        "receipt_gap_s": 1.9895756244659424,
+        "header_gap_s": 1.9897022610000001
+      }
+    ]
+  },
+  "limitations": [
+    "No valid moving beam plan or arrival transition is recorded; prior motion predates bag.",
+    "Bridge emits no exact latch reason; watchdog stale-after-clock-step is strongly supported, not uniquely proven.",
+    "ROS-vs-steady offset step is established across the previous/current entry interval, not precisely located by a simultaneous clock sample at the source gap.",
+    "The first Astar path and guard RUNNING may be retained/latched messages, not newly occurring events."
+  ]
+}

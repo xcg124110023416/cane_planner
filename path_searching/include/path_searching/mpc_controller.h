@@ -3,7 +3,7 @@
 
 #include <Eigen/Eigen>
 #include <limits>
-#include <random>
+#include <array>
 #include <vector>
 
 #include <ros/ros.h>
@@ -23,10 +23,7 @@ public:
         // Horizon
         int horizon_steps = 6;       // N: lookahead steps
 
-        // MPPI sampling
-        int num_samples = 100;       // K
-        double temperature = 0.1;    // lower = more greedy
-        int mpc_iters = 1;           // MPPI iterations per plan
+        int beam_width = 8; // survivors per root action, not global winners
 
         // Control bounds
         double max_al = 0.4;
@@ -34,21 +31,10 @@ public:
         double max_aw = 0.15;
         double max_api = 0.5236;     // ~30 deg
 
-        // Exploration noise std
-        double sigma_al = 0.06;
-        double sigma_aw = 0.04;
-        double sigma_api = 0.12;
-
         // Cost weights
         double w_steer = 0.5;
         double w_goal = 10.0;
         double w_dapi = 0.0;    // steering rate penalty: |api[n] - api[n-1]|
-
-        // Use best trajectory instead of weighted average (avoids mode collapse)
-        bool use_best = true;
-
-        // Fix step length/width to nominal (human provides, only optimize api)
-        bool fix_step_params = false;
 
         // Early goal arrival: stop rollout and skip terminal cost if within this radius
         double goal_arrival_threshold = 0.3;
@@ -56,7 +42,7 @@ public:
         // Warm-start nominal
         double nominal_al = 0.25;
         double nominal_aw = 0.0;
-        double nominal_api = 0.0;
+
     };
 
     struct DebugMetrics
@@ -85,6 +71,24 @@ public:
         double executed_total_cost = std::numeric_limits<double>::infinity();
     };
 
+    struct TreeNode {
+        LFPC state;
+        int id=0, parent=-1, root=-1, depth=0;
+        std::vector<int> children;
+        double action=0., motion_cost=0., objective=0.;
+        bool terminal=false, arrived=false, safe=false, pruned=false, continuation_found=false;
+    };
+    struct BeamEvidence {
+        int horizon=0, width=0, selected_root=-1, selected_leaf=-1;
+        std::array<bool,5> available{{false,false,false,false,false}};
+        std::array<bool,5> found{{false,false,false,false,false}};
+        std::array<bool,5> pruned{{false,false,false,false,false}};
+        int evaluated=0, full_leaves=0;
+        bool reroll_valid=false;
+    };
+    const BeamEvidence& beamEvidence() const {return beam_evidence_;}
+    const std::vector<TreeNode>& tree() const {return tree_;}
+
     MpcController();
     ~MpcController();
 
@@ -98,7 +102,8 @@ public:
 
     // Static planner API: one LFPC step, returns [al, aw, api].
     Eigen::Vector3d plan(const LFPC::Ptr &lfpc_base,
-                         const Eigen::Vector3d &goal_pos);
+                         const Eigen::Vector3d &goal_pos,
+                         const Eigen::Vector2d* final_goal = nullptr, double final_radius = 0.);
 
     // Return the best predicted CoM path from last plan (for visualization)
     std::vector<Eigen::Vector3d> getBestPath() const { return best_path_; }
@@ -118,16 +123,12 @@ private:
     bool has_convex_corridor_ = false;
     std::vector<ConvexCorridor::Segment> convex_corridor_segments_;
 
-    // Pre-allocated LFPC pool for rollout
-    std::vector<LFPC::Ptr> lfpc_pool_;
-
-    // Warm-start control sequence: N x 3
-    Eigen::MatrixXd warm_start_;
-
-    // RNG
-    std::mt19937 rng_;
-    std::normal_distribution<double> normal_dist_;
-
+    std::vector<TreeNode> tree_;
+    BeamEvidence beam_evidence_;
+    ros::Publisher beam_pub_;
+    void publishBeamEvidence();
+    bool advance(LFPC& state, double action, std::vector<Eigen::Vector3d>& path);
+    double distanceToGoal(LFPC&,const Eigen::Vector3d&) const;
     // Best path from last plan
     std::vector<Eigen::Vector3d> best_path_;
 
@@ -144,22 +145,7 @@ private:
         const std::vector<std::vector<Eigen::Vector3d>> &paths,
         const Eigen::VectorXd &costs);
 
-    // Internal methods
-    Eigen::MatrixXd makeNominalSequence(int N);
-    std::vector<Eigen::MatrixXd> sampleSequences(const Eigen::MatrixXd &mean,
-                                                  int N, int K);
-    void rolloutBatch(const LFPC::Ptr &lfpc_base,
-                      const std::vector<Eigen::MatrixXd> &samples,
-                      const Eigen::Vector3d &goal_pos,
-                      Eigen::VectorXd &costs,
-                      std::vector<std::vector<Eigen::Vector3d>> &paths,
-                      std::vector<bool> &sample_corridor_feasible);
-    Eigen::VectorXd computeWeights(const Eigen::VectorXd &costs);
-    Eigen::MatrixXd weightedUpdate(const std::vector<Eigen::MatrixXd> &samples,
-                                    const Eigen::VectorXd &weights,
-                                    int N);
-    void shiftSequence(Eigen::MatrixXd &mean, int N);
-    void ensurePool(int K);
+
 };
 
 } // namespace cane_planner

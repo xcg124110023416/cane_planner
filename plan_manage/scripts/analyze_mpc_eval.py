@@ -294,7 +294,8 @@ def analyze_bag(bag_path, odom_topic=DEFAULT_ODOM_TOPIC, robot_radius=0.25):
                 if len(data) > 0:
                     plan_time.add(data[0])
                 if len(data) > 1:
-                    valid_ratio.add(data[1])
+                    if math.isfinite(data[1]) and 0.0 <= data[1] <= 1.0:
+                        valid_ratio.add(data[1])
                 if len(data) > 3:
                     value = metric_or_none(data, 3)
                     if value is not None:

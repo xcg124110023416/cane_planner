@@ -19,6 +19,26 @@ namespace cane_planner
 namespace
 {
 
+void certifyCorridorRoot(ConvexCorridor::Result& result, const Eigen::Vector2d& root)
+{
+    if (!result.feasible)
+        return;
+    // Match the controller's root union check before committing new geometry.
+    if (root.allFinite() && std::any_of(result.segments.begin(), result.segments.end(),
+            [&](const ConvexCorridor::Segment& segment) {
+                return ConvexCorridor::contains(segment, root, 1e-6);
+            }))
+        return;
+    result.feasible = false;
+    result.segments.clear();
+    result.failure_reason = ConvexCorridor::FailureReason::OUTPUT_CERTIFICATE;
+    result.diagnostics.stage = ConvexCorridor::FailureStage::OUTPUT_CERTIFICATE;
+    result.failure_segment_index = 0;
+    result.failure_s = 0.;
+    result.failure_position = root;
+    result.failure_position_valid = root.allFinite();
+}
+
 double cross2d(const Eigen::Vector2d& a, const Eigen::Vector2d& b)
 {
     return a.x() * b.y() - a.y() * b.x();
@@ -1208,16 +1228,23 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             const double fraction = edge.squaredNorm() > 1e-12
                 ? std::max(0.0, std::min(1.0,
                     (current_pose.head(2) - a).dot(edge) / edge.squaredNorm())) : 0.0;
-            reference_path.push_back(a + fraction * edge);
+            const Eigen::Vector2d projection = a + fraction * edge;
+            reference_path.push_back(current_pose.head<2>());
+            // Keep the exact root; only omit a sub-nanometre degenerate connector.
+            // FIRI certifies this connector with the same static/dynamic geometry.
+            if ((projection - reference_path.back()).norm() >= 1e-9)
+                reference_path.push_back(projection);
+            Eigen::Vector2d forward_previous = projection;
             double length = 0.0;
             const double local_length = std::max(8.0, 2.0 * lookahead_dist_);
             for (size_t i = global_wp_idx_ + 1;
                  i < global_waypoints_.size() && length < local_length; ++i)
             {
-                const double ds = (global_waypoints_[i] - reference_path.back()).norm();
+                const double ds = (global_waypoints_[i] - forward_previous).norm();
                 if (ds <= 1e-6)
                     continue;  // duplicate projection, not a skipped route edge
                 length += ds;
+                forward_previous = global_waypoints_[i];
                 reference_path.push_back(global_waypoints_[i]);
             }
         }
@@ -1266,6 +1293,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
                 result.failure_reason=ConvexCorridor::FailureReason::DYNAMIC_DATA_INVALID;
                 pedestrian_geometry_.clear();
             }
+            certifyCorridorRoot(result, current_pose.head<2>());
             std::string snapshot_file, snapshot_error;
             if (polygons.empty() && result.failure_reason!=ConvexCorridor::FailureReason::DYNAMIC_DATA_INVALID) {
                 const auto capture = corridor_failure_capture_.saveOnce(corridor_failure_directory_,
@@ -1327,6 +1355,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         auto rebuilt=convex_corridor_->buildStatic(local,grid,polygons); // SAME hull, not recomputed SFM
         transaction_diag_[15]=std::chrono::duration<double>(std::chrono::steady_clock::now()-rebuild_started).count();
         dynamic_recovery_seconds_=std::chrono::duration<double>(std::chrono::steady_clock::now()-began).count();
+        certifyCorridorRoot(rebuilt, pose.head<2>());
         if(!rebuilt.feasible) {dynamic_recovery_reason_="REBUILD_FAILED";return rebuilt;}
         if(!authorizePedestrianFrameLocked(frame,ros::Time::now())) {dynamic_recovery_reason_="EXPIRED";return blocked;}
         global_waypoints_=candidate.path;global_wp_idx_=0;
@@ -2615,7 +2644,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             mpc_controller_->clearConvexCorridor();
 
         const auto mppi_started=std::chrono::steady_clock::now();
-        Eigen::Vector3d control = mpc_controller_->plan(lfpc_model_, mpc_sim_goal_);
+        Eigen::Vector3d control = mpc_controller_->plan(lfpc_model_, mpc_sim_goal_, &end_pt_, global_wp_arrival_radius_);
         transaction_diag_[16]=std::chrono::duration<double>(std::chrono::steady_clock::now()-mppi_started).count();
 #ifdef CANE_MANAGER_INTERLEAVING_TEST
         if (after_mppi_test_hook_) after_mppi_test_hook_();
@@ -2653,7 +2682,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             // (-1); index 11 remains legacy DWC rejects (zero). Index 12 is
             // convex rejects. Explicit static mode and weighted result append.
             std_msgs::MultiArrayDimension mode;
-            mode.label = "planner3_static_union_v1;19=static,20=weighted_checked,21=weighted_fallback,22=executed_cost;23=pedestrian_source_enabled,24=current_frame_corridor_feasible,25=corridor_failure_reason";
+            mode.label = "planner3_lfpc_beam_v1;1=unavailable,7=evaluated_edges,16=retained_full_leaves;19=static,20=weighted_checked,21=weighted_fallback,22=executed_cost;23=pedestrian_source_enabled,24=current_frame_corridor_feasible,25=corridor_failure_reason";
             mode.size = 26;
             mode.stride = 26;
             metrics.layout.dim.push_back(mode);

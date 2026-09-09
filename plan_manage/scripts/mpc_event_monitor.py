@@ -95,7 +95,7 @@ class MpcEventMonitor:
         if data is None or len(data) < 10:
             return "metrics=NA"
 
-        valid = self.fmt(data[1])
+        valid = self.fmt(data[1]) if 0.0 <= data[1] <= 1.0 else "NA"
         clearance = self.fmt(data[3])
         ttc = self.fmt(data[4])
         plan_valid = int(data[8]) if len(data) > 8 else -1

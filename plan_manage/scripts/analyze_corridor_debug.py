@@ -252,7 +252,7 @@ def analyze_bag(bag_path):
                 data = list(msg.data)
                 debug_samples.append({
                     "t": tr,
-                    "valid_ratio": data[1] if len(data) > 1 else float("nan"),
+                    "valid_ratio": data[1] if len(data) > 1 and 0.0 <= data[1] <= 1.0 else float("nan"),
                     "plan_valid": data[8] if len(data) > 8 else float("nan"),
                     "best_clearance": data[9] if len(data) > 9 else float("nan"),
                     "corridor_reject_count": data[11] if len(data) > 11 else float("nan"),

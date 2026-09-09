@@ -27,6 +27,10 @@ public:
             if(std::abs(py)>.3)c.static_inflated_[c.staticToAddress(Eigen::Vector2i(x,y))]=1;
         }
     }
+    static void block(CollisionDetection& c, const Eigen::Vector2d& p) {
+        const Eigen::Vector2i cell=((p-c.static_origin_)*c.static_map_inv_resolution_).array().floor().cast<int>();
+        c.static_inflated_[c.staticToAddress(cell)]=1;
+    }
     static std::vector<double> state(const LFPC& m)
     {
         return {double(m.support_leg_), m.t_sup_, m.delta_t_, m.h_, m.t_c_,
@@ -120,6 +124,27 @@ public:
     static uint64_t attempts(PlannerManager&m) {return m.dynamic_recovery_attempts_;}
     static std::string recoveryReason(PlannerManager&m) {return m.dynamic_recovery_reason_;}
     static std::vector<Eigen::Vector2d> route(PlannerManager&m) {return m.global_waypoints_;}
+    static void reference(PlannerManager& m, const std::vector<Eigen::Vector2d>& path, size_t index=0) {
+        m.global_waypoints_=path;m.global_wp_idx_=index;
+    }
+    static size_t reanchor(PlannerManager& m) {
+        std::lock_guard<std::mutex> lock(m.dynObsMutex_);
+        m.reanchorWaypoint(m.lfpc_model_->getCOMPos().head<2>());
+        return m.global_wp_idx_;
+    }
+    static void block(PlannerManager& m,const Eigen::Vector2d& p) {StaticMpcTestAccess::block(*m.collision_,p);}
+    static void root(PlannerManager& m,const Eigen::Vector2d& p) {
+        m.lfpc_model_->reset(Eigen::Vector3d(.4,0,0),Eigen::Vector3d(p.x(),p.y(),0),LEFT_LEG,5);
+    }
+    static void smallCorridor(PlannerManager& m) {
+        auto c=m.convex_corridor_->getConfig();c.local_radius=.3;c.max_segment_length=.3;
+        m.convex_corridor_->setConfig(c);
+    }
+    static void finalStepSetup(PlannerManager&m) {
+        m.have_odom_=m.have_target_=true;m.exec_state_=PlannerManager::MPC_STEP;
+        m.end_pt_=Eigen::Vector2d(.30,0);m.global_wp_arrival_radius_=.2;
+        m.global_waypoints_={Eigen::Vector2d(0,0),Eigen::Vector2d(.30,0)};m.global_wp_idx_=0;
+    }
     static void arriveSetup(PlannerManager&m) {m.have_odom_=m.have_target_=true;m.exec_state_=PlannerManager::MPC_STEP;m.end_pt_=m.lfpc_model_->getCOMPos().head<2>();}
     static void idleSetup(PlannerManager&m,bool initialized) {m.have_odom_=initialized;m.have_target_=false;m.mpc_reached_goal_=initialized;m.exec_state_=PlannerManager::WAIT_TARGET;}
     static void initialSetup(PlannerManager&m) {m.have_odom_=m.have_target_=true;m.exec_state_=PlannerManager::GEN_NEW_TRAJ;}
@@ -692,6 +717,107 @@ TEST_F(SimOdomTest, ActualArrivalIdleHeartbeatAndNewGoalKeepPlantState)
     EXPECT_EQ(Eigen::Vector2d(4,1),SimOdomTestAccess::route(manager_).back());
     EXPECT_EQ(pos,SimOdomTestAccess::model(manager_).getCOMPos());
 }
+TEST_F(SimOdomTest, LastSafeFinalStepThenActualArrivalAndIdle)
+{
+    ros::Time::setNow(ros::Time(720));SimOdomTestAccess::dynamicSetup(manager_);
+    SimOdomTestAccess::recoverySetup(manager_,nh_);SimOdomTestAccess::finalStepSetup(manager_);
+    auto clear=frame(ros::Time::now());SimOdomTestAccess::receive(manager_,clear);
+    std::atomic<bool> done{false};
+    std::thread clock([&]{double t=720.;while(!done){t+=.001;ros::Time::setNow(ros::Time(t));ros::WallDuration(.002).sleep();}});
+    SimOdomTestAccess::fsm(manager_);
+    EXPECT_TRUE(SimOdomTestAccess::planValid(manager_));
+    EXPECT_LT((SimOdomTestAccess::model(manager_).getCOMPos().head<2>()-Eigen::Vector2d(.30,0)).norm(),.2);
+    SimOdomTestAccess::fsm(manager_);done=true;clock.join();waitForOdom(2);
+    const auto state=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
+    for(int i=0;i<8;++i){ros::Time::setNow(ros::Time(720.1+.1*i));SimOdomTestAccess::fsm(manager_);}
+    waitForOdom(10);EXPECT_EQ(state,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
+    EXPECT_EQ(geometry_msgs::Twist(),odom_.back().twist.twist);
+}
+TEST_F(SimOdomTest, AdvancedCornerReferenceCoversActualPreviousLegalStep)
+{
+    ros::Time::setNow(ros::Time(740));SimOdomTestAccess::dynamicSetup(manager_);
+    SimOdomTestAccess::recoverySetup(manager_,nh_);
+    SimOdomTestAccess::receive(manager_,frame(ros::Time::now()));
+    const auto before=SimOdomTestAccess::model(manager_).getCOMPos().eval();
+    std::atomic<bool> done{false};
+    std::thread clock([&]{double t=740.;while(!done){t+=.001;ros::Time::setNow(ros::Time(t));ros::WallDuration(.002).sleep();}});
+    SimOdomTestAccess::step(manager_);done=true;clock.join();
+    ASSERT_TRUE(SimOdomTestAccess::planValid(manager_));
+    const Eigen::Vector2d p=SimOdomTestAccess::model(manager_).getCOMPos().head<2>();
+    ASSERT_GT((p-before.head<2>()).norm(),.01);
+    SimOdomTestAccess::smallCorridor(manager_);
+    const std::vector<Eigen::Vector2d> route{p+Eigen::Vector2d(-.7,.3372),
+        p+Eigen::Vector2d(-.2,.3372),p+Eigen::Vector2d(.5,.3372),p+Eigen::Vector2d(.5,1)};
+    SimOdomTestAccess::reference(manager_,route);
+    ASSERT_EQ(1u,SimOdomTestAccess::reanchor(manager_));
+    SimOdomTestAccess::receive(manager_,frame(ros::Time::now()));
+    const auto result=SimOdomTestAccess::corridor(manager_);
+    ASSERT_TRUE(result.feasible)<<ConvexCorridor::failureReasonName(result.failure_reason);
+    EXPECT_TRUE(std::any_of(result.segments.begin(),result.segments.end(),[&](const ConvexCorridor::Segment& s){return ConvexCorridor::contains(s,p,1e-6);}));
+    EXPECT_EQ(route,SimOdomTestAccess::route(manager_));
+    for(const auto& q:{route[1],route[2],route[3]})
+        EXPECT_TRUE(std::any_of(result.segments.begin(),result.segments.end(),[&](const ConvexCorridor::Segment& s){return ConvexCorridor::contains(s,q,1e-6);}));
+}
+
+TEST_F(SimOdomTest, RecordedOffsetAndNearZeroConnectorsKeepExactRoot)
+{
+    ros::Time::setNow(ros::Time(750));SimOdomTestAccess::dynamicSetup(manager_);
+    SimOdomTestAccess::enabled(manager_,false);
+    const Eigen::Vector2d recorded(-2.5058499314422193,-2.157256244571377);
+    const Eigen::Vector2d projection(-2.2674125774,-2.3956935986);
+    const Eigen::Vector2d direction=Eigen::Vector2d(1,1).normalized();
+    SimOdomTestAccess::smallCorridor(manager_);
+    for(double offset:{1.,1e-6,1e-10,0.}) {
+        const Eigen::Vector2d p=projection+offset*(recorded-projection);
+        SimOdomTestAccess::root(manager_,p);
+        SimOdomTestAccess::reference(manager_,{projection-direction,projection,projection+.5*direction,projection+Eigen::Vector2d(1,0)},1);
+        const auto result=SimOdomTestAccess::corridor(manager_);
+        ASSERT_TRUE(result.feasible)<<offset<<" "<<ConvexCorridor::failureReasonName(result.failure_reason);
+        EXPECT_TRUE(std::any_of(result.segments.begin(),result.segments.end(),[&](const ConvexCorridor::Segment& s){return ConvexCorridor::contains(s,p,1e-6);}));
+    }
+}
+
+TEST_F(SimOdomTest, StaticConnectorCannotCutBlockedCellOrAdvanceState)
+{
+    ros::Time::setNow(ros::Time(760));SimOdomTestAccess::dynamicSetup(manager_);
+    SimOdomTestAccess::recoverySetup(manager_,nh_);SimOdomTestAccess::enabled(manager_,false);
+    SimOdomTestAccess::root(manager_,Eigen::Vector2d(0,0));
+    const std::vector<Eigen::Vector2d> route{{0,2},{1,2},{2,2}};
+    SimOdomTestAccess::reference(manager_,route);
+    ASSERT_TRUE(SimOdomTestAccess::corridor(manager_).feasible);
+    SimOdomTestAccess::block(manager_,Eigen::Vector2d(.01,1.01));
+    const auto blocked=SimOdomTestAccess::corridor(manager_);
+    EXPECT_FALSE(blocked.feasible);EXPECT_TRUE(blocked.segments.empty());
+    EXPECT_EQ(ConvexCorridor::FailureReason::REFERENCE_OCCUPIED,blocked.failure_reason);
+    const auto state=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
+    SimOdomTestAccess::step(manager_);waitForStops(1);
+    EXPECT_EQ(state,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
+    EXPECT_EQ(route,SimOdomTestAccess::route(manager_));
+    EXPECT_FALSE(SimOdomTestAccess::planValid(manager_));
+}
+
+TEST_F(SimOdomTest, PedestrianConnectorUsesExistingBlockedRecoveryAndStop)
+{
+    ros::Time::setNow(ros::Time(770));SimOdomTestAccess::dynamicSetup(manager_);
+    SimOdomTestAccess::recoverySetup(manager_,nh_);
+    SimOdomTestAccess::root(manager_,Eigen::Vector2d(0,0));
+    const std::vector<Eigen::Vector2d> route{{0,2},{1,2},{2,2}};
+    SimOdomTestAccess::reference(manager_,route);
+    SimOdomTestAccess::receive(manager_,frame(ros::Time::now()));
+    ASSERT_TRUE(SimOdomTestAccess::corridor(manager_).feasible);
+    auto msg=frame(ros::Time::now());addPedestrian(*msg,Eigen::Vector2d(0,1));
+    SimOdomTestAccess::receive(manager_,msg);
+    const auto blocked=SimOdomTestAccess::corridor(manager_);
+    EXPECT_FALSE(blocked.feasible);EXPECT_TRUE(blocked.segments.empty());
+    EXPECT_EQ(ConvexCorridor::FailureReason::DYNAMIC_REFERENCE_BLOCKED,blocked.failure_reason);
+    EXPECT_EQ("RECOVERY_UNAVAILABLE",SimOdomTestAccess::recoveryReason(manager_));
+    const auto state=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
+    SimOdomTestAccess::step(manager_);waitForStops(1);
+    EXPECT_EQ(state,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
+    EXPECT_EQ(route,SimOdomTestAccess::route(manager_));
+    EXPECT_FALSE(SimOdomTestAccess::planValid(manager_));
+}
+
 TEST_F(SimOdomTest, IdleHeartbeatModeAndInitializationGuards)
 {
     for(int mode=0;mode<3;++mode) {

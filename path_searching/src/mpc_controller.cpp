@@ -4,22 +4,13 @@
 #include <algorithm>
 #include <visualization_msgs/MarkerArray.h>
 #include <chrono>
+#include <std_msgs/Float64MultiArray.h>
 
 namespace cane_planner
 {
 
-MpcController::MpcController()
-    : normal_dist_(0.0, 1.0)
-    , last_plan_time_ms_(0.0)
-{
-    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-    rng_.seed(seed);
-}
-
-MpcController::~MpcController()
-{
-    lfpc_pool_.clear();
-}
+MpcController::MpcController() : last_plan_time_ms_(0.0) {}
+MpcController::~MpcController() = default;
 
 void MpcController::setParam(ros::NodeHandle &nh)
 {
@@ -31,29 +22,22 @@ void MpcController::setParam(ros::NodeHandle &nh)
     publishSampleTrajectories({}, Eigen::VectorXd());
 
     nh.param("mpc/horizon_steps", cfg_.horizon_steps, 6);
-    nh.param("mpc/num_samples", cfg_.num_samples, 100);
-    nh.param("mpc/temperature", cfg_.temperature, 0.1);
-    nh.param("mpc/mpc_iters", cfg_.mpc_iters, 1);
+    nh.param("mpc/beam_width", cfg_.beam_width, 8);
+    beam_pub_=nh.advertise<std_msgs::Float64MultiArray>("/mpc/beam_evidence",1);
 
     nh.param("mpc/max_al", cfg_.max_al, 0.4);
     nh.param("mpc/min_al", cfg_.min_al, 0.05);
     nh.param("mpc/max_aw", cfg_.max_aw, 0.15);
     nh.param("mpc/max_api", cfg_.max_api, 0.5236);
 
-    nh.param("mpc/sigma_al", cfg_.sigma_al, 0.06);
-    nh.param("mpc/sigma_aw", cfg_.sigma_aw, 0.04);
-    nh.param("mpc/sigma_api", cfg_.sigma_api, 0.12);
 
     nh.param("mpc/w_steer", cfg_.w_steer, 0.5);
     nh.param("mpc/w_goal", cfg_.w_goal, 10.0);
     nh.param("mpc/w_dapi", cfg_.w_dapi, 0.0);
-    nh.param("mpc/use_best", cfg_.use_best, true);
-    nh.param("mpc/fix_step_params", cfg_.fix_step_params, false);
     nh.param("mpc/goal_arrival_threshold", cfg_.goal_arrival_threshold, 0.3);
 
     nh.param("mpc/nominal_al", cfg_.nominal_al, 0.25);
     nh.param("mpc/nominal_aw", cfg_.nominal_aw, 0.0);
-    nh.param("mpc/nominal_api", cfg_.nominal_api, 0.0);
 
 }
 
@@ -64,17 +48,18 @@ void MpcController::init()
 
 void MpcController::reset()
 {
-    warm_start_.resize(0, 0);
+    tree_.clear();beam_evidence_=BeamEvidence();
     best_path_.clear();
     last_plan_valid_ = false;
     last_plan_time_ms_ = 0.0;
     last_debug_metrics_ = DebugMetrics();
     publishSampleTrajectories({}, Eigen::VectorXd());
+    publishBeamEvidence();
 }
 
 void MpcController::resetWarmStart()
 {
-    warm_start_.resize(0, 0);  // forces fresh nominal init on next plan()
+    tree_.clear();beam_evidence_=BeamEvidence(); // no stochastic warm start retained
 }
 
 void MpcController::publishSampleTrajectories(
@@ -160,557 +145,155 @@ void MpcController::clearConvexCorridor()
 // Main API
 // =========================================================================
 
-Eigen::Vector3d MpcController::plan(const LFPC::Ptr &lfpc_base,
-                                     const Eigen::Vector3d &goal_pos)
+void MpcController::publishBeamEvidence()
 {
-    auto t_start = std::chrono::high_resolution_clock::now();
-
-    int N = cfg_.horizon_steps;
-    int K = cfg_.num_samples;
-    last_debug_metrics_ = DebugMetrics();
-    last_debug_metrics_.num_samples = K;
-    const bool initial_inside = lfpc_base && lfpc_base->getCOMPos().allFinite() &&
-        std::any_of(convex_corridor_segments_.begin(), convex_corridor_segments_.end(),
-            [&lfpc_base](const ConvexCorridor::Segment &segment) {
-                return ConvexCorridor::contains(segment, lfpc_base->getCOMPos().head(2), 1e-6);
-            });
-    const bool initial_free = initial_inside && collision_ &&
-        (collision_->hasStaticGlobalMap()
-            ? collision_->isStaticTraversable(lfpc_base->getCOMPos().x(), lfpc_base->getCOMPos().y())
-            : collision_->isTraversable(lfpc_base->getCOMPos().x(), lfpc_base->getCOMPos().y()));
-    if (!has_convex_corridor_ || !initial_free || !collision_ || !lfpc_base ||
-        !goal_pos.allFinite() || N <= 0 || K <= 0 || cfg_.mpc_iters <= 0 ||
-        !std::isfinite(cfg_.temperature) || cfg_.temperature <= 0.0)
-    {
-        best_path_.clear();
-        warm_start_.resize(0, 0);
-        last_plan_valid_ = false;
-        last_debug_metrics_.plan_valid = false;
-        last_plan_time_ms_ = std::chrono::duration<double, std::milli>(
-            std::chrono::high_resolution_clock::now() - t_start).count();
-        last_debug_metrics_.plan_time_ms = last_plan_time_ms_;
-        publishSampleTrajectories({}, Eigen::VectorXd());
-        return Eigen::Vector3d::Zero();
-    }
-
-    ensurePool(K);
-
-    // Initialize or shift warm-start
-    if (warm_start_.rows() != N)
-    {
-        warm_start_ = makeNominalSequence(N);
-        // Tiny random bias on first control to break left-right symmetry
-        warm_start_(0, 2) += normal_dist_(rng_) * 0.03;
-    }
-
-    Eigen::MatrixXd mean_seq = warm_start_;
-
-    Eigen::Vector3d control_cmd = Eigen::Vector3d::Zero();
-    int best_idx_global = -1;
-    best_path_.clear();
-
-    for (int iter = 0; iter < cfg_.mpc_iters; ++iter)
-    {
-        // Validity must describe this iteration, never an earlier proposal.
-        best_idx_global = -1;
-        best_path_.clear();
-        last_debug_metrics_.weighted_checked = false;
-        last_debug_metrics_.weighted_fallback = false;
-        // 1. Sample K sequences around current mean
-        std::vector<Eigen::MatrixXd> samples = sampleSequences(mean_seq, N, K);
-
-        // 2. Rollout and compute costs
-        Eigen::VectorXd costs(K);
-        std::vector<std::vector<Eigen::Vector3d>> paths(K);
-        std::vector<bool> sample_corridor_feasible;
-        rolloutBatch(lfpc_base, samples, goal_pos, costs, paths,
-                     sample_corridor_feasible);
-
-        // Publish only the final iteration, including all-rejected/STOP frames.
-        if (iter + 1 == cfg_.mpc_iters)
-            publishSampleTrajectories(paths, costs);
-
-        // 3. Find best trajectory
-        int valid_count = 0;
-        for (int kk = 0; kk < K; ++kk)
-        {
-            if (std::isfinite(costs(kk)))
-                valid_count++;
-        }
-        std::vector<double> cost_values(K, std::numeric_limits<double>::infinity());
-        for (int kk = 0; kk < K; ++kk)
-            cost_values[kk] = costs(kk);
-        int best_idx = selectBestTrajectoryIndex(
-            cost_values, sample_corridor_feasible,
-            last_debug_metrics_.corridor_evaluated);
-        bool has_corridor_feasible_sample = false;
-        if (last_debug_metrics_.corridor_evaluated)
-        {
-            for (int kk = 0; kk < K; ++kk)
-            {
-                if (std::isfinite(costs(kk)) &&
-                    kk < static_cast<int>(sample_corridor_feasible.size()) &&
-                    sample_corridor_feasible[kk])
-                {
-                    has_corridor_feasible_sample = true;
-                    break;
-                }
-            }
-        }
-        last_debug_metrics_.valid_sample_ratio = K > 0 ? (double)valid_count / (double)K : 0.0;
-        last_debug_metrics_.best_total_cost = best_idx >= 0 ? costs(best_idx) : std::numeric_limits<double>::infinity();
-        last_debug_metrics_.executed_total_cost = last_debug_metrics_.best_total_cost;
-
-        if (cfg_.use_best && best_idx >= 0)
-        {
-            // Best-of-K: avoids MPPI mode collapse with multimodal obstacles
-            control_cmd = samples[best_idx].row(0);
-            mean_seq = samples[best_idx];
-            best_path_ = paths[best_idx];
-            best_idx_global = best_idx;
-        }
-        else
-        {
-            // MPPI weighted average
-            Eigen::VectorXd weight_costs = costs;
-            if (last_debug_metrics_.corridor_evaluated && has_corridor_feasible_sample)
-            {
-                for (int kk = 0; kk < K; ++kk)
-                {
-                    if (kk >= static_cast<int>(sample_corridor_feasible.size()) ||
-                        !sample_corridor_feasible[kk])
-                    {
-                        weight_costs(kk) = std::numeric_limits<double>::infinity();
-                    }
-                }
-            }
-            Eigen::VectorXd weights = computeWeights(weight_costs);
-            mean_seq = weightedUpdate(samples, weights, N);
-            if (best_idx >= 0)
-            {
-                // A weighted control sequence is not necessarily collision-free,
-                // even when every contributing sample is. Reuse the exact rollout
-                // evaluator without drawing samples or changing candidate metrics.
-                const DebugMetrics candidate_metrics = last_debug_metrics_;
-                Eigen::VectorXd checked_costs;
-                std::vector<std::vector<Eigen::Vector3d>> checked_paths(1);
-                std::vector<bool> checked_corridor_feasible;
-                rolloutBatch(lfpc_base, {mean_seq}, goal_pos,
-                             checked_costs, checked_paths, checked_corridor_feasible);
-                last_debug_metrics_ = candidate_metrics;
-                const bool weighted_valid = chooseFinalSequence(
-                    has_convex_corridor_, best_idx, cfg_.use_best, checked_costs(0),
-                    !candidate_metrics.corridor_evaluated || checked_corridor_feasible[0])
-                    == FinalSequenceChoice::WEIGHTED;
-                last_debug_metrics_.weighted_checked = true;
-                last_debug_metrics_.weighted_fallback = !weighted_valid;
-                if (weighted_valid)
-                {
-                    best_path_ = checked_paths[0];
-                    last_debug_metrics_.executed_total_cost = checked_costs(0);
-                }
-                else
-                {
-                    mean_seq = samples[best_idx];
-                    best_path_ = paths[best_idx];
-                }
-                control_cmd = mean_seq.row(0);
-                best_idx_global = best_idx;
-            }
-        }
-    }
-
-    // Shift warm-start for next cycle
-    shiftSequence(mean_seq, N);
-    warm_start_ = mean_seq;
-
-    // No valid trajectory found (all INF) → full stop, wait for obstacle to pass
-    if (chooseFinalSequence(has_convex_corridor_, best_idx_global, true,
-                            std::numeric_limits<double>::infinity(), false)
-        == FinalSequenceChoice::STOP)
-    {
-        control_cmd << 0.0, 0.0, 0.0;
-        last_plan_valid_ = false;
-    }
-    else
-    {
-        last_plan_valid_ = true;
-    }
-
-    auto t_end = std::chrono::high_resolution_clock::now();
-    last_plan_time_ms_ = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-    last_debug_metrics_.plan_time_ms = last_plan_time_ms_;
-    last_debug_metrics_.plan_valid = last_plan_valid_;
-    if (!last_plan_valid_)
-    {
-        best_path_.clear();
-        warm_start_.resize(0, 0);
-        last_debug_metrics_.executed_total_cost = std::numeric_limits<double>::infinity();
-        last_debug_metrics_.best_min_dynamic_clearance = std::numeric_limits<double>::infinity();
-        last_debug_metrics_.best_min_cpa_time = std::numeric_limits<double>::infinity();
-    }
-
-    return control_cmd;
+    if(!beam_pub_)return;
+    std_msgs::Float64MultiArray msg;
+    std_msgs::MultiArrayDimension d;d.label="lfpc_beam_v1;roots=-30,-15,0,15,30;not_found_is_not_proof";
+    d.size=d.stride=24;msg.layout.dim.push_back(d);
+    msg.data={1.,double(beam_evidence_.horizon),double(beam_evidence_.width),double(beam_evidence_.evaluated),
+        double(beam_evidence_.full_leaves),double(beam_evidence_.selected_root),double(beam_evidence_.selected_leaf),beam_evidence_.reroll_valid?1.:0.};
+    for(int i=0;i<5;++i){msg.data.push_back(beam_evidence_.available[i]);msg.data.push_back(beam_evidence_.found[i]);msg.data.push_back(beam_evidence_.pruned[i]);}
+    msg.data.push_back(beam_evidence_.selected_leaf>=0 && tree_[beam_evidence_.selected_leaf].terminal?1.:0.);
+    beam_pub_.publish(msg);
 }
 
-// =========================================================================
-// Pool management
-// =========================================================================
+double MpcController::distanceToGoal(LFPC& state,const Eigen::Vector3d& goal) const
+{return (state.getCOMPos().head<2>()-goal.head<2>()).norm();}
 
-void MpcController::ensurePool(int K)
+bool MpcController::advance(LFPC& state,double action,std::vector<Eigen::Vector3d>& path)
 {
-    if ((int)lfpc_pool_.size() >= K)
-        return;
-
-    lfpc_pool_.clear();
-    lfpc_pool_.reserve(K);
-    for (int i = 0; i < K; ++i)
-    {
-        LFPC::Ptr lfpc = std::make_shared<LFPC>();
-        lfpc_pool_.push_back(lfpc);
+    state.SetCtrlParams(Eigen::Vector3d(cfg_.nominal_al,cfg_.nominal_aw,action));
+    state.updateOneStep();
+    const auto points=state.getStepCOMPath();
+    auto free=[&](const Eigen::Vector2d& p){return p.allFinite() && (collision_->hasStaticGlobalMap()?
+        collision_->isStaticTraversable(p.x(),p.y()):collision_->isTraversable(p.x(),p.y()));};
+    if(points.empty() || !state.getCOMPos().allFinite() || !free(state.getFootPosition())) {
+        ++last_debug_metrics_.static_reject_count;return false;
     }
+    for(const auto& pt:points) {
+        const Eigen::Vector2d p=pt.head<2>();
+        last_debug_metrics_.corridor_evaluated=true;
+        const bool inside=p.allFinite() && std::any_of(convex_corridor_segments_.begin(),convex_corridor_segments_.end(),
+            [&](const ConvexCorridor::Segment& seg){return ConvexCorridor::contains(seg,p,1e-6);});
+        if(!inside) {
+            double v=std::numeric_limits<double>::infinity();
+            for(const auto& seg:convex_corridor_segments_)v=std::min(v,ConvexCorridor::violation(seg,p));
+            last_debug_metrics_.max_convex_corridor_violation=std::max(last_debug_metrics_.max_convex_corridor_violation,v);
+            ++last_debug_metrics_.convex_corridor_reject_count;return false;
+        }
+        if(!free(p)){++last_debug_metrics_.static_reject_count;return false;}
+    }
+    path.insert(path.end(),points.begin(),points.end());
+    state.prepareNextStep();return true;
 }
 
-// =========================================================================
-// Sampling
-// =========================================================================
-
-Eigen::MatrixXd MpcController::makeNominalSequence(int N)
+Eigen::Vector3d MpcController::plan(const LFPC::Ptr& base,const Eigen::Vector3d& goal,const Eigen::Vector2d* final_goal,double final_radius)
 {
-    Eigen::MatrixXd seq(N, 3);
-    seq.col(0).setConstant(cfg_.nominal_al);
-    seq.col(1).setConstant(cfg_.nominal_aw);
-    seq.col(2).setConstant(cfg_.nominal_api);
-    return seq;
-}
-
-std::vector<Eigen::MatrixXd> MpcController::sampleSequences(
-    const Eigen::MatrixXd &mean, int N, int K)
-{
-    std::vector<Eigen::MatrixXd> samples(K);
-    double sa = cfg_.sigma_al;
-    double sw = cfg_.sigma_aw;
-    double sp = cfg_.sigma_api;
-
-    for (int k = 0; k < K; ++k)
-    {
-        if (k == 0)
-        {
-            samples[k] = mean;
-            continue;
-        }
-
-        samples[k] = Eigen::MatrixXd(N, 3);
-        for (int n = 0; n < N; ++n)
-        {
-            double al, aw, api;
-            if (cfg_.fix_step_params)
-            {
-                al  = cfg_.nominal_al;
-                aw  = cfg_.nominal_aw;
-                api = mean(n, 2) + sp * normal_dist_(rng_);
-            }
-            else
-            {
-                al  = mean(n, 0) + sa * normal_dist_(rng_);
-                aw  = mean(n, 1) + sw * normal_dist_(rng_);
-                api = mean(n, 2) + sp * normal_dist_(rng_);
-            }
-
-            // Clamp
-            al  = std::max(cfg_.min_al, std::min(cfg_.max_al, al));
-            aw  = std::max(0.0, std::min(cfg_.max_aw, aw));
-            api = std::max(-cfg_.max_api, std::min(cfg_.max_api, api));
-
-            samples[k](n, 0) = al;
-            samples[k](n, 1) = aw;
-            samples[k](n, 2) = api;
-        }
+    const auto started=std::chrono::steady_clock::now();
+    tree_.clear();best_path_.clear();last_plan_valid_=false;last_debug_metrics_=DebugMetrics();beam_evidence_=BeamEvidence();
+    const int N=cfg_.horizon_steps,W=cfg_.beam_width;
+    beam_evidence_.horizon=N;beam_evidence_.width=W;
+    Eigen::Vector3d command=Eigen::Vector3d::Zero();
+    auto finish=[&] {
+        last_plan_time_ms_=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
+        last_debug_metrics_.plan_time_ms=last_plan_time_ms_;last_debug_metrics_.plan_valid=last_plan_valid_;
+        publishBeamEvidence();return command;
+    };
+    bool config=!final_goal || (final_goal->allFinite() && std::isfinite(final_radius) && final_radius>0.);
+    for(double x:{cfg_.nominal_al,cfg_.nominal_aw,cfg_.min_al,cfg_.max_al,cfg_.max_aw,cfg_.max_api,
+                  cfg_.w_steer,cfg_.w_dapi,cfg_.w_goal,cfg_.goal_arrival_threshold})config=config&&std::isfinite(x);
+    config=config && N>=1 && N<=32 && W>=1 && W<=32 && cfg_.min_al>=0 && cfg_.nominal_al>=cfg_.min_al &&
+        cfg_.nominal_al<=cfg_.max_al && cfg_.nominal_aw>=0 && cfg_.nominal_aw<=cfg_.max_aw && cfg_.max_api>=0 &&
+        cfg_.w_steer>=0 && cfg_.w_dapi>=0 && cfg_.w_goal>=0 && cfg_.goal_arrival_threshold>=0;
+    const bool inside=base && base->getCOMPos().allFinite() && std::any_of(convex_corridor_segments_.begin(),convex_corridor_segments_.end(),
+        [&](const ConvexCorridor::Segment& seg){return ConvexCorridor::contains(seg,base->getCOMPos().head<2>(),1e-6);});
+    if(!config || !collision_ || !goal.allFinite() || !has_convex_corridor_ || !inside ||
+       !(collision_->hasStaticGlobalMap()?collision_->isStaticTraversable(base->getCOMPos().x(),base->getCOMPos().y()):
+         collision_->isTraversable(base->getCOMPos().x(),base->getCOMPos().y()))) {
+        publishSampleTrajectories({},Eigen::VectorXd());return finish();
     }
-    return samples;
-}
-
-// =========================================================================
-// Rollout (hot path)
-// =========================================================================
-
-void MpcController::rolloutBatch(
-    const LFPC::Ptr &lfpc_base,
-    const std::vector<Eigen::MatrixXd> &samples,
-    const Eigen::Vector3d &goal_pos,
-    Eigen::VectorXd &costs,
-    std::vector<std::vector<Eigen::Vector3d>> &paths,
-    std::vector<bool> &sample_corridor_feasible)
-{
-    int K = (int)samples.size();
-    int N = cfg_.horizon_steps;
-    costs.resize(K);
-    costs.setConstant(std::numeric_limits<double>::infinity());
-    sample_corridor_feasible.assign(K, true);
-
-    last_debug_metrics_.dynamic_reject_count = 0;
-    last_debug_metrics_.static_reject_count = 0;
-    last_debug_metrics_.corridor_reject_count = 0;
-    last_debug_metrics_.convex_corridor_reject_count = 0;
-    last_debug_metrics_.convex_corridor_segments =
-        has_convex_corridor_ ? static_cast<int>(convex_corridor_segments_.size()) : 0;
-    last_debug_metrics_.max_convex_corridor_violation = 0.0;
-    last_debug_metrics_.candidate_inside_corridor_ratio = 1.0;
-    last_debug_metrics_.valid_trajectory_count = 0;
-    last_debug_metrics_.corridor_feasible_trajectory_count = 0;
-    last_debug_metrics_.corridor_evaluated = false;
-    last_debug_metrics_.min_dynamic_clearance = std::numeric_limits<double>::infinity();
-    last_debug_metrics_.min_cpa_time = std::numeric_limits<double>::infinity();
-    int corridor_check_count = 0;
-    int corridor_inside_count = 0;
-    double w_steer = cfg_.w_steer;
-    double w_dapi = cfg_.w_dapi;
-    double w_goal = cfg_.w_goal;
-
-    for (int k = 0; k < K; ++k)
-    {
-        LFPC::Ptr lfpc = lfpc_pool_[k];
-        lfpc->copyState(*lfpc_base);
-
-        double prev_api = samples[k](0, 2);  // for steering rate penalty
-        double total_cost = 0.0;
-        bool static_collided = false;
-        bool corridor_evaluated_for_sample = false;
-        bool sample_corridor_feasible_for_sample = true;
-        bool convex_corridor_violated = false;
-        bool arrived_early = false;
-
-        for (int n = 0; n < N; ++n)
-        {
-            double al  = samples[k](n, 0);
-            double aw  = samples[k](n, 1);
-            double api = samples[k](n, 2);
-
-            lfpc->SetCtrlParams(Eigen::Vector3d(al, aw, api));
-            lfpc->updateOneStep();
-
-            std::vector<Eigen::Vector3d> com_path = lfpc->getStepCOMPath();
-            Eigen::Vector3d final_com = lfpc->getCOMPos();
-            if (com_path.empty() || !final_com.allFinite())
-            {
-                static_collided = true;
-                break;
-            }
-            double fx = final_com(0);
-            double fy = final_com(1);
-
-            for (const auto &pt : com_path)
-                paths[k].push_back(pt);
-
-            // Steering magnitude and inter-step steering variation.
-            double steer_cost = w_steer * std::abs(api);
-
-            // Steering rate penalty: penalize large api changes between steps
-            double dapi_cost = 0.0;
-            if (n > 0)
-                dapi_cost = w_dapi * std::abs(api - prev_api);
-
-            // Static foot placement uses the map's existing safety boundary.
-            Eigen::Vector2d foot_pos = lfpc->getFootPosition();
-            const bool foot_free = foot_pos.allFinite() && (collision_->hasStaticGlobalMap()
-                ? collision_->isStaticTraversable(foot_pos.x(), foot_pos.y())
-                : collision_->isTraversable(foot_pos.x(), foot_pos.y()));
-            if (!foot_pos.allFinite() || !foot_free)
-            {
-                static_collided = true;
-                break;
-            }
-
-            // Static CoM samples are checked against the same spatial union.
-            for (size_t pi = 0; pi < com_path.size(); ++pi)
-            {
-                double px = com_path[pi](0);
-                double py = com_path[pi](1);
-
-                // Membership in the connected spatial union, independent of
-                // timing and nearest-centre heuristics. No soft corridor cost.
-                const Eigen::Vector2d point(px, py);
-                const bool inside = point.allFinite() && std::any_of(
-                    convex_corridor_segments_.begin(), convex_corridor_segments_.end(),
-                    [&point](const ConvexCorridor::Segment &segment) {
-                        return ConvexCorridor::contains(segment, point, 1e-6);
-                    });
-                corridor_evaluated_for_sample = true;
-                ++corridor_check_count;
-                if (!inside)
-                {
-                    double union_violation = std::numeric_limits<double>::infinity();
-                    for (const auto &segment : convex_corridor_segments_)
-                        union_violation = std::min(union_violation,
-                            ConvexCorridor::violation(segment, point));
-                    last_debug_metrics_.max_convex_corridor_violation = std::max(
-                        last_debug_metrics_.max_convex_corridor_violation, union_violation);
-                    sample_corridor_feasible_for_sample = false;
-                    convex_corridor_violated = true;
-                    break;
-                }
-                ++corridor_inside_count;
-
-                const bool com_free = collision_->hasStaticGlobalMap()
-                    ? collision_->isStaticTraversable(px, py)
-                    : collision_->isTraversable(px, py);
-                if (!com_free)
-                {
-                    static_collided = true;
-                    break;
-                }
-                if (static_collided || convex_corridor_violated)
-                    break;
-            }
-
-            if (static_collided || convex_corridor_violated)
-            {
-                total_cost = std::numeric_limits<double>::infinity();
-                break;
-            }
-
-            total_cost += steer_cost + dapi_cost;
-
-            prev_api = api;
-
-            // Early goal arrival: stop rollout if within threshold
-            {
-                double dxg = fx - goal_pos(0);
-                double dyg = fy - goal_pos(1);
-                if (std::sqrt(dxg*dxg + dyg*dyg) < cfg_.goal_arrival_threshold)
-                {
-                    arrived_early = true;
-                    break;
-                }
-            }
-
-            lfpc->prepareNextStep();
+    constexpr double rad=3.14159265358979323846/180.;
+    const std::array<double,5> actions{{-30*rad,-15*rad,0,15*rad,30*rad}};
+    for(int i=0;i<5;++i)beam_evidence_.available[i]=std::abs(actions[i])<=cfg_.max_api;
+    tree_.reserve(1+5+25*W*(N-1));
+    TreeNode root;root.state.copyState(*base);root.safe=true;tree_.push_back(root);
+    std::array<std::vector<int>,5> frontier;
+    std::vector<int> leaves;
+    auto expand=[&](int parent,int ai,int ri) {
+        TreeNode node;node.id=tree_.size();node.parent=parent;node.root=ri;node.depth=tree_[parent].depth+1;node.action=actions[ai];
+        node.state.copyState(tree_[parent].state);node.motion_cost=tree_[parent].motion_cost;node.arrived=tree_[parent].arrived;
+        std::vector<Eigen::Vector3d> ignored;node.safe=advance(node.state,node.action,ignored);++beam_evidence_.evaluated;
+        if(node.safe) {
+            node.motion_cost+=cfg_.w_steer*std::abs(node.action)+(node.depth>1?cfg_.w_dapi*std::abs(node.action-tree_[parent].action):0.);
+            node.arrived=node.arrived || distanceToGoal(node.state,goal)<cfg_.goal_arrival_threshold;
+            node.terminal=final_goal && (node.state.getCOMPos().head<2>()-*final_goal).norm()<final_radius;
+            node.objective=node.motion_cost+(node.arrived?0.:(cfg_.w_goal/N)*distanceToGoal(node.state,goal));
+            node.safe=std::isfinite(node.objective);
         }
-
-        // Hard-inf any trajectory that touched a static obstacle or left the union,
-        // regardless of where the break happened (foot placement or CoM path).
-        if (static_collided || convex_corridor_violated)
-        {
-            total_cost = std::numeric_limits<double>::infinity();
-            if (static_collided)
-                last_debug_metrics_.static_reject_count++;
-            if (convex_corridor_violated)
-                last_debug_metrics_.convex_corridor_reject_count++;
+        tree_[parent].children.push_back(node.id);tree_.push_back(std::move(node));return int(tree_.size()-1);
+    };
+    for(int ri=0;ri<5;++ri)if(beam_evidence_.available[ri]) {
+        int id=expand(0,ri,ri);if(tree_[id].safe) {if(tree_[id].terminal)leaves.push_back(id);else frontier[ri].push_back(id);}
+    }
+    for(int depth=2;depth<=N;++depth)for(int ri=0;ri<5;++ri) {
+        std::vector<int> next;
+        for(int parent:frontier[ri])for(int ai=0;ai<5;++ai)if(beam_evidence_.available[ai]) {
+            int id=expand(parent,ai,ri);if(tree_[id].safe) {if(tree_[id].terminal)leaves.push_back(id);else next.push_back(id);}
         }
-        else if (!arrived_early)
-        {
-            double gx = goal_pos(0);
-            double gy = goal_pos(1);
-            Eigen::Vector3d final_com = lfpc->getCOMPos();
-            double fx = final_com(0);
-            double fy = final_com(1);
-            double dx = fx - gx;
-            double dy = fy - gy;
-            total_cost += (w_goal / N) * std::sqrt(dx * dx + dy * dy);
+        std::stable_sort(next.begin(),next.end(),[&](int a,int b){return tree_[a].objective<tree_[b].objective;});
+        if(next.size()>size_t(W)) {
+            beam_evidence_.pruned[ri]=true;
+            for(size_t i=W;i<next.size();++i)tree_[next[i]].pruned=true;
+            next.resize(W);
         }
-
-        costs(k) = total_cost;
-        sample_corridor_feasible[k] =
-            !corridor_evaluated_for_sample || sample_corridor_feasible_for_sample;
-        if (std::isfinite(total_cost))
-        {
-            last_debug_metrics_.valid_trajectory_count++;
-            if (sample_corridor_feasible[k])
-                last_debug_metrics_.corridor_feasible_trajectory_count++;
+        frontier[ri]=std::move(next);
+    }
+    for(int ri=0;ri<5;++ri)for(int id:frontier[ri])if(tree_[id].depth==N) {
+        leaves.push_back(id);
+    }
+    for(int id:leaves) {beam_evidence_.found[tree_[id].root]=true;
+        for(int p=id;p>=0;p=tree_[p].parent)tree_[p].continuation_found=true;}
+    beam_evidence_.full_leaves=leaves.size();
+    last_debug_metrics_.num_samples=beam_evidence_.evaluated;
+    last_debug_metrics_.valid_trajectory_count=leaves.size();last_debug_metrics_.corridor_feasible_trajectory_count=leaves.size();
+    last_debug_metrics_.convex_corridor_segments=convex_corridor_segments_.size();
+    // Legacy ratio unavailable: expanded edges and retained leaves are not Monte Carlo samples.
+    last_debug_metrics_.valid_sample_ratio=-1.;last_debug_metrics_.candidate_inside_corridor_ratio=-1.;
+    std::stable_sort(leaves.begin(),leaves.end(),[&](int a,int b){return tree_[a].objective<tree_[b].objective;});
+    std::vector<std::vector<Eigen::Vector3d>> display_paths;std::vector<double> display_costs;
+    if(!leaves.empty()) {
+        const int selected=leaves.front();std::vector<int> ancestry;
+        for(int id=selected;tree_[id].parent>=0;id=tree_[id].parent)ancestry.push_back(id);
+        std::reverse(ancestry.begin(),ancestry.end());
+        LFPC checked;checked.copyState(*base);bool valid=true,arrived=false;
+        double replay_motion=0.,previous_action=0.;
+        for(size_t step=0;step<ancestry.size();++step) {
+            const double action=tree_[ancestry[step]].action;
+            if(!advance(checked,action,best_path_)){valid=false;break;}
+            replay_motion+=cfg_.w_steer*std::abs(action)+(step>0?cfg_.w_dapi*std::abs(action-previous_action):0.);
+            previous_action=action;
+            arrived=arrived || distanceToGoal(checked,goal)<cfg_.goal_arrival_threshold;
+        }
+        const double replay_objective=replay_motion+(arrived?0.:(cfg_.w_goal/N)*distanceToGoal(checked,goal));
+        valid=valid && std::isfinite(replay_objective) && replay_objective==tree_[selected].objective;
+        if(tree_[selected].terminal)valid=valid && final_goal && (checked.getCOMPos().head<2>()-*final_goal).norm()<final_radius;
+        beam_evidence_.selected_root=tree_[selected].root;beam_evidence_.selected_leaf=selected;beam_evidence_.reroll_valid=valid;
+        if(valid) {
+            last_plan_valid_=true;command=Eigen::Vector3d(cfg_.nominal_al,cfg_.nominal_aw,tree_[ancestry.front()].action);
+            last_debug_metrics_.best_total_cost=last_debug_metrics_.executed_total_cost=tree_[selected].objective;
+            display_paths.push_back(best_path_);display_costs.push_back(tree_[selected].objective);
+        }else best_path_.clear();
+        for(size_t k=1;k<leaves.size() && display_paths.size()<size_t(sample_vis_count_);++k) {
+            std::vector<int> chain;for(int id=leaves[k];tree_[id].parent>=0;id=tree_[id].parent)chain.push_back(id);
+            std::vector<Eigen::Vector3d> path;
+            // Each node retains full LFPC pose, draw actual validated step end points.
+            path.push_back(base->getCOMPos());for(auto i=chain.rbegin();i!=chain.rend();++i)path.push_back(tree_[*i].state.getCOMPos());
+            display_paths.push_back(path);display_costs.push_back(tree_[leaves[k]].objective);
         }
     }
-    if (corridor_check_count > 0)
-    {
-        last_debug_metrics_.corridor_evaluated = true;
-        last_debug_metrics_.candidate_inside_corridor_ratio =
-            static_cast<double>(corridor_inside_count) /
-            static_cast<double>(corridor_check_count);
-    }
-}
-
-// =========================================================================
-// MPPI weight computation
-// =========================================================================
-
-Eigen::VectorXd MpcController::computeWeights(const Eigen::VectorXd &costs)
-{
-    int K = (int)costs.size();
-    Eigen::VectorXd weights = Eigen::VectorXd::Zero(K);
-
-    // Find min finite cost
-    double min_cost = std::numeric_limits<double>::max();
-    bool any_finite = false;
-    for (int i = 0; i < K; ++i)
-    {
-        if (std::isfinite(costs(i)))
-        {
-            any_finite = true;
-            if (costs(i) < min_cost)
-                min_cost = costs(i);
-        }
-    }
-
-    if (!any_finite)
-    {
-        weights.setConstant(1.0 / K);
-        return weights;
-    }
-
-    double w_sum = 0.0;
-    for (int i = 0; i < K; ++i)
-    {
-        if (std::isfinite(costs(i)))
-        {
-            weights(i) = std::exp(-(costs(i) - min_cost) / cfg_.temperature);
-            w_sum += weights(i);
-        }
-    }
-
-    if (w_sum < 1e-12)
-    {
-        weights.setConstant(1.0 / K);
-        return weights;
-    }
-
-    weights /= w_sum;
-    return weights;
-}
-
-Eigen::MatrixXd MpcController::weightedUpdate(
-    const std::vector<Eigen::MatrixXd> &samples,
-    const Eigen::VectorXd &weights,
-    int N)
-{
-    Eigen::MatrixXd new_mean = Eigen::MatrixXd::Zero(N, 3);
-    int K = (int)samples.size();
-
-    for (int k = 0; k < K; ++k)
-    {
-        new_mean += weights(k) * samples[k];
-    }
-
-    // Clamp
-    for (int n = 0; n < N; ++n)
-    {
-        new_mean(n, 0) = std::max(cfg_.min_al, std::min(cfg_.max_al, new_mean(n, 0)));
-        new_mean(n, 1) = std::max(0.0, std::min(cfg_.max_aw, new_mean(n, 1)));
-        new_mean(n, 2) = std::max(-cfg_.max_api, std::min(cfg_.max_api, new_mean(n, 2)));
-    }
-
-    return new_mean;
-}
-
-void MpcController::shiftSequence(Eigen::MatrixXd &mean, int N)
-{
-    // Roll by -1 (shift up)
-    for (int n = 0; n < N - 1; ++n)
-    {
-        mean.row(n) = mean.row(n + 1);
-    }
-    // Set last row to nominal
-    mean(N - 1, 0) = cfg_.nominal_al;
-    mean(N - 1, 1) = cfg_.nominal_aw;
-    mean(N - 1, 2) = cfg_.nominal_api;
+    Eigen::VectorXd costs(display_costs.size());for(size_t i=0;i<display_costs.size();++i)costs[i]=display_costs[i];
+    publishSampleTrajectories(display_paths,costs);return finish();
 }
 
 } // namespace cane_planner

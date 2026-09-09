@@ -24,6 +24,7 @@ TOPICS = [
     "/Odometry",
     "/odom_world",
     "/mpc/debug_metrics",
+    "/mpc/beam_evidence",
     "/mpc/stop_advice",
     "/mpc/stop_reason",
     "/mpc/path",
