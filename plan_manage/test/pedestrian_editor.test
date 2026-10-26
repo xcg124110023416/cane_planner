@@ -1,0 +1,11 @@
+<launch>
+  <node pkg="plan_manage" type="pedestrian_sim.py" name="pedestrian_sim" output="screen">
+    <param name="frame_id" value="world"/>
+    <param name="scenario" value="dwcg_crossing"/>
+    <param name="remember_last" value="false"/>
+  </node>
+  <node pkg="tf2_ros" type="static_transform_publisher" name="editor_test_tf"
+        args="10 0 0 0 0 0 world editor_test_frame"/>
+  <test pkg="plan_manage" type="test_pedestrian_editor_ros.py" test-name="pedestrian_editor"
+        time-limit="45"/>
+</launch>

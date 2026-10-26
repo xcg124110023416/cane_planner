@@ -1,0 +1,4 @@
+<launch>
+  <test pkg="plan_manage" type="test_pedestrian_persistence_ros.py"
+        test-name="pedestrian_persistence" time-limit="90"/>
+</launch>

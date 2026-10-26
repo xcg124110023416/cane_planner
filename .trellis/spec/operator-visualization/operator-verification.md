@@ -25,4 +25,4 @@ Offline Python plots under `LFPC/`, `bspline_opt/script/`, and `plan_manage/scri
 
 ## Current limitations
 
-This repository does not provide a formal frontend test runner or screenshot automation. If a launch cannot run because ROS/dependencies are unavailable, report that limitation and still validate topic/config consistency statically.
+The pedestrian editor has offscreen Qt/pluginlib tests in `plan_manage/test/pedestrian_panel.test`, alongside motion and ROS-interface tests. These do not replace inspection of the full RViz/Ogre view. If a launch cannot run because ROS/dependencies are unavailable, report that limitation and still validate topic/config consistency statically.

@@ -33,6 +33,8 @@
     <arg name="pedestrian_source" default="deterministic"/> <!-- deterministic|pedsim; optional pedsim source launched separately -->
     <arg name="use_pedestrians" default="$(eval arg('planner') != 3)"/>
     <arg name="pedestrian_scenario" default="$(eval 'dwcg_crossing' if arg('planner') == 3 else 'mixed')"/>
+    <arg name="pedestrian_scenario_config" default="$(find plan_manage)/config/pedestrian_scenarios.yaml"/>
+    <arg name="pedestrian_remember_last" default="true"/>
     <arg name="use_static_global_map" default="false"/>
     <arg name="use_static_global_esdf" default="false"/>
     <arg name="static_map_pcd" default="$(find map_generator)/resource/office2_modify.pcd"/>
@@ -136,11 +138,12 @@
     <!-- Disabled source retains static mode; enabled requires fresh valid frames. -->
     <group if="$(eval arg('use_pedestrians') and arg('pedestrian_source') == 'deterministic')">
         <node pkg="plan_manage" type="pedestrian_sim.py" name="pedestrian_sim" output="screen">
-            <!-- trigger mode: pedestrian stays at start, walks once on goal, then disappears.
-                 loop mode repeats continuously. -->
+            <!-- Legacy trigger scenes appear on goal and disappear after their period.
+                 RViz placement switches a single pedestrian into controlled mode. -->
             <param name="frame_id" value="$(eval 'world' if arg('planner') == 3 else 'map')"/>
             <param name="scenario" value="$(arg pedestrian_scenario)"/>
-            <param name="scenario_config" value="$(find plan_manage)/config/pedestrian_scenarios.yaml"/>
+            <param name="scenario_config" value="$(arg pedestrian_scenario_config)"/>
+            <param name="remember_last" value="$(arg pedestrian_remember_last)"/>
         </node>
     </group>
 

@@ -89,6 +89,39 @@ roslaunch plan_manage sim_kin_replan.launch \
 
 [pedestrian_scenarios.yaml](plan_manage/config/pedestrian_scenarios.yaml) 提供 `dwcg_crossing`、`dwcg_approach`、`dwcg_stationary` 等单行人场景。上述三个场景在收到导航目标后触发；行人按配置运动或保持静止，到达配置时长后退出本次观测。
 
+编译 `plan_manage` 并重新加载工作空间后，同一启动命令会加载 RViz 的 **行人设置** 面板和 **放置行人** 工具（快捷键 `P`）：
+
+1. 选择“放置行人”，在地图上点击起点并拖拽设置行走方向。行人立即作为静止障碍出现，同时预览去程路线与终点。
+2. 在面板设置速度、单程时间和结束行为，点击“应用并复位”。速度范围为 `0–10 m/s`，单程时间为 `0.1–3600 s`；速度为零时可放置静止行人。修改面板数值后需要应用，地图预览和运动才会更新。
+3. 勾选“收到机器人导航目标后启动”时，用原有 `2D Nav Goal` 设置机器人目标即可启动／重新开始行人运动；不勾选时点击“开始／继续”。放置行人不会设置机器人目标。
+
+| 结束行为 | 运动规则 |
+|---|---|
+| 终点停止 | 沿放置方向行走 T 秒，在终点保持静止 |
+| 终点消失 | 行走 T 秒后退出行人观测 |
+| 返回起点后停止 | 去程 T 秒，反向返回 T 秒，在起点保持静止 |
+| 持续往返 | 去程、回程各 T 秒，持续重复 |
+
+“暂停”保持当前位置并持续发布零速度观测，“开始／继续”从暂停位置续走；运行中或结束后再点“开始／继续”会从起点重新开始。“复位”回到起点并等待启动，“清除”移除行人并持续发布新鲜空观测。交互控制只支持零或一个行人的确定性场景，不控制 pedsim 或 Gazebo 行人。没有已记忆的配置时，原有 YAML 场景在首次交互前保留其运动方式；旧 `loop` 表示瞬移回起点，旧 `patrol` 的 `period` 表示以起点为中心的完整往返周期。
+
+**默认记住上次配置。** 交互放置、应用或加载成功后会自动保存起点、朝向、速度、时间及结束／触发方式。下次使用同一场景、配置文件和坐标系启动时，自动恢复到配置的起点等待启动；清除后的空场景也会被记住。面板中尚未应用的数值和运行进度不会被恢复。
+
+**直接在面板加载文件。** 点击“保存场景”导出已应用的设置；以后点击“加载场景”，选择 YAML 即可立即恢复配置和地图预览。支持此前由面板导出的文件。加载失败会保留当前行人；新格式带有坐标系信息，坐标系不匹配时会提示错误。
+
+需要固定从指定文件启动时，也可使用以下参数；`pedestrian_remember_last:=false` 表示本次忽略并停止更新自动记忆，直接采用启动文件：
+
+```bash
+roslaunch plan_manage sim_kin_replan.launch \
+  planner:=3 use_pedestrians:=true \
+  pedestrian_scenario:=custom_pedestrian \
+  pedestrian_scenario_config:=/absolute/path/pedestrian_custom.yaml \
+  pedestrian_remember_last:=false
+```
+
+保存的场景加载后在起点等待启动，坐标属于当前仿真坐标系（planner 3 为 `world`）。若面板被关闭，可通过 `Panels → Add New Panel → plan_manage/PedestrianPanel` 加回；工具通过工具栏 `+ → plan_manage/PlacePedestrian` 加回。
+
+中文面板依赖中文字体，包中已声明 `fonts-wqy-microhei` 运行依赖。若源码构建环境显示方框，安装该字体（`sudo apt install fonts-wqy-microhei`）后重启 RViz。
+
 `mixed` 等多行人场景保留给其他模式和历史实验，超出当前 planner 3 的单行人输入范围。确定性行人源、pedsim 桥接、Gazebo 真值桥接与实机检测器应按场景选择一个，避免向同一观测话题发布相互冲突的数据。
 
 ### 可选 pedsim 场景

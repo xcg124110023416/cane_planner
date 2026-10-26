@@ -23,7 +23,17 @@ find_package(catkin REQUIRED COMPONENTS
   path_searching
   bspline
   bspline_opt
+  rviz
+  pluginlib
+  message_generation
 )
+
+find_package(Qt5 REQUIRED COMPONENTS Widgets)
+find_library(RVIZ_DEFAULT_PLUGIN_LIBRARY rviz_default_plugin HINTS ${rviz_LIBRARY_DIRS})
+catkin_python_setup()
+add_message_files(FILES PedestrianState.msg)
+add_service_files(FILES ControlPedestrian.srv)
+generate_messages(DEPENDENCIES std_msgs geometry_msgs)
 
 # 2. 传递 PCL 的编译器宏定义（可选，防患未然）
 add_definitions(${PCL_DEFINITIONS})
@@ -32,7 +42,7 @@ add_definitions(${PCL_DEFINITIONS})
 # 移除了不存在的 LIBRARIES 导出，修复了 CATIKIN_DEPENDS 拼写错误
 catkin_package(
   INCLUDE_DIRS include
-  CATKIN_DEPENDS roscpp std_msgs sensor_msgs tf onboard_detector geometry_msgs gazebo_msgs plan_env path_searching bspline bspline_opt
+  CATKIN_DEPENDS roscpp std_msgs sensor_msgs tf onboard_detector geometry_msgs gazebo_msgs plan_env path_searching bspline bspline_opt rviz pluginlib message_runtime
 )
 
 # 4. 环境变量钩子
@@ -73,7 +83,26 @@ target_link_libraries(kin_replan_node
   Eigen3::Eigen
 )
 
+add_library(pedestrian_panel
+  src/pedestrian_panel.cpp
+  src/pedestrian_tool.cpp
+  include/plan_manage/pedestrian_panel.h
+)
+set_target_properties(pedestrian_panel PROPERTIES AUTOMOC ON)
+add_dependencies(pedestrian_panel ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+target_link_libraries(pedestrian_panel ${catkin_LIBRARIES} ${RVIZ_DEFAULT_PLUGIN_LIBRARY}
+  Qt5::Widgets -Wl,--no-undefined)
+
 if(CATKIN_ENABLE_TESTING)
+  catkin_add_nosetests(test/test_pedestrian_motion.py)
+  find_package(rostest REQUIRED)
+  add_rostest(test/pedestrian_editor.test)
+  add_rostest(test/pedestrian_persistence.test)
+  add_rostest_gtest(test_pedestrian_panel test/pedestrian_panel.test test/test_pedestrian_panel.cpp)
+  if(TARGET test_pedestrian_panel)
+    add_dependencies(test_pedestrian_panel pedestrian_panel ${${PROJECT_NAME}_EXPORTED_TARGETS})
+    target_link_libraries(test_pedestrian_panel ${catkin_LIBRARIES} Qt5::Widgets)
+  endif()
   catkin_add_gtest(test_sim_odom_stop
     test/test_sim_odom_stop.cpp
     src/planner_manager.cpp
@@ -126,3 +155,7 @@ catkin_install_python(PROGRAMS
 )
 
 install(PROGRAMS scripts/start_pedsim_navigation.sh DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+
+install(TARGETS pedestrian_panel
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION})
+install(FILES rviz_plugins.xml DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})

@@ -1,0 +1,15 @@
+# apply resets to the configured start; start resumes a pause or restarts a run.
+# apply | start | pause | reset | clear | load | export
+string command
+# Used only by apply. Heading and position come from /pedestrian_sim/initial_pose.
+float64 speed
+float64 duration
+string end_behavior
+bool start_on_goal
+# Used only by load: file contents, so the RViz and simulator may run on different hosts.
+string scenario_yaml
+---
+bool success
+string message
+# Used only by export: the authoritative applied configuration.
+string scenario_yaml

@@ -12,6 +12,8 @@ Panels:
     Tree Height: 964
   - Class: rviz/Selection
     Name: Selection
+  - Class: plan_manage/PedestrianPanel
+    Name: 行人设置
   - Class: rviz/Tool Properties
     Expanded:
       - /2D Pose Estimate1
@@ -469,6 +471,14 @@ Visualization Manager:
       Value: true
     - Class: rviz/MarkerArray
       Enabled: true
+      Marker Topic: /pedestrian_sim/visualization
+      Name: Pedestrian_sim_and_preview
+      Namespaces:
+        {}
+      Queue Size: 10
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
       Marker Topic: /gazebo_pedestrian_truth/visualization
       Name: Gazebo_pedestrian_truth
       Namespaces:
@@ -842,6 +852,8 @@ Visualization Manager:
       Y std deviation: 0.5
     - Class: rviz/SetGoal
       Topic: /move_base_simple/goal
+    - Class: plan_manage/PlacePedestrian
+      Topic: /pedestrian_sim/initial_pose
     - Class: rviz/PublishPoint
       Single click: true
       Topic: /clicked_point

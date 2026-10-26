@@ -1,0 +1,10 @@
+<launch>
+  <node pkg="plan_manage" type="pedestrian_sim.py" name="pedestrian_sim" output="screen">
+    <param name="frame_id" value="world"/>
+    <param name="scenario" value="dwcg_crossing"/>
+    <param name="remember_last" value="false"/>
+  </node>
+  <test pkg="plan_manage" type="test_pedestrian_panel" test-name="pedestrian_panel" time-limit="40">
+    <env name="QT_QPA_PLATFORM" value="offscreen"/>
+  </test>
+</launch>

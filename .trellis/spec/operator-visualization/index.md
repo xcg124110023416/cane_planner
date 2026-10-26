@@ -4,13 +4,14 @@
 
 ## Scope
 
-There is no web frontend in this repository: no React/Vue/Angular/Svelte, TypeScript, HTML/CSS, `package.json`, roslibjs, rosbridge, Foxglove, Qt, or rqt application. Do not invent browser component, hook, or client-store conventions. Operator-facing work belongs in these guides.
+There is no web frontend in this repository. Operator-facing work belongs in RViz, ROS scripts, and the `plan_manage` Qt/RViz pedestrian plugin. Do not invent browser component, hook, or client-store conventions.
 
 | Guide | Applies to |
 |---|---|
 | [RViz and launch layout](./rviz-and-launch.md) | RViz configs, launch composition, frames, and displays |
 | [Markers and topic contracts](./markers-and-topics.md) | Paths, point clouds, markers, obstacles, and goal topics |
 | [Operator verification](./operator-verification.md) | Simulation, RViz inspection, and visualization quality |
+| [Pedestrian editor](./pedestrian-editor.md) | Single-pedestrian RViz panel, placement tool, and simulator control |
 
 ## Operator interaction
 

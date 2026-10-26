@@ -1,0 +1,8 @@
+<library path="lib/libpedestrian_panel">
+  <class name="plan_manage/PedestrianPanel" type="cane_planner::PedestrianPanel" base_class_type="rviz::Panel">
+    <description>Place and control one deterministic pedestrian, with speed, duration and return behavior.</description>
+  </class>
+  <class name="plan_manage/PlacePedestrian" type="cane_planner::PedestrianTool" base_class_type="rviz::Tool">
+    <description>Click and drag to set the pedestrian start and heading (shortcut P).</description>
+  </class>
+</library>
