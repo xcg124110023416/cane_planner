@@ -15,6 +15,7 @@
 
 #include <path_searching/matrix_hash.h>
 #include <plan_env/collision_detection.h>
+#include <plan_env/corridor_distance_field.h>
 // #include <plan_env/edt_environment.h>
 
 using namespace std;
@@ -140,6 +141,8 @@ namespace cane_planner
     SearchProfile recovery_profile_;
     bool recovery_timed_out_ = false;
     bool recoveryDeadline();
+    std::unordered_map<Eigen::Vector2i, CorridorDistanceField, matrix_hash<Eigen::Vector2i>> comfort_fields_;
+    double corridorComfortDistance(const Eigen::Vector2d& position);
     bool corridorEdgeFree(const Eigen::Vector2d& a, const Eigen::Vector2d& b);
     double corridorEdgeCost(const Eigen::Vector2d& a, const Eigen::Vector2d& b);
     double corridorHeuristic(const Eigen::Vector2d& a, const Eigen::Vector2d& b) const;
@@ -170,7 +173,7 @@ namespace cane_planner
     };
 
     /* main API */
-    void setCorridorEdgeClearance(double clearance) { corridor_edge_clearance_ = clearance; }
+    void setCorridorEdgeClearance(double clearance) { corridor_edge_clearance_ = clearance; comfort_fields_.clear(); }
     void setParam(ros::NodeHandle &nh);
     void init();
     void reset();

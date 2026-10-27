@@ -8,6 +8,13 @@ using namespace Eigen;
 namespace cane_planner
 {
   namespace {
+    int comfortTileBins(double native, double range) {
+      if(!std::isfinite(native) || native<.01 || !std::isfinite(range) || range<0.)return 0;
+      // Include a full native-bin halo beyond the cost's finite influence, and
+      // leave two bins for alignment roundoff within the snapshot adapter cap.
+      const double available=std::min(1000.,std::floor(100./native))-2.-2.*(std::ceil(range/native)+1.);
+      return static_cast<int>(std::max(0.,std::min(64.,available)));
+    }
     struct ProfileScope {
       double* value;std::chrono::steady_clock::time_point start;
       explicit ProfileScope(double* v):value(v) {if(value)start=std::chrono::steady_clock::now();}
@@ -146,30 +153,44 @@ namespace cane_planner
     return true;
   }
 
+  double Astar::corridorComfortDistance(const Eigen::Vector2d& position)
+  {
+    if(!collision_ || !position.allFinite() || recoveryDeadline())return std::numeric_limits<double>::quiet_NaN();
+    const double native=collision_->getStaticQueryResolution();
+    const double range=clearance_sigma_+corridor_edge_clearance_;
+    const int bins=comfortTileBins(native,range);
+    if(bins<=0)return std::numeric_limits<double>::quiet_NaN();
+    const double width=bins*native;
+    const Eigen::Vector2i key=((position-origin_)/width).array().floor().cast<int>();
+    auto field=comfort_fields_.find(key);
+    if(field==comfort_fields_.end()) {
+      const double halo=(std::ceil(range/native)+1.)*native;
+      const Eigen::Vector2d lower=origin_+width*key.cast<double>()-Eigen::Vector2d::Constant(halo);
+      const Eigen::Vector2d upper=origin_+width*(key+Eigen::Vector2i::Ones()).cast<double>()+Eigen::Vector2d::Constant(halo);
+      Eigen::Vector2d origin;Eigen::Vector2i size;double resolution;
+      std::vector<uint8_t> blocked;std::string reason;bool grid_ok;
+      {ProfileScope grid_profile(recovery_polygon_?&recovery_profile_.grid_seconds:nullptr);
+       if(recovery_polygon_)++recovery_profile_.grid_calls;
+       grid_ok=collision_->getStaticCorridorGrid(lower,upper,origin,resolution,size,blocked,reason);}
+      if(!grid_ok || recoveryDeadline())return std::numeric_limits<double>::quiet_NaN();
+      CorridorDistanceField built;
+      if(!built.build(origin,resolution,size,blocked) || recoveryDeadline())return std::numeric_limits<double>::quiet_NaN();
+      field=comfort_fields_.emplace(key,std::move(built)).first;
+    }
+    return field->second.distance(position);
+  }
+
   double Astar::corridorEdgeCost(const Eigen::Vector2d& a, const Eigen::Vector2d& b)
   {
     ProfileScope profile(recovery_polygon_?&recovery_profile_.soft_seconds:nullptr);
     if(recovery_polygon_)++recovery_profile_.soft_calls;
     const double length = (b-a).norm();
+    if(!std::isfinite(length))return std::numeric_limits<double>::infinity();
     if (w_clearance_ == 0. || length == 0.) return length;
+    if(!collision_)return std::numeric_limits<double>::infinity();
     const double range = clearance_sigma_ + corridor_edge_clearance_;
-    const Eigen::Vector2d padding = Eigen::Vector2d::Constant(range + 1e-9);
-    Eigen::Vector2d origin; Eigen::Vector2i size; double resolution;
-    std::vector<uint8_t> blocked; std::string reason;
-    // Only the edge's finite preference neighborhood, using the SAME classifier
-    // as the hard certificate. Raw ESDF distances have different semantics.
-    bool grid_ok;
-    {ProfileScope grid_profile(recovery_polygon_?&recovery_profile_.grid_seconds:nullptr);
-     if(recovery_polygon_)++recovery_profile_.grid_calls;
-     grid_ok=collision_->getStaticCorridorGrid(a.cwiseMin(b)-padding,a.cwiseMax(b)+padding,origin,resolution,size,blocked,reason);}
-    if(!grid_ok)return std::numeric_limits<double>::infinity();
-    const Eigen::Vector2d extent = origin + resolution*size.cast<double>();
-    std::vector<Eigen::Vector2d> cells;
-    for (int y=0; y<size.y(); ++y) for (int x=0; x<size.x(); ++x) {
-      if(recoveryDeadline())return std::numeric_limits<double>::infinity();
-      if (blocked[y*size.x()+x]) cells.push_back(origin+resolution*Eigen::Vector2d(x,y));
-    }
-
+    const double resolution=collision_->getStaticQueryResolution();
+    if(!std::isfinite(resolution) || resolution<.01)return std::numeric_limits<double>::infinity();
     // Composite midpoint quadrature over the COMPLETE edge, not just its end.
     // Step <= 2 cm, half a native bin and 1/16 of the soft range. This is a
     // comfort-cost approximation, never the continuous hard collision check.
@@ -179,14 +200,9 @@ namespace cane_planner
     for (int i=0; i<count; ++i) {
       if(recoveryDeadline())return std::numeric_limits<double>::infinity();
       const Eigen::Vector2d p = a+((i+.5)/count)*(b-a);
-      // A cropped side is >= range away unless it is the real map boundary;
-      // hence taking its distance cannot change the truncated penalty.
-      double distance = std::min(range, std::min((p-origin).minCoeff(), (extent-p).minCoeff()));
-      for (const auto& lo : cells) {
-        if(recoveryDeadline())return std::numeric_limits<double>::infinity();
-        const Eigen::Vector2d hi = lo+Eigen::Vector2d::Constant(resolution);
-        distance = std::min(distance, (p-p.cwiseMax(lo).cwiseMin(hi)).norm());
-      }
+      const double queried=corridorComfortDistance(p);
+      if(!std::isfinite(queried))return std::numeric_limits<double>::infinity();
+      const double distance=std::min(range,queried);
       const double additional = std::max(0., distance-corridor_edge_clearance_);
       const double t = std::max(0., 1.-additional/clearance_sigma_);
       penalty += t*t;
@@ -203,6 +219,7 @@ namespace cane_planner
 
   bool Astar::search(Eigen::Vector2d start_pt, Eigen::Vector2d end_pt, bool dynamic, double time_start)
   {
+    comfort_fields_.clear(); // A new search always observes the latest selected map.
     append_goal_ = false;
     const bool corridor_edges = corridor_edge_clearance_ != -1.0;
     if (!start_pt.allFinite() || !end_pt.allFinite() || !collision_ ||
@@ -215,14 +232,14 @@ namespace cane_planner
     }
     if (corridor_edges && (!corridorEdgeFree(start_pt,start_pt) || !corridorEdgeFree(end_pt,end_pt))) return false;
     if (corridor_edges && w_clearance_ > 0.) {
-      // Endpoint checks established an available, valid selected native grid.
-      // A terminal connector can span 1.5 search steps per axis (nearest goal
-      // index plus one neighbor). Bound its uncropped, aligned preference query
-      // before expanding any nodes; do not turn GRID_BUDGET into no-path/INF.
+      // Retain the supported preference-configuration envelope for exact-goal
+      // connectors. Distance tiles additionally need room for their finite halo
+      // within the adapter budget; reject unsupported settings before expansion.
       const double native = collision_->getStaticQueryResolution();
       const double span = 1.5*resolution_ + 2.*(clearance_sigma_+corridor_edge_clearance_+1e-9);
       const double bins = std::ceil(span/native) + 1.;
-      if (!std::isfinite(bins) || bins > 1000. || bins*native > 100.) {
+      if (!std::isfinite(bins) || bins > 1000. || bins*native > 100. ||
+          comfortTileBins(native,clearance_sigma_+corridor_edge_clearance_)<=0) {
         ROS_WARN("[Astar] UNSUPPORTED_PREFERENCE_GRID: sigma=%.6g clearance=%.6g search_resolution=%.6g native_resolution=%.6g requires up to %.0f bins/axis; adapter limits 1000000 bins and 100 m/axis",
                  clearance_sigma_, corridor_edge_clearance_, resolution_, native, bins);
         return false;
@@ -617,6 +634,7 @@ namespace cane_planner
 
   void Astar::setParam(ros::NodeHandle &nh)
   {
+    comfort_fields_.clear();
 
     // resolution 可以理解成最小分辨率
     nh.param("astar/resolution_astar", resolution_, -1.0);
@@ -720,11 +738,13 @@ namespace cane_planner
 
   void Astar::setCollision(const CollisionDetection::Ptr &col)
   {
+    comfort_fields_.clear();
     this->collision_ = col;
   }
 
   void Astar::reset()
   {
+    comfort_fields_.clear();
     append_goal_ = false;
     has_path_ = false;
     expanded_nodes_.clear();

@@ -16,6 +16,9 @@ public:
 namespace cane_planner {
 class StaticMpcTestAccess {
 public:
+    static void block(CollisionDetection& c,int x,int y) {
+        c.static_inflated_[c.staticToAddress(Eigen::Vector2i(x,y))]=1;
+    }
     static CollisionDetection::Ptr map(const ConvexCorridor::Grid& g) {
         auto c = std::make_shared<CollisionDetection>();
         c->static_global_map_ready_ = true;
@@ -324,5 +327,70 @@ TEST(AstarRecovery, SoftPruningFrozenInputsAndFloatTies) {
         EXPECT_FALSE(lower<std::nextafter(lower,-std::numeric_limits<double>::infinity()));
         EXPECT_TRUE(lower<std::nextafter(lower,std::numeric_limits<double>::infinity()));
     }
+}
+TEST(AstarRecovery, SoftDistanceQueriesReuseSelectedGrid) {
+    auto g=passage(.1,3.);Astar a;AstarEdgeTestAccess::init(a,g);AstarEdgeTestAccess::preference(a);
+    const auto r=a.searchRecovery({.13,1.5},{5.37,1.5},{},
+        std::chrono::steady_clock::now()+std::chrono::seconds(2));
+    ASSERT_EQ(Astar::RecoveryStatus::FOUND,r.status);
+    ASSERT_GT(r.profile.soft_calls,100u);
+    // Empty overlay: each hard check queries its native cells. Extra map
+    // extractions should scale with spatial tiles, never the soft edge count.
+    EXPECT_LE(r.profile.grid_calls,r.profile.hard_calls+8u);
+    std::cout<<"DISTANCE_CACHE seconds="<<r.seconds<<" hard="<<r.profile.hard_calls
+             <<" soft="<<r.profile.soft_calls<<" grids="<<r.profile.grid_calls<<std::endl;
+}
+TEST(AstarClearance, RefreshDistanceFieldOnSearchAndSourceReplacement) {
+    auto g=passage(.1,3.);auto map=StaticMpcTestAccess::map(g);
+    Astar a;AstarEdgeTestAccess::init(a,g);a.setCollision(map);AstarEdgeTestAccess::preference(a);
+    auto search=[&] {return a.searchRecovery({.13,1.5},{5.37,1.5},{},
+        std::chrono::steady_clock::now()+std::chrono::seconds(2));};
+    ASSERT_EQ(Astar::RecoveryStatus::FOUND,search().status);
+    const Eigen::Vector2d u(2.2,1.5),v(2.3,1.5);
+    const double before=AstarEdgeTestAccess::cost(a,u,v);
+    EXPECT_NEAR(before,(v-u).norm(),1e-12);
+    StaticMpcTestAccess::block(*map,32,21); // A side obstacle appears in the SAME source.
+    ASSERT_EQ(Astar::RecoveryStatus::FOUND,search().status);
+    EXPECT_GT(AstarEdgeTestAccess::cost(a,u,v),before+.01);
+    StaticMpcTestAccess::block(*map,32,25);
+    EXPECT_FALSE(AstarEdgeTestAccess::edge(a,{2.2,1.55},{2.3,1.55})); // hard check remains current
+    a.setCollision(StaticMpcTestAccess::map(g));
+    EXPECT_NEAR(AstarEdgeTestAccess::cost(a,u,v),before,1e-12);
+    a.setCollision(std::make_shared<CollisionDetection>());
+    EXPECT_FALSE(std::isfinite(AstarEdgeTestAccess::cost(a,u,v))); // never reuse old valid data
+}
+TEST(AstarClearance, TileBoundaryDoesNotCreateArtificialWallPenalty) {
+    auto g=passage(.1,3.);Astar a;AstarEdgeTestAccess::init(a,g);AstarEdgeTestAccess::preference(a);
+    const Eigen::Vector2d u(5.31,1.5),v(5.49,1.5); // crosses the 64-native-bin tile boundary
+    EXPECT_NEAR(AstarEdgeTestAccess::cost(a,u,v),(v-u).norm(),1e-12);
+    // The actual finite map boundary DOES contribute.
+    EXPECT_GT(AstarEdgeTestAccess::cost(a,{-.8,1.4},{-.8,1.6}),.25);
+}
+TEST(CorridorDistanceField, WholeCellsBoundaryAndInterpolation) {
+    const Eigen::Vector2d origin(-.4,.3);const Eigen::Vector2i size(12,10);const double res=.1;
+    std::vector<uint8_t> blocked(size.x()*size.y(),0);
+    const std::vector<Eigen::Vector2i> cells{{4,4},{4,5},{7,6}};
+    for(const auto& c:cells)blocked[c.y()*size.x()+c.x()]=1;
+    CorridorDistanceField field;ASSERT_TRUE(field.build(origin,res,size,blocked));
+    auto exact=[&](const Eigen::Vector2d& p) {
+        const auto hi=(origin+res*size.cast<double>()).eval();
+        double d=std::max(0.,std::min((p-origin).minCoeff(),(hi-p).minCoeff()));
+        for(const auto& c:cells) {
+            const auto lo=(origin+res*c.cast<double>()).eval();
+            d=std::min(d,(p-p.cwiseMax(lo).cwiseMin(lo+Eigen::Vector2d::Constant(res))).norm());
+        }
+        return d;
+    };
+    for(int y=0;y<=2*size.y();++y)for(int x=0;x<=2*size.x();++x) {
+        const auto p=(origin+.5*res*Eigen::Vector2d(x,y)).eval();
+        EXPECT_NEAR(field.distance(p),exact(p),1e-12); // exact at half-native samples
+        const auto between=(p+Eigen::Vector2d(.013,.017)).eval();
+        EXPECT_NEAR(field.distance(between),exact(between),res*std::sqrt(2.)/4.+1e-12);
+    }
+    EXPECT_EQ(field.distance(origin-Eigen::Vector2d::Ones()),0.);
+    EXPECT_FALSE(field.build(origin,res,size,{}));
+    EXPECT_TRUE(std::isnan(field.distance({0.,0.}))); // a failed rebuild invalidates its predecessor
+    EXPECT_FALSE(field.build(origin,0.,size,blocked));
+    EXPECT_FALSE(field.build(origin,res,{-1,10},blocked));
 }
 int main(int argc,char** argv) { ros::init(argc,argv,"test_astar_edges",ros::init_options::AnonymousName);testing::InitGoogleTest(&argc,argv);return RUN_ALL_TESTS(); }

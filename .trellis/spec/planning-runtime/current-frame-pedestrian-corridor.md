@@ -53,6 +53,41 @@ the earlier full pedestrian octagon and COM-only corridor conventions.
 
 ## Obstacle-triggered route recovery
 
+### Search-local static comfort distance field (2026-10-27)
+
+Planner-3 initial/recovery A* now derives its soft wall-distance cost from
+`CorridorDistanceField` in plan_env (C++ namespace `cane_planner`), built from the SAME
+selected `getStaticCorridorGrid` classifier as the hard whole-cell certificate.
+Do not substitute raw 3D ESDF distances or omit unknown/model/map-boundary rules.
+The field is unsigned: blocked cells and domain exterior have zero comfort
+distance; only free-space distance is needed for this cost. Mark complete closed
+cells on a half-native-bin lattice and apply a separable exact squared Euclidean
+transform. Distances at those samples are exact up to roundoff. Bilinear lookup
+between samples approximates whole-cell distance with absolute error bounded by
+native_resolution*sqrt(2)/4 (about 3.54 cm at 0.1 m); this is NOT a hard certificate.
+Retain complete-edge midpoint integration, nonnegative metre costs, the existing
+sigma/weight meaning, and the Euclidean lower-bound heuristic.
+
+A* lazily builds native-spaced tiles with cores up to 64 bins and halos of
+ceil((sigma+clearance)/native)+1 bins. A cropped side cannot affect the truncated
+cost inside its core; real map boundaries still contribute. Reduce core size to
+respect existing finite snapshot budgets and reject unsupported configurations
+before expanding. Bound tile work and check the recovery deadline before and
+after construction. Clear all fields at every search entry/reset, parameter reload,
+clearance change and collision-source replacement. Cache lifetime is one search,
+not one pedestrian frame or one process; this avoids stale local-map/backend data
+without introducing a revision contract for every map producer. No dynamic polygon
+is rasterized into this field. Hard edge/polygon checks, full-footprint FIRI and
+source-age/execution authorization remain authoritative and unchanged.
+
+Regressions must exercise actual recovery call counters (map extractions scale
+with tiles, not soft edges), exact lattice distances vs independent whole-cell
+geometry, interpolation bounds, true/cropped boundaries, map changes between
+searches, invalid/replaced sources, selected unknown/ESDF/local classifications,
+exact goals and manager expiry/rebuild/STOP cases. Faster COM search does not
+guarantee a footprint-valid recovery route: inspect REBUILD_FAILED separately from
+TIMEOUT and never weaken FIRI to make a benchmark pass.
+
 `Astar::searchRecovery(start,goal,polygon,steady_deadline)` reuses the existing search and static certificates. The immutable query polygon is validated as complete strictly convex CCW geometry (3–32 vertices, finite bounded coordinates); continuous segment/polygon clipping rejects closed intersections and segment-edge distances enforce the same FIRI clearance. Empty overlay does not affect the static objective/edge decisions. No overlay persists beyond the call, including timeout/failure. Dynamic geometry is hard-only, never a new comfort penalty. Recovery output must end at the exact actual final goal; partial horizon success is returned as `INCOMPLETE_PATH` with empty output, never committed.
 
 Only actual `DYNAMIC_REFERENCE_BLOCKED` triggers recovery. Manager searches from current exact LFPC CoM to `end_pt_`, under the existing accepted-observation transaction. It allows at most min(0.2 s, half the remaining header/receipt freshness) of cooperative steady-clock search, checking expansion/static-cell/comfort loops and final full-route certificates. Normal search has no new wall deadline. Backend calls and reset/allocation work are finite but not hard-preemptible; timing is not hard real time. ROS-time age is independently checked after search, after FIRI rebuild and before LFPC advance; no 0.5 s timeout increase.

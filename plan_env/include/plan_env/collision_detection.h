@@ -122,7 +122,7 @@ namespace cane_planner
     {
       if (static_global_esdf_ready_) return global_esdf_resolution_;
       if (static_global_map_ready_) return static_map_resolution_;
-      return sdf_map_->getResolution();
+      return sdf_map_ ? sdf_map_->getResolution() : 0.;
     }
     // Conservative aligned 2D cell snapshot for static corridor inflation.
     // Preserves selected backend semantics; not an observed-free certificate.

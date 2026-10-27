@@ -49,6 +49,7 @@ add_library( plan_env
     src/raycast.cpp
     src/map_ros.cpp
     src/collision_detection.cpp
+    src/corridor_distance_field.cpp
     )
 target_link_libraries( plan_env
     ${catkin_LIBRARIES} 
