@@ -58,7 +58,7 @@
     <arg name="mpc_w_risk" default="0.0"/>
     <arg name="mpc_cpa_weight" default="0.6"/>
     <arg name="mpc_risk_sigma_y" default="0.4"/>
-    <arg name="mpc_num_samples" default="200"/>
+    <arg name="mpc_num_samples" default="$(eval 256 if arg('planner') == 3 else 200)"/>
     <arg name="mpc_enable_dynamic_hard_reject" default="false"/>
     <arg name="mpc_enable_interaction" default="true"/>
     <arg name="mpc_interaction_enable_yield" default="false"/>
@@ -242,26 +242,29 @@
         <param name="lfpc/delta_t" value="0.07"/>
         <param name="lfpc/t_sup" value="0.35"/>
         <!-- mpc controller set -->
-        <!-- Display real final-iteration sample paths, uniformly selected (cap: 50).
+        <!-- Display real final-iteration MPPI sample paths, uniformly selected (cap: 50).
              Cyan: finite cost; orange: rejected, possibly a truncated rollout. -->
         <param name="mpc/sample_vis_enable" value="true" type="bool"/>
         <param name="mpc/sample_vis_count" value="20" type="int"/>
         <param name="mpc/horizon_steps" value="10" type="int"/>
-        <param name="mpc/beam_width" value="8" type="int"/>
+        <param name="mpc/num_samples" value="$(arg mpc_num_samples)" type="int"/>
+        <param if="$(eval arg('planner') == 3)" name="mpc/random_seed" value="0" type="int"/>
         <!-- Planner 3: CV prediction + matched-time polygon intersection (SAT).
              The circumscribed octagon encloses this COM-centered circular radius. -->
         <param if="$(eval arg('planner') == 3)" name="mpc/timed_collision_enable" value="$(arg mpc_timed_collision_enable)" type="bool"/>
         <param if="$(eval arg('planner') == 3)" name="mpc/timed_robot_radius" value="$(arg mpc_timed_robot_radius)" type="double"/>
         <!-- MPPI温度：越小越贪心(选最优)，越大越平滑(加权平均) -->
         <param name="mpc/temperature" value="0.4" type="double"/>
-        <param name="mpc/mpc_iters" value="1" type="int"/>
+        <param name="mpc/mpc_iters" value="$(eval 2 if arg('planner') == 3 else 1)" type="int"/>
         <param name="mpc/max_al" value="0.6" type="double"/>
         <param name="mpc/min_al" value="0.05" type="double"/>
         <param name="mpc/max_aw" value="0.15" type="double"/>
-        <param name="mpc/max_api" value="0.7854" type="double"/>
-        <param name="mpc/sigma_al" value="0.10" type="double"/>
-        <param name="mpc/sigma_aw" value="0.06" type="double"/>
-        <param name="mpc/sigma_api" value="0.15" type="double"/>
+        <!-- Preserve the old planner-3 effective +/-30 degree action range. -->
+        <param name="mpc/max_api" value="$(eval 0.5235987755982988 if arg('planner') == 3 else 0.7854)" type="double"/>
+        <param if="$(eval arg('planner') == 4)" name="mpc/sigma_al" value="0.10" type="double"/>
+        <param if="$(eval arg('planner') == 4)" name="mpc/sigma_aw" value="0.06" type="double"/>
+        <!-- Planner 3 needs broad enough exploration for turns from a cold start. -->
+        <param name="mpc/sigma_api" value="$(eval 0.35 if arg('planner') == 3 else 0.15)" type="double"/>
         <!-- Planner 3: goal, steering magnitude and steering variation only.
              Static collision and the A* spatial corridor are mandatory hard checks. -->
         <!-- 转向幅度代价：惩罚|api|绝对值，越大越走直线 -->
@@ -284,10 +287,10 @@
         <param if="$(eval arg('planner') == 4)" name="mpc/dynamic_min_radius" value="0.20" type="double"/>
         <param if="$(eval arg('planner') == 4)" name="mpc/w_prox" value="0.0" type="double"/>
         <param if="$(eval arg('planner') == 4)" name="mpc/prox_margin" value="0.3" type="double"/>
-        <param name="mpc/use_best" value="false" type="bool"/>
+        <param if="$(eval arg('planner') == 4)" name="mpc/use_best" value="false" type="bool"/>
         <!-- 使用真实模式true，为false则步长和步宽不固定 -->
-        <!-- Guide-cane gait model: forward motion is supplied by the user, MPC mainly optimizes steering. -->
-        <param name="mpc/fix_step_params" value="true" type="bool"/>
+        <!-- Guide-cane gait model: planner 3 fixes al/aw and optimizes continuous steering. -->
+        <param if="$(eval arg('planner') == 4)" name="mpc/fix_step_params" value="true" type="bool"/>
         <param name="mpc/goal_arrival_threshold" value="0.2" type="double"/>
         <param name="mpc/fov_range" value="5.0" type="double"/>
         <param name="mpc/debug_enable" value="true" type="bool"/>
@@ -312,7 +315,7 @@
         <param if="$(eval arg('planner') == 4)" name="mpc/interaction_use_cpa_check" value="$(arg mpc_interaction_use_cpa_check)" type="bool"/>
         <param name="mpc/nominal_al" value="$(arg user_step_length)" type="double"/>
         <param name="mpc/nominal_aw" value="0.0" type="double"/>
-        <param name="mpc/nominal_api" value="0.0" type="double"/>
+        <param if="$(eval arg('planner') == 4)" name="mpc/nominal_api" value="0.0" type="double"/>
 
         <!-- Planner 4 only: legacy dynamic walking corridor diagnostics.
              Planner 3 never constructs DWC or reads this configuration. -->

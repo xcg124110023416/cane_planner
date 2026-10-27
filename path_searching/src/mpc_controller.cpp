@@ -1,5 +1,4 @@
 #include <path_searching/mpc_controller.h>
-#include <path_searching/trajectory_feasibility.h>
 #include <cmath>
 #include <algorithm>
 #include <visualization_msgs/MarkerArray.h>
@@ -22,8 +21,13 @@ void MpcController::setParam(ros::NodeHandle &nh)
     publishSampleTrajectories({}, Eigen::VectorXd());
 
     nh.param("mpc/horizon_steps", cfg_.horizon_steps, 6);
-    nh.param("mpc/beam_width", cfg_.beam_width, 8);
-    beam_pub_=nh.advertise<std_msgs::Float64MultiArray>("/mpc/beam_evidence",1);
+    nh.param("mpc/num_samples", cfg_.num_samples, 256);
+    nh.param("mpc/mpc_iters", cfg_.mpc_iters, 2);
+    nh.param("mpc/temperature", cfg_.temperature, 0.4);
+    nh.param("mpc/sigma_api", cfg_.sigma_api, 0.35);
+    nh.param("mpc/random_seed", cfg_.random_seed, 0);
+    rng_.seed(cfg_.random_seed); normal_dist_.reset();
+    optimization_pub_=nh.advertise<std_msgs::Float64MultiArray>("/mpc/optimization_evidence",1);
 
     nh.param("mpc/max_al", cfg_.max_al, 0.4);
     nh.param("mpc/min_al", cfg_.min_al, 0.05);
@@ -50,19 +54,19 @@ void MpcController::init()
 
 void MpcController::reset()
 {
-    tree_.clear();beam_evidence_=BeamEvidence();
-    best_path_.clear(); best_times_.clear();
+    resetWarmStart(); optimization_evidence_=OptimizationEvidence();
+    best_path_.clear(); best_times_.clear(); best_controls_.clear();
     clearTimedPedestrians();
     last_plan_valid_ = false;
     last_plan_time_ms_ = 0.0;
     last_debug_metrics_ = DebugMetrics();
     publishSampleTrajectories({}, Eigen::VectorXd());
-    publishBeamEvidence();
+    publishOptimizationEvidence();
 }
 
 void MpcController::resetWarmStart()
 {
-    tree_.clear();beam_evidence_=BeamEvidence(); // no stochastic warm start retained
+    warm_start_.clear();
 }
 
 void MpcController::publishSampleTrajectories(
@@ -148,17 +152,22 @@ void MpcController::clearConvexCorridor()
 // Main API
 // =========================================================================
 
-void MpcController::publishBeamEvidence()
+void MpcController::publishOptimizationEvidence()
 {
-    if(!beam_pub_)return;
+    if(!optimization_pub_) return;
+    const auto& e=optimization_evidence_;
+    const auto finite=[](double x){return std::isfinite(x)?x:-1.;};
     std_msgs::Float64MultiArray msg;
-    std_msgs::MultiArrayDimension d;d.label="lfpc_beam_v1;roots=-30,-15,0,15,30;not_found_is_not_proof";
-    d.size=d.stride=24;msg.layout.dim.push_back(d);
-    msg.data={1.,double(beam_evidence_.horizon),double(beam_evidence_.width),double(beam_evidence_.evaluated),
-        double(beam_evidence_.full_leaves),double(beam_evidence_.selected_root),double(beam_evidence_.selected_leaf),beam_evidence_.reroll_valid?1.:0.};
-    for(int i=0;i<5;++i){msg.data.push_back(beam_evidence_.available[i]);msg.data.push_back(beam_evidence_.found[i]);msg.data.push_back(beam_evidence_.pruned[i]);}
-    msg.data.push_back(beam_evidence_.selected_leaf>=0 && tree_[beam_evidence_.selected_leaf].terminal?1.:0.);
-    beam_pub_.publish(msg);
+    msg.data={1.,double(e.horizon),double(e.samples_per_iteration),double(e.iterations),
+        double(e.evaluated),double(e.valid),double(e.weighted_checks),double(e.weighted_rejects),
+        e.effective_samples,double(e.selected_steps),e.selected_terminal?1.:0.,e.reroll_valid?1.:0.,
+        finite(last_debug_metrics_.best_total_cost),finite(last_debug_metrics_.executed_total_cost)};
+    for(double cost:e.best_verified_costs)msg.data.push_back(finite(cost));
+    for(double cost:e.weighted_costs)msg.data.push_back(finite(cost));
+    std_msgs::MultiArrayDimension d;
+    d.label="lfpc_mppi_v1;0=version,1=horizon,2=samples_per_iter,3=iters,4=sampled,5=valid,6=weighted_checks,7=weighted_rejects,8=ESS,9=selected_steps,10=terminal,11=reroll_valid,12=best_verified_cost,13=executed_cost;then[iter_best_costs],[iter_weighted_costs];-1=unavailable";
+    d.size=d.stride=msg.data.size();msg.layout.dim.push_back(d);
+    optimization_pub_.publish(msg);
 }
 
 double MpcController::distanceToGoal(LFPC& state,const Eigen::Vector3d& goal) const
@@ -187,7 +196,7 @@ bool MpcController::timedFree(const Eigen::Vector2d& com, double time, double ag
     ++last_debug_metrics_.timed_collision_checks;
     if (timed_input_valid_ && timed_collision_.intersects(com, age+time) == false) return true;
     ++last_debug_metrics_.dynamic_reject_count;
-    // Keep one bounded witness, not every rejected beam sample.
+    // Keep one bounded witness, not every rejected rollout sample.
     if (!collision_witness_.valid) collision_witness_ = {true, com, time, age};
     return false;
 }
@@ -208,7 +217,7 @@ bool MpcController::revalidateTimedPath(double age)
     if (safe) timed_observation_age_ = age;
     else {
         last_plan_valid_ = last_debug_metrics_.plan_valid = false;
-        best_path_.clear(); best_times_.clear();
+        best_path_.clear(); best_times_.clear(); best_controls_.clear();
     }
     return safe;
 }
@@ -251,118 +260,177 @@ bool MpcController::advance(LFPC& state,double action,std::vector<Eigen::Vector3
     state.prepareNextStep();return true;
 }
 
-Eigen::Vector3d MpcController::plan(const LFPC::Ptr& base,const Eigen::Vector3d& goal,const Eigen::Vector2d* final_goal,double final_radius)
+std::vector<MpcController::ControlSequence> MpcController::sampleSequences(
+    const ControlSequence& mean,const ControlSequence& incumbent)
+{
+    std::vector<ControlSequence> samples(cfg_.num_samples,mean);
+    if(samples.size()>1 && incumbent.size()==mean.size()) samples[1]=incumbent;
+    // Two anchors (proposal and retained candidate), then antithetic Gaussian
+    // pairs. Paired noise reduces sampling bias without quantizing steering.
+    for(size_t k=2;k<samples.size();k+=2)for(size_t n=0;n<mean.size();++n) {
+        const double noise=cfg_.sigma_api*normal_dist_(rng_);
+        samples[k][n]=std::max(-cfg_.max_api,std::min(cfg_.max_api,mean[n]+noise));
+        if(k+1<samples.size())
+            samples[k+1][n]=std::max(-cfg_.max_api,std::min(cfg_.max_api,mean[n]-noise));
+    }
+    return samples;
+}
+
+std::vector<double> MpcController::computeWeights(const std::vector<double>& costs) const
+{
+    std::vector<double> weights(costs.size(),0.);
+    double minimum=std::numeric_limits<double>::infinity(),sum=0.;
+    for(double cost:costs)if(std::isfinite(cost))minimum=std::min(minimum,cost);
+    if(!std::isfinite(minimum))return weights; // no uniform weight for unsafe samples
+    for(size_t i=0;i<costs.size();++i)if(std::isfinite(costs[i])) {
+        weights[i]=std::exp(-(costs[i]-minimum)/cfg_.temperature);sum+=weights[i];
+    }
+    for(auto& weight:weights)weight/=sum; // minimum has weight one, sum cannot underflow
+    return weights;
+}
+
+MpcController::ControlSequence MpcController::weightedUpdate(
+    const std::vector<ControlSequence>& samples,const std::vector<double>& weights) const
+{
+    ControlSequence mean(cfg_.horizon_steps,0.);
+    for(size_t k=0;k<samples.size();++k)for(size_t n=0;n<mean.size();++n)
+        mean[n]+=weights[k]*samples[k][n];
+    for(auto& action:mean)action=std::max(-cfg_.max_api,std::min(cfg_.max_api,action));
+    return mean;
+}
+
+MpcController::Rollout MpcController::rolloutSequence(const LFPC& base,
+    const ControlSequence& controls,const Eigen::Vector3d& goal,
+    const Eigen::Vector2d* final_goal,double final_radius)
+{
+    Rollout result;
+    if(controls.size()!=size_t(cfg_.horizon_steps))return result;
+    LFPC state;state.copyState(base);
+    double elapsed=0.,motion_cost=0.,previous_action=0.;bool arrived=false;
+    for(size_t n=0;n<controls.size();++n) {
+        const double action=controls[n];
+        if(!std::isfinite(action) || std::abs(action)>cfg_.max_api ||
+           !advance(state,action,result.path,elapsed,&result.times))return result;
+        motion_cost+=cfg_.w_steer*std::abs(action)+(n>0?cfg_.w_dapi*std::abs(action-previous_action):0.);
+        previous_action=action;++result.steps;
+        arrived=arrived || distanceToGoal(state,goal)<cfg_.goal_arrival_threshold;
+        // Local arrival only suppresses terminal distance cost, never safety or
+        // suffix walking cost. Only the actual final goal permits idle termination.
+        result.terminal=final_goal && (state.getCOMPos().head<2>()-*final_goal).norm()<final_radius;
+        if(result.terminal)break;
+    }
+    result.cost=motion_cost+(arrived?0.:(cfg_.w_goal/cfg_.horizon_steps)*distanceToGoal(state,goal));
+    result.valid=std::isfinite(result.cost);
+    return result;
+}
+
+Eigen::Vector3d MpcController::plan(const LFPC::Ptr& base,const Eigen::Vector3d& goal,
+                                   const Eigen::Vector2d* final_goal,double final_radius)
 {
     const auto started=std::chrono::steady_clock::now();
-    tree_.clear();best_path_.clear();best_times_.clear();collision_witness_=CollisionWitness();last_plan_valid_=false;last_debug_metrics_=DebugMetrics();beam_evidence_=BeamEvidence();
-    last_debug_metrics_.timed_collision_active = !timed_collision_.empty() || !timed_input_valid_;
-    const int N=cfg_.horizon_steps,W=cfg_.beam_width;
-    beam_evidence_.horizon=N;beam_evidence_.width=W;
+    best_path_.clear();best_times_.clear();best_controls_.clear();collision_witness_=CollisionWitness();
+    last_plan_valid_=false;last_debug_metrics_=DebugMetrics();optimization_evidence_=OptimizationEvidence();
+    last_debug_metrics_.timed_collision_active=!timed_collision_.empty() || !timed_input_valid_;
+    const int N=cfg_.horizon_steps,K=cfg_.num_samples,I=cfg_.mpc_iters;
+    auto& evidence=optimization_evidence_;evidence.horizon=N;evidence.samples_per_iteration=K;
     Eigen::Vector3d command=Eigen::Vector3d::Zero();
     auto finish=[&] {
+        if(!last_plan_valid_)resetWarmStart();
         last_plan_time_ms_=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
         last_debug_metrics_.plan_time_ms=last_plan_time_ms_;last_debug_metrics_.plan_valid=last_plan_valid_;
-        publishBeamEvidence();return command;
+        publishOptimizationEvidence();return command;
     };
     bool config=!final_goal || (final_goal->allFinite() && std::isfinite(final_radius) && final_radius>0.);
     for(double x:{cfg_.nominal_al,cfg_.nominal_aw,cfg_.min_al,cfg_.max_al,cfg_.max_aw,cfg_.max_api,
-                  cfg_.w_steer,cfg_.w_dapi,cfg_.w_goal,cfg_.goal_arrival_threshold})config=config&&std::isfinite(x);
-    config=config && N>=1 && N<=32 && W>=1 && W<=32 && cfg_.min_al>=0 && cfg_.nominal_al>=cfg_.min_al &&
-        cfg_.nominal_al<=cfg_.max_al && cfg_.nominal_aw>=0 && cfg_.nominal_aw<=cfg_.max_aw && cfg_.max_api>=0 &&
-        cfg_.w_steer>=0 && cfg_.w_dapi>=0 && cfg_.w_goal>=0 && cfg_.goal_arrival_threshold>=0;
-    const bool inside=base && base->getCOMPos().allFinite() && std::any_of(convex_corridor_segments_.begin(),convex_corridor_segments_.end(),
+                  cfg_.w_steer,cfg_.w_dapi,cfg_.w_goal,cfg_.goal_arrival_threshold,cfg_.sigma_api,cfg_.temperature})
+        config=config && std::isfinite(x);
+    config=config && N>=1 && N<=32 && K>=1 && K<=4096 && I>=1 && I<=16 && cfg_.random_seed>=0 &&
+        cfg_.min_al>=0 && cfg_.nominal_al>=cfg_.min_al && cfg_.nominal_al<=cfg_.max_al &&
+        cfg_.nominal_aw>=0 && cfg_.nominal_aw<=cfg_.max_aw && cfg_.max_api>=0 && cfg_.sigma_api>=0 &&
+        cfg_.temperature>0 && cfg_.w_steer>=0 && cfg_.w_dapi>=0 && cfg_.w_goal>=0 && cfg_.goal_arrival_threshold>=0;
+    const bool inside=base && base->getCOMPos().allFinite() && std::any_of(
+        convex_corridor_segments_.begin(),convex_corridor_segments_.end(),
         [&](const ConvexCorridor::Segment& seg){return ConvexCorridor::contains(seg,base->getCOMPos().head<2>(),1e-6);});
     if(!config || !timed_input_valid_ || !collision_ || !goal.allFinite() || !has_convex_corridor_ || !inside ||
        !(collision_->hasStaticGlobalMap()?collision_->isStaticTraversable(base->getCOMPos().x(),base->getCOMPos().y()):
          collision_->isTraversable(base->getCOMPos().x(),base->getCOMPos().y()))) {
         publishSampleTrajectories({},Eigen::VectorXd());return finish();
     }
-    timed_root_ = base->getCOMPos().head<2>();
-    if (!timedFree(timed_root_,0.,timed_observation_age_)) {
+    timed_root_=base->getCOMPos().head<2>();
+    if(!timedFree(timed_root_,0.,timed_observation_age_)) {
         publishSampleTrajectories({},Eigen::VectorXd());return finish();
     }
-    constexpr double rad=3.14159265358979323846/180.;
-    const std::array<double,5> actions{{-30*rad,-15*rad,0,15*rad,30*rad}};
-    for(int i=0;i<5;++i)beam_evidence_.available[i]=std::abs(actions[i])<=cfg_.max_api;
-    tree_.reserve(1+5+25*W*(N-1));
-    TreeNode root;root.state.copyState(*base);root.safe=true;tree_.push_back(root);
-    std::array<std::vector<int>,5> frontier;
-    std::vector<int> leaves;
-    auto expand=[&](int parent,int ai,int ri) {
-        TreeNode node;node.id=tree_.size();node.parent=parent;node.root=ri;node.depth=tree_[parent].depth+1;node.action=actions[ai];
-        node.state.copyState(tree_[parent].state);node.motion_cost=tree_[parent].motion_cost;node.arrived=tree_[parent].arrived;
-        node.elapsed=tree_[parent].elapsed;
-        std::vector<Eigen::Vector3d> ignored;node.safe=advance(node.state,node.action,ignored,node.elapsed);++beam_evidence_.evaluated;
-        if(node.safe) {
-            node.motion_cost+=cfg_.w_steer*std::abs(node.action)+(node.depth>1?cfg_.w_dapi*std::abs(node.action-tree_[parent].action):0.);
-            node.arrived=node.arrived || distanceToGoal(node.state,goal)<cfg_.goal_arrival_threshold;
-            node.terminal=final_goal && (node.state.getCOMPos().head<2>()-*final_goal).norm()<final_radius;
-            node.objective=node.motion_cost+(node.arrived?0.:(cfg_.w_goal/N)*distanceToGoal(node.state,goal));
-            node.safe=std::isfinite(node.objective);
+    ControlSequence mean=warm_start_.size()==size_t(N)?warm_start_:ControlSequence(N,0.);
+    ControlSequence fallback_controls,optimized_controls;
+    Rollout fallback,optimized;
+    bool has_weighted=false;
+    for(int iteration=0;iteration<I;++iteration) {
+        const auto samples=sampleSequences(mean,fallback_controls);
+        std::vector<double> costs(K,std::numeric_limits<double>::infinity());
+        std::vector<std::vector<Eigen::Vector3d>> display_paths;
+        if(iteration+1==I)display_paths.reserve(K);
+        for(int k=0;k<K;++k) {
+            auto rollout=rolloutSequence(*base,samples[k],goal,final_goal,final_radius);
+            ++evidence.evaluated;
+            if(rollout.valid) {
+                costs[k]=rollout.cost;++evidence.valid;
+                if(!fallback.valid || rollout.cost<fallback.cost) {fallback=rollout;fallback_controls=samples[k];}
+                // Retain the initial feasible proposal so optimization never
+                // forces a higher-cost command than a validated warm start.
+                if(iteration==0 && k==0) {optimized=rollout;optimized_controls=samples[k];}
+            }
+            if(iteration+1==I)display_paths.push_back(std::move(rollout.path));
         }
-        tree_[parent].children.push_back(node.id);tree_.push_back(std::move(node));return int(tree_.size()-1);
-    };
-    for(int ri=0;ri<5;++ri)if(beam_evidence_.available[ri]) {
-        int id=expand(0,ri,ri);if(tree_[id].safe) {if(tree_[id].terminal)leaves.push_back(id);else frontier[ri].push_back(id);}
-    }
-    for(int depth=2;depth<=N;++depth)for(int ri=0;ri<5;++ri) {
-        std::vector<int> next;
-        for(int parent:frontier[ri])for(int ai=0;ai<5;++ai)if(beam_evidence_.available[ai]) {
-            int id=expand(parent,ai,ri);if(tree_[id].safe) {if(tree_[id].terminal)leaves.push_back(id);else next.push_back(id);}
+        if(iteration+1==I) {
+            Eigen::VectorXd c(K);for(int k=0;k<K;++k)c[k]=costs[k];
+            publishSampleTrajectories(display_paths,c);
         }
-        std::stable_sort(next.begin(),next.end(),[&](int a,int b){return tree_[a].objective<tree_[b].objective;});
-        if(next.size()>size_t(W)) {
-            beam_evidence_.pruned[ri]=true;
-            for(size_t i=W;i<next.size();++i)tree_[next[i]].pruned=true;
-            next.resize(W);
-        }
-        frontier[ri]=std::move(next);
+        const auto weights=computeWeights(costs);
+        double sum=0.,squares=0.;for(double w:weights){sum+=w;squares+=w*w;}
+        evidence.effective_samples=squares>0.?1./squares:0.;
+        double weighted_cost=std::numeric_limits<double>::infinity();
+        if(sum>0.) {
+            auto proposal=weightedUpdate(samples,weights);
+            auto checked=rolloutSequence(*base,proposal,goal,final_goal,final_radius);
+            ++evidence.weighted_checks;
+            if(checked.valid) {
+                has_weighted=true;weighted_cost=checked.cost;mean=proposal;
+                if(!optimized.valid || checked.cost<optimized.cost) {optimized=checked;optimized_controls=proposal;}
+                if(!fallback.valid || checked.cost<fallback.cost) {fallback=checked;fallback_controls=proposal;}
+            } else {
+                ++evidence.weighted_rejects;
+                if(fallback.valid)mean=fallback_controls;
+            }
+        } else if(fallback.valid)mean=fallback_controls;
+        ++evidence.iterations;
+        evidence.best_verified_costs.push_back(fallback.cost);
+        evidence.weighted_costs.push_back(weighted_cost);
     }
-    for(int ri=0;ri<5;++ri)for(int id:frontier[ri])if(tree_[id].depth==N) {
-        leaves.push_back(id);
-    }
-    for(int id:leaves) {beam_evidence_.found[tree_[id].root]=true;
-        for(int p=id;p>=0;p=tree_[p].parent)tree_[p].continuation_found=true;}
-    beam_evidence_.full_leaves=leaves.size();
-    last_debug_metrics_.num_samples=beam_evidence_.evaluated;
-    last_debug_metrics_.valid_trajectory_count=leaves.size();last_debug_metrics_.corridor_feasible_trajectory_count=leaves.size();
+    last_debug_metrics_.num_samples=evidence.evaluated;
+    last_debug_metrics_.valid_trajectory_count=last_debug_metrics_.corridor_feasible_trajectory_count=evidence.valid;
+    last_debug_metrics_.valid_sample_ratio=double(evidence.valid)/evidence.evaluated;
+    last_debug_metrics_.candidate_inside_corridor_ratio=-1.;
     last_debug_metrics_.convex_corridor_segments=convex_corridor_segments_.size();
-    // Legacy ratio unavailable: expanded edges and retained leaves are not Monte Carlo samples.
-    last_debug_metrics_.valid_sample_ratio=-1.;last_debug_metrics_.candidate_inside_corridor_ratio=-1.;
-    std::stable_sort(leaves.begin(),leaves.end(),[&](int a,int b){return tree_[a].objective<tree_[b].objective;});
-    std::vector<std::vector<Eigen::Vector3d>> display_paths;std::vector<double> display_costs;
-    if(!leaves.empty()) {
-        const int selected=leaves.front();std::vector<int> ancestry;
-        for(int id=selected;tree_[id].parent>=0;id=tree_[id].parent)ancestry.push_back(id);
-        std::reverse(ancestry.begin(),ancestry.end());
-        LFPC checked;checked.copyState(*base);bool valid=true,arrived=false;
-        double replay_motion=0.,previous_action=0.,elapsed=0.;
-        for(size_t step=0;step<ancestry.size();++step) {
-            const double action=tree_[ancestry[step]].action;
-            if(!advance(checked,action,best_path_,elapsed,&best_times_)){valid=false;break;}
-            replay_motion+=cfg_.w_steer*std::abs(action)+(step>0?cfg_.w_dapi*std::abs(action-previous_action):0.);
-            previous_action=action;
-            arrived=arrived || distanceToGoal(checked,goal)<cfg_.goal_arrival_threshold;
-        }
-        const double replay_objective=replay_motion+(arrived?0.:(cfg_.w_goal/N)*distanceToGoal(checked,goal));
-        valid=valid && std::isfinite(replay_objective) && replay_objective==tree_[selected].objective;
-        if(tree_[selected].terminal)valid=valid && final_goal && (checked.getCOMPos().head<2>()-*final_goal).norm()<final_radius;
-        beam_evidence_.selected_root=tree_[selected].root;beam_evidence_.selected_leaf=selected;beam_evidence_.reroll_valid=valid;
-        if(valid) {
-            last_plan_valid_=true;command=Eigen::Vector3d(cfg_.nominal_al,cfg_.nominal_aw,tree_[ancestry.front()].action);
-            last_debug_metrics_.best_total_cost=last_debug_metrics_.executed_total_cost=tree_[selected].objective;
-            display_paths.push_back(best_path_);display_costs.push_back(tree_[selected].objective);
-        }else {best_path_.clear();best_times_.clear();}
-        for(size_t k=1;k<leaves.size() && display_paths.size()<size_t(sample_vis_count_);++k) {
-            std::vector<int> chain;for(int id=leaves[k];tree_[id].parent>=0;id=tree_[id].parent)chain.push_back(id);
-            std::vector<Eigen::Vector3d> path;
-            // Each node retains full LFPC pose, draw actual validated step end points.
-            path.push_back(base->getCOMPos());for(auto i=chain.rbegin();i!=chain.rend();++i)path.push_back(tree_[*i].state.getCOMPos());
-            display_paths.push_back(path);display_costs.push_back(tree_[leaves[k]].objective);
+    last_debug_metrics_.weighted_checked=evidence.weighted_checks>0;
+    last_debug_metrics_.weighted_fallback=evidence.weighted_checks>0 && !has_weighted;
+    last_debug_metrics_.best_total_cost=fallback.cost;
+    if(fallback.valid) {
+        const auto& selected=has_weighted?optimized:fallback;
+        const auto& controls=has_weighted?optimized_controls:fallback_controls;
+        auto replay=rolloutSequence(*base,controls,goal,final_goal,final_radius);
+        evidence.reroll_valid=replay.valid && replay.cost==selected.cost && replay.steps==selected.steps &&
+                              replay.terminal==selected.terminal;
+        if(evidence.reroll_valid) {
+            last_plan_valid_=true;last_debug_metrics_.executed_total_cost=replay.cost;
+            best_path_=std::move(replay.path);best_times_=std::move(replay.times);
+            best_controls_.assign(controls.begin(),controls.begin()+replay.steps);
+            evidence.selected_steps=replay.steps;evidence.selected_terminal=replay.terminal;
+            command=Eigen::Vector3d(cfg_.nominal_al,cfg_.nominal_aw,controls.front());
+            warm_start_=controls;std::rotate(warm_start_.begin(),warm_start_.begin()+1,warm_start_.end());
+            warm_start_.back()=0.;
         }
     }
-    Eigen::VectorXd costs(display_costs.size());for(size_t i=0;i<display_costs.size();++i)costs[i]=display_costs[i];
-    publishSampleTrajectories(display_paths,costs);return finish();
+    return finish();
 }
 
 } // namespace cane_planner

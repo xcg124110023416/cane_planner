@@ -29,7 +29,7 @@ cost decisions remain unchanged.
 ## Transaction and execution
 
 Manager binds hulls/velocities/source age under the existing nonrecursive accepted
-observation lock, after geometry and before beam search. Freshness, original stamp,
+observation lock, after geometry and before MPPI optimization. Freshness, original stamp,
 receipt and generation authorization remain mandatory. Immediately after that
 check, revalidate the root and ALL selected samples using the actual execution
 epoch, before any LFPC control change or integration. Cost is bounded by selected
@@ -61,13 +61,14 @@ Debug indices 0–25 retain positions; 5=timed rejected edge/query count,
 19=spatial-only mode. Append 26=timed active, 27=point checks (search/replay/final),
 28=execution rechecked, 29=execution safe. Distance/CPA metrics remain unavailable;
 SAT axis projection gaps must not be reported as Euclidean clearance. Final plan
-validity is false after execution rejection. Beam replay evidence describes search
-replay; execution safety is independently indicated by 28/29 and STOP.
+validity is false after execution rejection. MPPI optimization evidence describes
+sampling/weighted-update replay; execution safety is independently indicated by
+28/29 and STOP. See [lfpc-mppi.md](./lfpc-mppi.md) for the optimizer contract.
 
 Tests cover SAT contact/containment/rotated separation/invalid/empty/CV;
 controller sample timing/copy/reset, crossing beyond first step, source age,
 latency rejection and ablation; manager captured snapshot and source-age binding,
 matched future marker/path stamps and empty cleanup, execution-time STOP before
 integration with frozen odometry. Existing transaction/arrival/static tests remain.
-Opt-in same-search benchmark: test_static_mpc with
-`--gtest_filter=TimedMpcRuntime.DISABLED_BenchmarkSameBeamWork --gtest_also_run_disabled_tests`.
+Opt-in same-budget benchmark (10 steps, 256 samples, 2 iterations): test_static_mpc with
+`--gtest_filter=TimedMpcRuntime.DISABLED_BenchmarkSameMppiWork --gtest_also_run_disabled_tests`.

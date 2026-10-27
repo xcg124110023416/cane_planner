@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <chrono>
+#include <array>
 #include <iostream>
 #include <path_searching/mpc_controller.h>
 
@@ -48,19 +49,33 @@ public:
         return c;
     }
 
-    static void configure(MpcController &c, bool = false)
+    static void configure(MpcController &c)
     {
         c.cfg_.horizon_steps = 1;
         c.cfg_.nominal_al = 0.25;
-        c.cfg_.max_api = 0.7854;
+        c.cfg_.max_api = 3.14159265358979323846/6.;
+        c.cfg_.num_samples = 64;c.cfg_.mpc_iters = 2;
+        c.rng_.seed(17);c.normal_dist_.reset();
         c.cfg_.w_goal = c.cfg_.w_steer = c.cfg_.w_dapi = 0.0;
     }
 
-    static void beam(MpcController& c,int horizon,int width) {c.cfg_.horizon_steps=horizon;c.cfg_.beam_width=width;c.cfg_.w_goal=10.;c.cfg_.goal_arrival_threshold=0.;}
+    static void horizon(MpcController& c,int horizon) {c.cfg_.horizon_steps=horizon;c.cfg_.w_goal=10.;c.cfg_.goal_arrival_threshold=0.;}
+    static void sampling(MpcController& c,int count,int iterations,double sigma=.15) {c.cfg_.num_samples=count;c.cfg_.mpc_iters=iterations;c.cfg_.sigma_api=sigma;}
+    static void seed(MpcController& c,int value) {c.rng_.seed(value);c.normal_dist_.reset();}
+    static const std::vector<double>& warm(MpcController& c) {return c.warm_start_;}
+    static std::vector<double> weights(MpcController& c,const std::vector<double>& costs) {return c.computeWeights(costs);}
+    static double rolloutCost(MpcController& c,const LFPC& base,const std::vector<double>& u,const Eigen::Vector3d& goal) {return c.rolloutSequence(base,u,goal,nullptr,0.).cost;}
+    static auto samples(MpcController& c,const std::vector<double>& mean,const std::vector<double>& incumbent) {return c.sampleSequences(mean,incumbent);}
+    static void temperature(MpcController& c,double value) {c.cfg_.temperature=value;}
+    static void coldStartBudget(MpcController& c) {
+        c.cfg_.horizon_steps=10;c.cfg_.num_samples=256;c.cfg_.mpc_iters=2;
+        c.cfg_.nominal_al=.4;c.cfg_.w_goal=25.;c.cfg_.w_steer=.5;c.cfg_.w_dapi=.2;
+        c.cfg_.goal_arrival_threshold=.2;seed(c,0);
+    }
     static void timedEnable(MpcController& c,bool value) {c.cfg_.timed_collision_enable=value;}
     static void angleLimit(MpcController& c,double limit) {c.cfg_.max_api=limit;}
     static CollisionDetection::Ptr wideMap() {auto c=map();c->static_origin_=Eigen::Vector2d(-10,-10);c->static_map_resolution_=.025;c->static_map_inv_resolution_=40.;return c;}
-    static void suffixCost(MpcController& c) {c.cfg_.horizon_steps=10;c.cfg_.beam_width=8;c.cfg_.w_steer=.5;c.cfg_.w_dapi=.7;c.cfg_.w_goal=10.;c.cfg_.goal_arrival_threshold=.2;}
+    static void suffixCost(MpcController& c) {c.cfg_.horizon_steps=10;c.cfg_.w_steer=.5;c.cfg_.w_dapi=.7;c.cfg_.w_goal=10.;c.cfg_.goal_arrival_threshold=.2;}
     static void steeringCost(MpcController &c) { c.cfg_.w_steer = 0.5; }
 
     static void corridorGrid(CollisionDetection& c)
@@ -196,195 +211,179 @@ TEST(StaticMpcRuntime, MissingInvalidAndClearedCorridorStop)
     EXPECT_TRUE(c.getBestPath().empty());
 }
 
-TEST(StaticMpcRuntime, DiscreteSelectedPathMatchesExecutedAction)
+TEST(StaticMpcRuntime, WeightedCommandMatchesExecutedAction)
 {
-    MpcController c;
-    StaticMpcTestAccess::configure(c);
+    MpcController c;StaticMpcTestAccess::configure(c);
+    c.setCollision(StaticMpcTestAccess::map());c.setConvexCorridor({box()});
+    auto m=StaticMpcTestAccess::model();const auto command=c.plan(m,Eigen::Vector3d(2,0,0));
+    ASSERT_TRUE(c.lastPlanValid());const auto d=c.getDebugMetrics();
+    EXPECT_TRUE(d.weighted_checked);EXPECT_FALSE(d.weighted_fallback);
+    EXPECT_EQ(128,d.valid_trajectory_count);EXPECT_EQ(128,d.num_samples);
+    EXPECT_DOUBLE_EQ(1.,d.valid_sample_ratio);EXPECT_DOUBLE_EQ(0.,d.executed_total_cost);
+    expectExecutedPath(c,m,command);
+}
+
+TEST(StaticMpcRuntime, WeightedFootCollisionFallsBackToVerifiedSampleReproducibly)
+{
+    MpcController a,b;auto m=StaticMpcTestAccess::model();auto collision=StaticMpcTestAccess::map(true);
+    for(auto* c:{&a,&b}) {
+        StaticMpcTestAccess::configure(*c);StaticMpcTestAccess::sampling(*c,64,1,.35);
+        c->setCollision(collision);c->setConvexCorridor({box()});
+    }
+    const auto expected=a.plan(m,Eigen::Vector3d(2,0,0));const auto actual=b.plan(m,Eigen::Vector3d(2,0,0));
+    ASSERT_TRUE(a.lastPlanValid());ASSERT_TRUE(b.lastPlanValid());EXPECT_EQ(expected,actual);
+    EXPECT_TRUE(a.getDebugMetrics().weighted_checked);EXPECT_TRUE(a.getDebugMetrics().weighted_fallback);
+    EXPECT_EQ(1,a.optimizationEvidence().weighted_rejects);
+    EXPECT_GT(a.getDebugMetrics().static_reject_count,0);expectExecutedPath(a,m,expected);
+}
+
+TEST(StaticMpcRuntime, WeightedMeanAcrossNonconvexUnionIsRechecked)
+{
+    MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::sampling(c,64,1,.35);
     c.setCollision(StaticMpcTestAccess::map());
-    c.setConvexCorridor({box()});
-    auto m = StaticMpcTestAccess::model();
-    const auto command = c.plan(m, Eigen::Vector3d(2, 0, 0));
-    ASSERT_TRUE(c.lastPlanValid());
-    const auto d = c.getDebugMetrics();
-    EXPECT_FALSE(d.weighted_checked);
-    EXPECT_FALSE(d.weighted_fallback);
-    EXPECT_EQ(d.valid_trajectory_count, 5);
-    EXPECT_EQ(d.num_samples, 5);
-    EXPECT_DOUBLE_EQ(d.executed_total_cost, 0.0);
-    expectExecutedPath(c, m, command);
+    c.setConvexCorridor({box(-1,.025),box(-1,1,.006,1),box(-1,1,-1,-.006)});
+    auto m=StaticMpcTestAccess::model();const auto command=c.plan(m,Eigen::Vector3d(2,0,0));
+    ASSERT_TRUE(c.lastPlanValid());EXPECT_TRUE(c.getDebugMetrics().weighted_fallback);
+    EXPECT_EQ(1,c.optimizationEvidence().weighted_rejects);
+    EXPECT_GT(c.getDebugMetrics().convex_corridor_reject_count,0);
+    expectExecutedPath(c,m,command);
 }
 
-TEST(StaticMpcRuntime, DiscreteFootCollisionRejectsAndSelectionIsDeterministic)
+TEST(StaticMpcRuntime, EverySampleOutsideUnionOrInStaticObstacleStops)
 {
-    MpcController weighted, best;
-    StaticMpcTestAccess::configure(weighted);
-    StaticMpcTestAccess::configure(best, true);
-    auto collision = StaticMpcTestAccess::map(true);
-    auto m = StaticMpcTestAccess::model();
-    for (auto *c : {&weighted, &best})
-    {
-        c->setCollision(collision);
-        c->setConvexCorridor({box()});
+    for(bool static_obstacle:{false,true}) {
+        MpcController c;StaticMpcTestAccess::configure(c);
+        c.setCollision(StaticMpcTestAccess::map(false,static_obstacle));
+        c.setConvexCorridor({static_obstacle?box():box(-.001,.001)});
+        EXPECT_TRUE(c.plan(StaticMpcTestAccess::model(),Eigen::Vector3d(2,0,0)).isZero());
+        EXPECT_FALSE(c.lastPlanValid());EXPECT_FALSE(c.getDebugMetrics().weighted_checked);
+        EXPECT_EQ(0,c.getDebugMetrics().valid_trajectory_count);
+        EXPECT_TRUE(c.getBestPath().empty());EXPECT_TRUE(StaticMpcTestAccess::warm(c).empty());
     }
-    const Eigen::Vector3d goal(2, 0, 0);
-    const auto expected = best.plan(m, goal);
-    const auto actual = weighted.plan(m, goal);
-    ASSERT_TRUE(best.lastPlanValid());
-    ASSERT_TRUE(weighted.lastPlanValid());
-    EXPECT_FALSE(weighted.getDebugMetrics().weighted_checked);
-    EXPECT_FALSE(weighted.getDebugMetrics().weighted_fallback);
-    EXPECT_NEAR((actual - expected).norm(), 0.0, 1e-12);
-    EXPECT_GT(weighted.getDebugMetrics().static_reject_count, 0);
-    EXPECT_EQ(weighted.getDebugMetrics().static_reject_count,
-              best.getDebugMetrics().static_reject_count);
-    expectExecutedPath(weighted, m, actual);
 }
 
-TEST(StaticMpcRuntime, DiscreteSelectedCostMatchesExecutedCost)
+TEST(StaticMpcRuntime, ContinuousOptimizationImprovesCostAndReplaysFullState)
 {
-    MpcController weighted, best;
-    auto m = StaticMpcTestAccess::model();
-    for (auto *c : {&weighted, &best})
-    {
-        StaticMpcTestAccess::configure(*c, c == &best);
-        StaticMpcTestAccess::steeringCost(*c);
-        c->setCollision(StaticMpcTestAccess::map());
-        c->setConvexCorridor({box()});
-        c->plan(m, Eigen::Vector3d(2, 0, 0));
-        ASSERT_TRUE(c->lastPlanValid());
+    MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::horizon(c,5);
+    StaticMpcTestAccess::sampling(c,256,3,.25);
+    c.setCollision(StaticMpcTestAccess::wideMap());c.setConvexCorridor({box(-9,9,-9,9)});
+    auto model=StaticMpcTestAccess::model();const auto state=model->getState();const auto pos=model->getCOMPos();
+    const Eigen::Vector3d goal(1,1,0);
+    const double initial=StaticMpcTestAccess::rolloutCost(c,*model,std::vector<double>(5,0.),goal);
+    const auto command=c.plan(model,goal);ASSERT_TRUE(c.lastPlanValid());
+    EXPECT_EQ(state,model->getState());EXPECT_EQ(pos,model->getCOMPos());
+    EXPECT_TRUE(c.getDebugMetrics().weighted_checked);EXPECT_FALSE(c.getDebugMetrics().weighted_fallback);
+    EXPECT_LT(c.getDebugMetrics().executed_total_cost,initial);
+    const auto& e=c.optimizationEvidence();EXPECT_EQ(3,e.iterations);EXPECT_EQ(768,e.evaluated);
+    ASSERT_EQ(3u,e.best_verified_costs.size());
+    for(size_t i=1;i<e.best_verified_costs.size();++i)EXPECT_LE(e.best_verified_costs[i],e.best_verified_costs[i-1]);
+    const auto& controls=c.getBestControls();ASSERT_EQ(5u,controls.size());
+    EXPECT_DOUBLE_EQ(command.z(),controls.front());
+    EXPECT_GT(std::abs(command.z()/(3.14159265358979323846/12.)-std::round(command.z()/(3.14159265358979323846/12.))),1e-4);
+    LFPC replay;replay.copyState(*model);std::vector<Eigen::Vector3d> path;
+    for(double action:controls) {
+        EXPECT_LE(std::abs(action),3.14159265358979323846/6.);
+        replay.SetCtrlParams(Eigen::Vector3d(command.x(),command.y(),action));replay.updateOneStep();
+        const auto step=replay.getStepCOMPath();path.insert(path.end(),step.begin(),step.end());replay.prepareNextStep();
     }
-    EXPECT_DOUBLE_EQ(weighted.getDebugMetrics().best_total_cost,
-                     best.getDebugMetrics().best_total_cost);
-    EXPECT_DOUBLE_EQ(weighted.getDebugMetrics().executed_total_cost,
-              weighted.getDebugMetrics().best_total_cost);
+    ASSERT_EQ(path.size(),c.getBestPath().size());
+    for(size_t i=0;i<path.size();++i)EXPECT_NEAR(0.,(path[i]-c.getBestPath()[i]).norm(),1e-12);
+    EXPECT_DOUBLE_EQ(c.getDebugMetrics().executed_total_cost,StaticMpcTestAccess::rolloutCost(c,*model,controls,goal));
+    EXPECT_TRUE(e.reroll_valid);
 }
 
-TEST(StaticMpcRuntime, DiscreteUnionChecksPreservedWithoutAveraging)
+TEST(StaticMpcRuntime, StableWeightsExcludeAllUnsafeInputs)
 {
-    MpcController weighted, best;
-    auto m = StaticMpcTestAccess::model();
-    // Two connected branches with a narrow throat at time zero. Their weighted
-    // mean goes through the gap even though each retained branch is feasible.
-    const std::vector<ConvexCorridor::Segment> corridor = {
-        box(-1.0, 0.025), box(-1.0, 1.0, 0.006, 1.0), box(-1.0, 1.0, -1.0, -0.006)};
-    for (auto *c : {&weighted, &best})
-    {
-        StaticMpcTestAccess::configure(*c, c == &best);
-        c->setCollision(StaticMpcTestAccess::map());
-        c->setConvexCorridor(corridor);
+    MpcController c;const double inf=std::numeric_limits<double>::infinity();
+    const auto w=StaticMpcTestAccess::weights(c,{inf,1e9,1e9+.4,NAN});
+    EXPECT_DOUBLE_EQ(0.,w[0]);EXPECT_DOUBLE_EQ(0.,w[3]);
+    EXPECT_NEAR(1.,w[1]+w[2],1e-12);EXPECT_NEAR(std::exp(-1.),w[2]/w[1],1e-6);
+    EXPECT_EQ(std::vector<double>({0.,0.}),StaticMpcTestAccess::weights(c,{inf,NAN}));
+}
+
+TEST(StaticMpcRuntime, ColdStartRightAngleTurnFindsFullFeasibleRollout)
+{
+    MpcController c;StaticMpcTestAccess::coldStartBudget(c);
+    c.setCollision(StaticMpcTestAccess::wideMap());
+    // Robot initially faces +X, but the long corridor runs along +Y. A zero
+    // proposal is unsafe; default exploration must find a full turning sequence.
+    c.setConvexCorridor({box(-.9,.9,-.5,6.)});
+    auto model=StaticMpcTestAccess::model();
+    const auto command=c.plan(model,Eigen::Vector3d(0,3,0));
+    ASSERT_TRUE(c.lastPlanValid());EXPECT_GT(command.z(),0.);
+    EXPECT_EQ(10,c.optimizationEvidence().selected_steps);
+    EXPECT_EQ(512,c.optimizationEvidence().evaluated);
+    EXPECT_TRUE(c.optimizationEvidence().reroll_valid);
+    EXPECT_GT(c.getDebugMetrics().convex_corridor_reject_count,0);
+    for(const auto& p:c.getBestPath()) {
+        EXPECT_GE(p.x(),-.900001);EXPECT_LE(p.x(),.900001);
+        EXPECT_GE(p.y(),-.500001);EXPECT_LE(p.y(),6.000001);
     }
-    const auto expected = best.plan(m, Eigen::Vector3d(2, 0, 0));
-    const auto actual = weighted.plan(m, Eigen::Vector3d(2, 0, 0));
-    ASSERT_TRUE(best.lastPlanValid());
-    ASSERT_TRUE(weighted.lastPlanValid());
-    EXPECT_FALSE(weighted.getDebugMetrics().weighted_fallback);
-    EXPECT_GT(weighted.getDebugMetrics().convex_corridor_reject_count, 0);
-    EXPECT_GT(weighted.getDebugMetrics().max_convex_corridor_violation, 0.0);
-    EXPECT_NEAR((actual - expected).norm(), 0.0, 1e-12);
-    expectExecutedPath(weighted, m, actual);
 }
 
-TEST(StaticMpcRuntime, EverySampleOutsideUnionStops)
+TEST(StaticMpcRuntime, WarmStartShiftsAndRetainsCurrentCycleCandidate)
 {
-    MpcController c;
-    StaticMpcTestAccess::configure(c);
-    c.setCollision(StaticMpcTestAccess::map());
-    c.setConvexCorridor({box(-0.001, 0.001)});
-    EXPECT_TRUE(c.plan(StaticMpcTestAccess::model(), Eigen::Vector3d(2, 0, 0)).isZero());
-    EXPECT_FALSE(c.lastPlanValid());
-    EXPECT_EQ(c.getDebugMetrics().convex_corridor_reject_count, 5);
-    EXPECT_FALSE(c.getDebugMetrics().weighted_checked);
-    EXPECT_TRUE(c.getBestPath().empty());
+    MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::horizon(c,4);
+    c.setCollision(StaticMpcTestAccess::wideMap());c.setConvexCorridor({box(-9,9,-9,9)});
+    auto model=StaticMpcTestAccess::model();c.plan(model,Eigen::Vector3d(1,1,0));ASSERT_TRUE(c.lastPlanValid());
+    const auto controls=c.getBestControls();const auto warm=StaticMpcTestAccess::warm(c);
+    ASSERT_EQ(4u,warm.size());for(size_t i=0;i+1<warm.size();++i)EXPECT_DOUBLE_EQ(controls[i+1],warm[i]);
+    EXPECT_DOUBLE_EQ(0.,warm.back());
+    const auto sampled=StaticMpcTestAccess::samples(c,warm,controls);
+    EXPECT_EQ(warm,sampled[0]);EXPECT_EQ(controls,sampled[1]);
+    c.resetWarmStart();EXPECT_TRUE(StaticMpcTestAccess::warm(c).empty());
 }
 
-TEST(StaticMpcRuntime, EverySampleComCollisionStops)
+TEST(StaticMpcRuntime, InvalidSamplingConfigFailsClosed)
 {
-    MpcController c;
-    StaticMpcTestAccess::configure(c);
-    c.setCollision(StaticMpcTestAccess::map(false, true));
-    c.setConvexCorridor({box()});
-    EXPECT_TRUE(c.plan(StaticMpcTestAccess::model(), Eigen::Vector3d(2, 0, 0)).isZero());
-    EXPECT_FALSE(c.lastPlanValid());
-    EXPECT_EQ(c.getDebugMetrics().static_reject_count, 5);
-    EXPECT_TRUE(c.getBestPath().empty());
-}
-
-TEST(StaticMpcRuntime, BeamFullHorizonCopiesAncestryDiversityAndPruningUnknown)
-{
-    MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::beam(c,5,2);
-    c.setCollision(StaticMpcTestAccess::map());c.setConvexCorridor({box(-10,10,-10,10)});
-    auto model=StaticMpcTestAccess::model();const auto original=model->getState();
-    const auto position=model->getCOMPos();const auto control=c.plan(model,Eigen::Vector3d(1,1,0));
-    ASSERT_TRUE(c.lastPlanValid());EXPECT_EQ(original,model->getState());EXPECT_EQ(position,model->getCOMPos());
-    const auto evidence=c.beamEvidence();ASSERT_GE(evidence.selected_leaf,0);
-    EXPECT_LE(c.tree().size(),size_t(1+5+25*2*4));EXPECT_EQ(5,c.tree()[evidence.selected_leaf].depth);
-    EXPECT_TRUE(evidence.reroll_valid);int found=0,pruned=0;for(int i=0;i<5;++i){found+=evidence.found[i];pruned+=evidence.pruned[i];}
-    EXPECT_EQ(5,found);EXPECT_GT(pruned,0);
-    std::vector<int> chain;for(int id=evidence.selected_leaf;id>0;id=c.tree()[id].parent){chain.push_back(id);EXPECT_TRUE(c.tree()[id].continuation_found);}
-    std::reverse(chain.begin(),chain.end());EXPECT_DOUBLE_EQ(control.z(),c.tree()[chain.front()].action);
-    LFPC replay;replay.copyState(*model);bool changed=false;
-    for(size_t i=0;i<chain.size();++i) {
-        const auto& n=c.tree()[chain[i]];replay.SetCtrlParams(Eigen::Vector3d(control.x(),control.y(),n.action));replay.updateOneStep();replay.prepareNextStep();
-        EXPECT_EQ(replay.getCOMPos(),const_cast<LFPC&>(n.state).getCOMPos());
-        EXPECT_EQ(replay.getFootPosition(),const_cast<LFPC&>(n.state).getFootPosition());
-        EXPECT_EQ(replay.getState(),const_cast<LFPC&>(n.state).getState());
-        if(i && n.action!=c.tree()[chain[i-1]].action)changed=true;
+    for(int kind=0;kind<5;++kind) {
+        MpcController c;StaticMpcTestAccess::configure(c);c.setCollision(StaticMpcTestAccess::map());c.setConvexCorridor({box()});
+        if(kind==0)StaticMpcTestAccess::horizon(c,33);
+        if(kind==1)StaticMpcTestAccess::sampling(c,0,2);
+        if(kind==2)StaticMpcTestAccess::sampling(c,64,0);
+        if(kind==3)StaticMpcTestAccess::sampling(c,64,2,NAN);
+        if(kind==4)StaticMpcTestAccess::temperature(c,0.);
+        EXPECT_TRUE(c.plan(StaticMpcTestAccess::model(),Eigen::Vector3d(2,0,0)).isZero());
+        EXPECT_FALSE(c.lastPlanValid());EXPECT_TRUE(StaticMpcTestAccess::warm(c).empty());
     }
-    EXPECT_TRUE(changed); // candidate can change steering at successive nodes
-    const auto again=c.plan(model,Eigen::Vector3d(1,1,0));EXPECT_EQ(control,again);
-    EXPECT_EQ(evidence.evaluated,c.beamEvidence().evaluated);EXPECT_EQ(evidence.selected_leaf,c.beamEvidence().selected_leaf);
-    std::cout<<"BEAM horizon=5 width_per_root=2 evaluated="<<evidence.evaluated<<" ms="<<c.lastPlanTimeMs()<<std::endl;
 }
-TEST(StaticMpcRuntime, BeamActionLimitsAndNoFullContinuation)
+
+TEST(StaticMpcRuntime, ActionLimitsAndNoFullContinuation)
 {
-    MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::beam(c,4,2);StaticMpcTestAccess::angleLimit(c,0.);
+    MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::horizon(c,4);StaticMpcTestAccess::angleLimit(c,0.);
     c.setCollision(StaticMpcTestAccess::map());c.setConvexCorridor({box(-.1,.2,-1,1)});
-    const auto result=c.plan(StaticMpcTestAccess::model(),Eigen::Vector3d(3,0,0));
-    EXPECT_FALSE(c.lastPlanValid());EXPECT_TRUE(result.isZero());EXPECT_EQ(0,c.beamEvidence().full_leaves);
-    EXPECT_FALSE(c.beamEvidence().available[0]);EXPECT_TRUE(c.beamEvidence().available[2]);
-    EXPECT_FALSE(c.beamEvidence().found[2]);
-    StaticMpcTestAccess::beam(c,33,2);EXPECT_TRUE(c.plan(StaticMpcTestAccess::model(),Eigen::Vector3d(3,0,0)).isZero());
-    EXPECT_TRUE(c.tree().empty());
+    EXPECT_TRUE(c.plan(StaticMpcTestAccess::model(),Eigen::Vector3d(3,0,0)).isZero());
+    EXPECT_FALSE(c.lastPlanValid());EXPECT_EQ(0,c.getDebugMetrics().valid_trajectory_count);
 }
+
 TEST(StaticMpcRuntime, FinalArrivalIsSafeTerminalButLocalGoalIsNot)
 {
-    MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::beam(c,10,8);StaticMpcTestAccess::steeringCost(c);
+    MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::horizon(c,10);StaticMpcTestAccess::steeringCost(c);
     c.setCollision(StaticMpcTestAccess::map());c.setConvexCorridor({box(-.5,.7,-.3,.3)});
     auto model=StaticMpcTestAccess::model();const Eigen::Vector2d final(.30,0);
-    c.plan(model,Eigen::Vector3d(.30,0,0));EXPECT_FALSE(c.lastPlanValid()); // local-only: no invented idle
+    c.plan(model,Eigen::Vector3d(.30,0,0));EXPECT_FALSE(c.lastPlanValid());
     const auto cmd=c.plan(model,Eigen::Vector3d(.30,0,0),&final,.2);
-    ASSERT_TRUE(c.lastPlanValid());ASSERT_GE(c.beamEvidence().selected_leaf,0);
-    EXPECT_TRUE(c.tree()[c.beamEvidence().selected_leaf].terminal);
-    EXPECT_LT(c.tree()[c.beamEvidence().selected_leaf].depth,10);EXPECT_TRUE(c.beamEvidence().reroll_valid);
+    ASSERT_TRUE(c.lastPlanValid());EXPECT_TRUE(c.optimizationEvidence().selected_terminal);
+    EXPECT_LT(c.optimizationEvidence().selected_steps,10);EXPECT_TRUE(c.optimizationEvidence().reroll_valid);
     LFPC state;state.copyState(*model);state.SetCtrlParams(cmd);state.updateOneStep();
     EXPECT_LT((state.getCOMPos().head<2>()-final).norm(),.2);
     c.setConvexCorridor({box(-.001,.001,-.3,.3)});
     EXPECT_TRUE(c.plan(model,Eigen::Vector3d(.30,0,0),&final,.2).isZero());EXPECT_FALSE(c.lastPlanValid());
 }
+
 TEST(StaticMpcRuntime, LocalArrivalStillChargesEveryWalkingSuffixEdge)
 {
     MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::suffixCost(c);
-    c.setCollision(StaticMpcTestAccess::wideMap());c.setConvexCorridor({box(-10,10,-10,10)});
+    c.setCollision(StaticMpcTestAccess::wideMap());c.setConvexCorridor({box(-9,9,-9,9)});
     auto model=StaticMpcTestAccess::model();
     const auto command=c.plan(model,Eigen::Vector3d(.30,0,0));ASSERT_TRUE(c.lastPlanValid());
-    const auto& nodes=c.tree();const auto& leaf=nodes[c.beamEvidence().selected_leaf];
-    EXPECT_EQ(10,leaf.depth);EXPECT_FALSE(leaf.terminal);EXPECT_TRUE(leaf.arrived);
-    EXPECT_DOUBLE_EQ(0.,command.z());EXPECT_DOUBLE_EQ(0.,leaf.motion_cost);
-    int suffix_turns=0;
-    for(const auto& n:nodes)if(n.safe && n.parent>=0) {
-        const auto& parent=nodes[n.parent];
-        const double increment=.5*std::abs(n.action)+(n.depth>1?.7*std::abs(n.action-parent.action):0.);
-        EXPECT_DOUBLE_EQ(parent.motion_cost+increment,n.motion_cost);
-        if(parent.arrived && n.action!=0.){++suffix_turns;EXPECT_GT(n.motion_cost,parent.motion_cost);}
-    }
-    EXPECT_GT(suffix_turns,0);
-    for(int id=leaf.id;id>0;id=nodes[id].parent)EXPECT_DOUBLE_EQ(0.,nodes[id].action);
-    EXPECT_TRUE(c.beamEvidence().reroll_valid);
-    EXPECT_DOUBLE_EQ(leaf.objective,c.getDebugMetrics().executed_total_cost);
+    EXPECT_EQ(10,c.optimizationEvidence().selected_steps);EXPECT_FALSE(c.optimizationEvidence().selected_terminal);
+    EXPECT_DOUBLE_EQ(0.,command.z());EXPECT_DOUBLE_EQ(0.,c.getDebugMetrics().executed_total_cost);
+    std::vector<double> turns(10,0.);turns[1]=.2;
+    EXPECT_NEAR(.5*.2+.7*.4,StaticMpcTestAccess::rolloutCost(c,*model,turns,Eigen::Vector3d(.30,0,0)),1e-12);
     const Eigen::Vector2d final(.30,0);
     c.plan(model,Eigen::Vector3d(.30,0,0),&final,.2);ASSERT_TRUE(c.lastPlanValid());
-    EXPECT_TRUE(c.tree()[c.beamEvidence().selected_leaf].terminal);
-    EXPECT_EQ(1,c.tree()[c.beamEvidence().selected_leaf].depth);
+    EXPECT_TRUE(c.optimizationEvidence().selected_terminal);EXPECT_EQ(1,c.optimizationEvidence().selected_steps);
 }
 TEST(StaticMpcRuntime, QueryResolutionTracksSelectedStaticBackend)
 {
@@ -432,18 +431,18 @@ TEST(TimedMpcRuntime, ActualSampleTimesAcrossStepsAndCopies) {
     LFPC copy;copy.copyState(*model);EXPECT_EQ(phases,copy.getStepCOMTimes());
     model->prepareNextStep();EXPECT_TRUE(model->getStepCOMTimes().empty());
     model->reset(Eigen::Vector3d::Zero(),Eigen::Vector3d::Zero(),LEFT_LEG,0);
-    MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::beam(c,3,8);
+    MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::horizon(c,3);
     StaticMpcTestAccess::angleLimit(c,0.);c.setCollision(StaticMpcTestAccess::wideMap());
     c.setConvexCorridor({box(-9,9,-9,9)});c.plan(model,Eigen::Vector3d(5,0,0));
     ASSERT_TRUE(c.lastPlanValid());const auto& times=c.getBestTimes();
     ASSERT_EQ(phases.size()*3,times.size());ASSERT_EQ(c.getBestPath().size(),times.size());
     for(size_t i=0;i<times.size();++i)EXPECT_NEAR((i+1)*.07,times[i],1e-12);
-    EXPECT_NEAR(times.back(),c.tree().back().elapsed,1e-12);
+    EXPECT_EQ(3,c.optimizationEvidence().selected_steps);
 }
 
 TEST(TimedMpcRuntime, CrossingBeyondFirstStepRejectsFullContinuation) {
     auto m=StaticMpcTestAccess::model();MpcController c;
-    StaticMpcTestAccess::configure(c);StaticMpcTestAccess::beam(c,3,8);StaticMpcTestAccess::angleLimit(c,0.);
+    StaticMpcTestAccess::configure(c);StaticMpcTestAccess::horizon(c,3);StaticMpcTestAccess::angleLimit(c,0.);
     c.setCollision(StaticMpcTestAccess::wideMap());c.setConvexCorridor({box(-9,9,-9,9)});
     const auto command=c.plan(m,Eigen::Vector3d(5,0,0));ASSERT_TRUE(c.lastPlanValid());
     const auto target=c.getBestPath().back().head<2>().eval();const double time=c.getBestTimes().back();
@@ -483,12 +482,13 @@ TEST(TimedMpcRuntime, InvalidBindingFailsClosedAndExplicitAblationRestoresBaseli
     c.plan(m,Eigen::Vector3d(2,0,0));EXPECT_TRUE(c.lastPlanValid());
 }
 
-// Opt-in measured benchmark; same full search, no pruning difference or timing assertion.
-TEST(TimedMpcRuntime, DISABLED_BenchmarkSameBeamWork) {
-    auto m=StaticMpcTestAccess::model();MpcController c;StaticMpcTestAccess::configure(c);
-    StaticMpcTestAccess::suffixCost(c);c.setCollision(StaticMpcTestAccess::wideMap());c.setConvexCorridor({box(-9,9,-9,9)});
+// Opt-in measured benchmark; same seed and sample budget, no timing assertion.
+TEST(TimedMpcRuntime, DISABLED_BenchmarkSameMppiWork) {
+    auto m=StaticMpcTestAccess::model();MpcController c;StaticMpcTestAccess::coldStartBudget(c);
+    c.setCollision(StaticMpcTestAccess::wideMap());c.setConvexCorridor({box(-9,9,-9,9)});
     std::array<std::vector<double>,2> timings;
     for(int repeat=0;repeat<105;++repeat)for(int mode=0;mode<2;++mode) {
+        c.resetWarmStart();StaticMpcTestAccess::seed(c,0);
         if(mode)c.setTimedPedestrians({movingBox(Eigen::Vector2d(6,6),Eigen::Vector2d(.1,0))},.1);
         else c.clearTimedPedestrians();
         c.plan(m,Eigen::Vector3d(5,0,0));ASSERT_TRUE(c.lastPlanValid());

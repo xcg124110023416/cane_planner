@@ -2709,7 +2709,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
 
         // MPC规划一步
         // Bind spatial and time-synchronized geometry to one observation transaction.
-        // No replacement gap during beam search or execution authorization.
+        // No replacement gap during MPPI optimization or execution authorization.
         // Waiting callbacks are ordered after commit, not checked by this cycle.
         PedestrianFrameToken captured_frame;
         auto convex_corridor_result = updateAndPublishConvexCorridorLocked(current_com, &captured_frame);
@@ -2777,7 +2777,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             // Preserve positions 0-25; index 5 now counts timed SAT rejects.
             // Distance/CPA metrics remain unavailable: SAT is an intersection test.
             std_msgs::MultiArrayDimension mode;
-            mode.label = "planner3_lfpc_beam_v1;1=unavailable,7=evaluated_edges,16=retained_full_leaves;19=static,20=weighted_checked,21=weighted_fallback,22=executed_cost;23=pedestrian_source_enabled,24=current_frame_corridor_feasible,25=corridor_failure_reason;26=timed_active,27=timed_checks,28=execution_checked,29=execution_safe";
+            mode.label = "planner3_lfpc_mppi_v1;1=valid_sample_ratio,7=sampled_sequences,16=valid_sampled_sequences;19=static,20=weighted_checked,21=weighted_fallback,22=executed_cost;23=pedestrian_source_enabled,24=current_frame_corridor_feasible,25=corridor_failure_reason;26=timed_active,27=timed_checks,28=execution_checked,29=execution_safe";
             mode.size = 30;
             mode.stride = 30;
             metrics.layout.dim.push_back(mode);

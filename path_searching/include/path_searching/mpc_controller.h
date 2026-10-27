@@ -3,7 +3,7 @@
 
 #include <Eigen/Eigen>
 #include <limits>
-#include <array>
+#include <random>
 #include <vector>
 
 #include <ros/ros.h>
@@ -24,7 +24,11 @@ public:
         // Horizon
         int horizon_steps = 6;       // N: lookahead steps
 
-        int beam_width = 8; // survivors per root action, not global winners
+        int num_samples = 256;
+        int mpc_iters = 2;
+        double temperature = 0.4;
+        double sigma_api = 0.35;
+        int random_seed = 0; // reproducible runs; does not reseed every cycle
 
         // Control bounds
         double max_al = 0.4;
@@ -37,7 +41,7 @@ public:
         double w_goal = 10.0;
         double w_dapi = 0.0;    // steering rate penalty: |api[n] - api[n-1]|
 
-        // Early goal arrival: stop rollout and skip terminal cost if within this radius
+        // Local arrival suppresses distance cost; it never truncates safety checks.
         double goal_arrival_threshold = 0.3;
 
         // Warm-start nominal
@@ -79,23 +83,17 @@ public:
         double executed_total_cost = std::numeric_limits<double>::infinity();
     };
 
-    struct TreeNode {
-        LFPC state;
-        int id=0, parent=-1, root=-1, depth=0;
-        std::vector<int> children;
-        double action=0., motion_cost=0., objective=0., elapsed=0.;
-        bool terminal=false, arrived=false, safe=false, pruned=false, continuation_found=false;
+    using ControlSequence = std::vector<double>;
+    struct OptimizationEvidence {
+        int horizon=0, samples_per_iteration=0, iterations=0;
+        int evaluated=0, valid=0, weighted_checks=0, weighted_rejects=0, selected_steps=0;
+        bool reroll_valid=false, selected_terminal=false;
+        double effective_samples=0.;
+        std::vector<double> best_verified_costs;
+        std::vector<double> weighted_costs;
     };
-    struct BeamEvidence {
-        int horizon=0, width=0, selected_root=-1, selected_leaf=-1;
-        std::array<bool,5> available{{false,false,false,false,false}};
-        std::array<bool,5> found{{false,false,false,false,false}};
-        std::array<bool,5> pruned{{false,false,false,false,false}};
-        int evaluated=0, full_leaves=0;
-        bool reroll_valid=false;
-    };
-    const BeamEvidence& beamEvidence() const {return beam_evidence_;}
-    const std::vector<TreeNode>& tree() const {return tree_;}
+    const OptimizationEvidence& optimizationEvidence() const { return optimization_evidence_; }
+    const ControlSequence& getBestControls() const { return best_controls_; }
 
     MpcController();
     ~MpcController();
@@ -145,10 +143,27 @@ private:
     bool has_convex_corridor_ = false;
     std::vector<ConvexCorridor::Segment> convex_corridor_segments_;
 
-    std::vector<TreeNode> tree_;
-    BeamEvidence beam_evidence_;
-    ros::Publisher beam_pub_;
-    void publishBeamEvidence();
+    struct Rollout {
+        bool valid=false, terminal=false;
+        int steps=0;
+        double cost=std::numeric_limits<double>::infinity();
+        std::vector<Eigen::Vector3d> path;
+        std::vector<double> times;
+    };
+    OptimizationEvidence optimization_evidence_;
+    ros::Publisher optimization_pub_;
+    void publishOptimizationEvidence();
+    ControlSequence warm_start_, best_controls_;
+    std::mt19937 rng_{0};
+    std::normal_distribution<double> normal_dist_{0.,1.};
+    std::vector<ControlSequence> sampleSequences(const ControlSequence& mean,
+                                                const ControlSequence& incumbent);
+    std::vector<double> computeWeights(const std::vector<double>& costs) const;
+    ControlSequence weightedUpdate(const std::vector<ControlSequence>& samples,
+                                   const std::vector<double>& weights) const;
+    Rollout rolloutSequence(const LFPC& base, const ControlSequence& controls,
+                            const Eigen::Vector3d& goal, const Eigen::Vector2d* final_goal,
+                            double final_radius);
     bool advance(LFPC& state, double action, std::vector<Eigen::Vector3d>& path,
                  double& elapsed, std::vector<double>* times = nullptr);
     bool timedFree(const Eigen::Vector2d& com, double future_time, double age);

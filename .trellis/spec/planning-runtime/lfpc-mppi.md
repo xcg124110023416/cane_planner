@@ -1,0 +1,134 @@
+# Planner-3 LFPC MPPI contract
+
+## Scope and objective
+
+`MpcController` replaces the intermediate five-angle beam controller with
+MPPI-style continuous steering optimization. Planner 4 remains separate.
+Optimize only the N relative heading increments `api`; validated nominal al/aw
+remain fixed. Keep the existing objective and effective +/-30 degree bound:
+
+```text
+J = sum(w_steer * abs(api[n]))
+  + sum(n > 0 ? w_dapi * abs(api[n] - api[n-1]) : 0)
+  + (local_arrived ? 0 : w_goal / N * terminal_goal_distance)
+```
+
+Local arrival only suppresses distance cost. It never truncates later walking
+costs or checks. Only a fully safe incoming step inside the actual final-goal
+radius can terminate a rollout; the manager supplies that goal separately.
+Retain the exact LFPC discretization and model state copying. Do not restore
+old local-goal early termination, velocity optimization or planner-4 risk costs.
+
+## Sampling and update
+
+Launch defaults: N=10, K=256, iterations=2, temperature=.4, sigma_api=.35 rad,
+max_api=pi/6, seed=0. Direct C++ default N remains 6. Supported N=1..32,
+K=1..4096, iterations=1..16; finite positive temperature, finite nonnegative
+sigma, nonnegative seed and validated fixed gait/weights are mandatory.
+Configuration failure returns invalid zero command and clears warm start.
+
+The .35 rad launch/default spread was selected after the mixed_turn_upper
+lightweight route repeatedly stopped with .15 rad cold-start exploration.
+Both that cornering route and mixed_stress reached their final goals with the
+same 256x2 budget at .35 rad. Keep a default-budget cold-start 90-degree corridor
+regression; do not repair sampling failure by shortening the checked horizon or
+relaxing geometry. This evidence is scenario-specific, not completeness.
+
+First proposal is the prior selected sequence shifted one action, with zero
+tail; without a warm start use zeros. Revalidate every proposal on the current
+state, corridor and observation. Seed the RNG once at initialization; reset
+does not silently reseed it. Identical seed and identical calls/inputs reproduce
+the samples on the same toolchain; live sensor timing may differ between runs.
+
+Each iteration reserves slot 0 for the proposal and slot 1 for this cycle's
+best verified candidate, or the proposal if none. Remaining slots are paired
+positive/negative Gaussian perturbations around the proposal, clipped to bounds.
+K<3 has no random exploration. Samples are full control sequences, not branches
+of a quantized tree. Unsafe/nonfinite rollouts have infinite cost and zero weight.
+
+```text
+rho = min(finite J)
+w[k] = exp(-(J[k]-rho)/temperature) / sum(exp(-(J-rho)/temperature))
+proposal[n] = sum(w[k] * sampled_api[k][n])
+```
+
+All-invalid batches have all-zero weights; never assign uniform weights to
+unsafe sequences. This finite sampled, clipped update with hard rejection is
+an MPPI-style optimizer, not a certificate of strict local/global optimality.
+No penalty or safety guarantee is inferred from the Gaussian distribution.
+
+## Feasibility, selection and execution
+
+One production rollout evaluator checks support-foot static traversability,
+every generated COM sample's static traversability and membership in the spatial
+union, plus timed pedestrian SAT at its actual future time. Root spatial/static/
+timed checks remain mandatory. A sequence must safely complete the horizon or
+reach the actual final goal through a fully checked step.
+
+The weighted mean must pass the same full rollout evaluator: a mean of feasible
+controls can collide with static obstacles, cross the gap in a nonconvex union,
+or violate time-dependent collision constraints. Never execute it unchecked.
+If valid, it becomes the next proposal. Retain the lowest-cost initial feasible
+proposal / feasible weighted iterate as the optimized candidate. Separately
+retain the best verified sample or weighted iterate from this planning cycle.
+On weighted failure, use that current-cycle candidate as the next proposal.
+
+If at least one weighted update is valid, select the optimized candidate;
+otherwise select the current-cycle best verified fallback. This preserves
+weighted optimization as the primary result rather than merely selecting a
+random minimum. No feasible candidate means STOP. A final independent full
+rollout from the original LFPC state must reproduce finite cost, step count and
+terminal status exactly before returning its first command.
+
+Existing manager accepted-observation transaction, source freshness, final
+execution-epoch timed revalidation, frozen-LFPC STOP and stopped odometry remain
+unchanged. Failed planning or manager STOP clears warm start. A retained sequence
+is never an unvalidated trajectory from an older observation. The final source
+check can still reject an apparently successful optimizer result.
+
+## Diagnostics and visualization
+
+`/mpc/sample_trajectories` shows a bounded uniform subset of actual last-iteration
+rollouts without drawing extra random values. Existing selected trajectory,
+time-matched hull pairs and timed path outputs remain. Historical beam_evidence
+is replaced by optimization_evidence (Float64MultiArray, version 1):
+
+| Index | Meaning |
+|---|---|
+| 0 | schema version |
+| 1,2,3 | horizon, samples per iteration, completed iterations |
+| 4,5 | evaluated sampled sequences, valid sampled sequences |
+| 6,7 | weighted rollout checks, weighted rejections |
+| 8 | last iteration effective sample size, `1/sum(w*w)`; zero if all invalid |
+| 9,10,11 | selected steps, actual-final terminal, independent replay valid |
+| 12,13 | best verified cost across all candidates, selected executed cost |
+| 14.. | I retained-best costs, followed by I weighted costs |
+
+Nonfinite/unavailable costs serialize as -1. Retained-best cost is nonincreasing
+by construction; weighted costs need not be monotonic. Evidence is published
+before final execution authorization and does not certify that integration
+occurred. Debug fields 28/29 and STOP remain authoritative for timed execution.
+
+Existing debug indices are retained. Field 1 is valid/evaluated sampled ratio,
+7 is sampled count, 16/17 are valid sampled counts, 15 is -1 unavailable, 20 is
+weighted-check performed, 21 is fallback because every weighted update failed.
+Fields 2/22 differ when a sampled fallback is cheaper than the selected weighted
+solution. Counts include proposal/retained anchors in every iteration, so they
+are not independent Monte Carlo trials or a collision probability. Rejection
+counters additionally include weighted/replay/final checks.
+
+## Regression and limits
+
+Test actual production sampling, stable weights/all-invalid behavior, collision
+of a mean across a nonconvex union, support-foot rejection/fallback, deterministic
+seed, warm-start shifting, continuous cost reduction and exact sequence replay.
+Keep local-arrival suffix cost/full-horizon checks, true final termination,
+timed crossing/latency and real manager transaction/STOP/arrival tests.
+
+Measure with the opt-in same-budget benchmark documented in
+[lfpc-timed-collision.md](./lfpc-timed-collision.md). Full lightweight launch
+evidence and observed runtime limits belong in docs/LFPC_MPPI_VALIDATION.md.
+Finite sampling can miss feasible routes. Fixed gait does not add waiting/speed
+actions. Current-frame FIRI does not reclaim future-vacated space. Sampled CV
+collision checks and jump-step simulation retain the timed-checker limitations;
+no continuous-motion, physical-braking or real-hardware tracking claim.

@@ -10,7 +10,7 @@
     <arg name="mpc_enable_stop_advice" default="true"/>
     <arg name="mpc_cpa_weight" default="0.6"/>
     <arg name="mpc_risk_sigma_y" default="0.4"/>
-    <arg name="mpc_num_samples" default="200"/>
+    <arg name="mpc_num_samples" default="$(eval 256 if arg('planner') == 3 else 200)"/>
     <arg name="global_wp_arrival_radius" default="0.25"/>
     <!-- Optional full-PCD global map for A*. Keep local SDF for MPC. -->
     <arg name="mpc_enable_dynamic_hard_reject" default="false"/>

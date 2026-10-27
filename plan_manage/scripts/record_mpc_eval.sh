@@ -8,6 +8,7 @@ import sys
 TOPICS = [
     "/clock",
     "/mpc/debug_metrics",
+    "/mpc/optimization_evidence",
     "/mpc/stop_advice",
     "/mpc/stop_reason",
     "/mpc/path",

@@ -2,9 +2,9 @@
 
 `cane_planner` 是面向智能导盲杖的 ROS1 Noetic 导航研究项目。导盲杖由人提供前进运动，系统主要负责转向与路径引导。
 
-**当前开发重点是 `mpc-lfpc-prototype` 分支中的 planner 3：A* 全局路径、FIRI 凸走廊与 LFPC/LIPM beam search。** 主要验证入口为轻量仿真；仓库同时保留其他规划模式、Gazebo 仿真和早期实机控制接口。
+**当前开发重点是 `mpc-lfpc-prototype` 分支中的 planner 3：A* 全局路径、FIRI 凸走廊与 LFPC/LIPM MPPI。** 主要验证入口为轻量仿真；仓库同时保留其他规划模式、Gazebo 仿真和早期实机控制接口。
 
-代码中的 `MpcController` 类名、`mpc/*` 参数及 `/mpc/*` 话题沿用历史命名。planner 3 当前已经使用离散 beam search，早期 DRF-MPPI 的算法介绍和调参方式不适用于这条运行路径。
+planner 3 通过 MPPI 加权迭代优化连续转向序列，步长与步宽固定。当前实现保留走廊、静态碰撞和时间同步行人碰撞硬约束；早期 DRF-MPPI 的风险场与速度采样不在这条运行路径中。
 
 ![智能导盲杖硬件平台](figure/hardware_current.png)
 
@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | `planner:=1` | 几何 A* | 二维地图路径搜索，使用地图可通行性查询 |
 | `planner:=2` | Kinodynamic A* | 搜索步长、步宽和转角；用 LFPC/LIPM 展开步态，检查质心静态碰撞并加入行人风险场代价与阈值拒绝 |
-| **`planner:=3`** | **A* + FIRI + LFPC beam search** | **固定步长、步宽，搜索转向序列；静态碰撞和凸走廊空间并集为硬约束** |
+| **`planner:=3`** | **A* + FIRI + LFPC MPPI** | **固定步长、步宽，优化连续转向序列；静态碰撞、凸走廊空间并集和时间同步行人检查为硬约束** |
 | `planner:=4` | 运动学采样控制器 `KinematicMppiController` | A* 航点引导，使用单轮车模型采样线速度、角速度，保留动态风险场、可选 CPA 与交互让行逻辑 |
 
 `sim_kin_replan.launch` 和 `kin_replan.launch` 仍默认选择 planner 2，使用当前主线时需显式传入 `planner:=3`。两个 Gazebo 入口默认选择 planner 3。
@@ -31,18 +31,20 @@ flowchart LR
     PED["当前帧行人观测"] --> HULL["行人凸多边形"]
     HULL --> FIRI
     HULL --> CV["匀速预测凸包 P(t)"]
-    CV --> BEAM
-    FIRI --> BEAM["LFPC/LIPM beam search"]
-    MAP --> BEAM
-    BEAM --> EXEC["验证选中序列，执行首步或 STOP"]
+    CV --> MPPI
+    FIRI --> MPPI["LFPC/LIPM MPPI 加权迭代"]
+    MAP --> MPPI
+    MPPI --> EXEC["复检加权序列，执行首步或 STOP"]
 ```
 
 1. **全局参考。** 保留 A* 输出的全部折线顶点，统一用于局部目标选择、投影跟踪、走廊生成和可视化；planner 3 不对它做稀疏航点抽取或圆角平滑。
 2. **空间走廊。** FIRI 沿局部参考路径生成相邻凸区域，排除完整静态障碍栅格。启用行人后，将当前观测构造为凸多边形，用同一套 FIRI 分离约束排除。
-3. **步态搜索。** 每步枚举相对转角 `[-30°, -15°, 0°, 15°, 30°]`，分别为各首步方向保留 beam 候选。当前 launch 配置预测 10 步、每个首步方向最多保留 8 个候选，步长与步宽固定。
+3. **转向优化。** 默认预测 10 步，每轮采样 256 条连续转向序列、迭代 2 轮，逐步相对转角限于 `±30°`。在上次解移位后的序列附近施加高斯扰动，按可行序列的代价做指数加权，更新整条序列。步长与步宽固定。
 4. **轨迹检查与执行。** 检查落脚点的静态可通行性，以及每个质心采样点的静态碰撞和走廊并集包含关系。启用行人时，另按每个采样点的未来时间，检查机器人包络与匀速预测行人凸包是否相交。选中序列从原始完整 LFPC 状态重新推演，执行前按最新时间原点复查，通过后只执行第一步。
 5. **动态路径恢复。** 行人多边形阻断参考路径时，尝试将同一多边形作为临时硬障碍重新跑 A*。新路径须通过走廊重建及观测时效检查，才会替换当前参考。
-6. **失败处理。** 无有效走廊、无可行搜索结果或行人数据无效时，发布 STOP 建议；轻量仿真保持 LFPC 状态并发布静止里程计，Gazebo 输出零速度。
+6. **失败处理。** 加权序列也必须重新通过完整约束检查。若加权结果不可行，保留本轮已验证的可行候选继续迭代；所有加权更新都失败时使用本轮最佳可行候选。无有效走廊、无可行序列或行人数据无效时，发布 STOP 建议；轻量仿真保持 LFPC 状态并发布静止里程计，Gazebo 输出零速度。
+
+加权更新可行时，从初始可行提议和各轮可行加权结果中选择代价最低者，避免相对已验证的热启动解退化。局部目标到达只影响距离代价，仍检查完整预测期；只有安全进入实际最终目标范围才允许提前结束。有限采样 MPPI 提供连续优化过程，**不保证严格局部最优或找到所有可行解**。
 
 ### 行人输入与适用范围
 
@@ -50,7 +52,7 @@ flowchart LR
 - 当前 planner 3 支持每帧 **零或一个行人**。新鲜空帧有效；超过一个行人、数组不匹配、非有限数值、无效时间戳或缺失 TF 均视为输入无效。
 - 规划坐标系为 `world`。外部观测按原始时间戳变换；默认最大观测与接收时效均为 **0.5 s**，计算结束、执行前仍需检查。
 - 行人约束包括**当前帧 FIRI 空间约束 + LFPC 时间同步凸包碰撞检查**。未来凸包按观测速度匀速平移，现有空间走廊仍为必需约束。历史时空走廊与多速度区间鲁棒设计没有接入。
-- 动态检查使用离散质心点及质心周围的八边形包络；尚不覆盖采样间连续运动、完整人杖外形、行人加速度或转向。有限 beam 搜索未找到延伸，不等于证明不存在可行路径。
+- 动态检查使用离散质心点及质心周围的八边形包络；尚不覆盖采样间连续运动、完整人杖外形、行人加速度或转向。有限 MPPI 采样没有找到可行序列，不等于证明不存在可行路径。
 
 ### LFPC 时间同步避障
 
@@ -67,7 +69,7 @@ Pᵢ = P₀ + v × [(执行时间原点 − 观测时间戳) + τᵢ]
 
 原启动命令会默认启用该功能；可追加 `mpc_timed_collision_enable:=false` 做消融，或用 `mpc_timed_robot_radius:=0.25` 调整包络。RViz 新增 **MPC_TimedCollision**：同色机器人轮廓与行人凸包对应同一未来时刻，颜色由青到紫，文字标注 `+τ s`；STOP 时红色 `Rejected` 表示一个被拒绝的碰撞样本。最多显示十组安全预测，完整采样通过 `/mpc/timed_best_path` 输出，各 `PoseStamped.header.stamp` 为时间原点加 `τᵢ`。
 
-性能基准和横穿运行证据见 [验证记录](docs/LFPC_TIMED_COLLISION_VALIDATION.md)。
+当前 MPPI 的测试、性能与运行证据见 [MPPI 验证记录](docs/LFPC_MPPI_VALIDATION.md)；[时间碰撞检查初版记录](docs/LFPC_TIMED_COLLISION_VALIDATION.md) 保留原 beam 版本的历史结果。
 
 该检查叠加在现有当前帧空间走廊上，所以暂不利用“行人将来离开、机器人稍后再经过”的空间。轻量仿真仍按 FSM 周期整步更新位置，**不连续播放 LFPC 支撑相**；上述时间是预测模型时间，不能据此声称已完成真实执行速度同步或连续运动验证。
 
@@ -201,8 +203,13 @@ roslaunch plan_manage kin_replan.launch planner:=2
 
 | 参数 | 当前值 | 含义 |
 | --- | --- | --- |
-| `mpc/horizon_steps` | `10` | 搜索预测步数 |
-| `mpc/beam_width` | `8` | 每个首步方向的 beam 保留宽度 |
+| `mpc/horizon_steps` | `10` | 预测步数 |
+| `mpc/num_samples` | `256` | 每轮序列数，可由启动参数 `mpc_num_samples` 覆盖 |
+| `mpc/mpc_iters` | `2` | 加权优化迭代轮数 |
+| `mpc/temperature` | `0.4` | 指数权重温度；越小越偏向低代价样本 |
+| `mpc/sigma_api` | `0.35 rad` | 连续转角高斯扰动标准差，兼顾冷启动转弯探索 |
+| `mpc/max_api` | `π/6 rad` | 每步相对转角上限，约 30° |
+| `mpc/random_seed` | `0` | 初始化随机种子；运行中不逐周期重新播种 |
 | `mpc/timed_collision_enable` | `true` | 行人未来凸包与机器人包络的时间同步 SAT 硬检查；关闭用于消融 |
 | `mpc/timed_robot_radius` | `0.25 m` | 质心包络内切圆半径，须为有限正数 |
 | `mpc/nominal_al` | `0.40 m` | 固定步长参数，由 launch 参数 `user_step_length` 提供 |
@@ -218,9 +225,9 @@ roslaunch plan_manage kin_replan.launch planner:=2
 | `astar/w_clearance` | `1.0` | A* 离障碍距离的软偏好权重 |
 | `astar/clearance_sigma` | `0.8 m` | A* 偏好的额外离障碍距离范围 |
 
-beam 宽度和预测步数均支持 `1..32`。配置中的最大转角用于筛选上述五个离散动作，不会生成额外转角。
+预测步数支持 `1..32`，每轮序列数 `1..4096`，迭代次数 `1..16`；温度须为有限正数，扰动幅度须为有限非负数。每轮保留当前提议与本周期最佳可行序列两个槽位，其余使用成对正负高斯扰动；序列数小于 3 时没有随机探索。参数在节点初始化时读取。
 
-`mpc/num_samples`、温度、噪声幅度、`use_best` 等随机 MPPI 设置不再被 planner 3 使用。DRF、CPA 与交互让行参数主要保留给 planner 4；planner 3 的走廊和无效结果 STOP 为强制逻辑。
+planner 3 始终固定步长、步宽，只优化转角；`sigma_al`、`sigma_aw`、`fix_step_params`、`use_best` 不控制它。原 `beam_width` 已移除。DRF、CPA 与交互让行参数主要保留给 planner 4；planner 3 的走廊和无效结果 STOP 为强制逻辑。
 
 ## 话题与调试
 
@@ -235,7 +242,8 @@ beam 宽度和预测步数均支持 `1..32`。配置中的最大转角用于筛�
 | `/mpc/timed_best_path` | `nav_msgs/Path` | 带未来时间戳的选中轨迹；无有效动态预测时为空 |
 | `/mpc/timed_collision` | `visualization_msgs/MarkerArray` | 同时刻机器人包络、匀速预测行人凸包及冲突样本 |
 | `/mpc/path` | `nav_msgs/Path` | 累积轨迹历史 |
-| `/mpc/beam_evidence` | `std_msgs/Float64MultiArray` | 各首步方向、剪枝、完整延伸及选中分支证据 |
+| `/mpc/sample_trajectories` | `visualization_msgs/MarkerArray` | 最后一轮的有界采样显示；青色可行、橙色拒绝 |
+| `/mpc/optimization_evidence` | `std_msgs/Float64MultiArray` | 采样数、加权复检、有效样本量、逐轮代价及重演结果 |
 | `/mpc/debug_metrics` | `std_msgs/Float64MultiArray` | 规划耗时、拒绝计数和执行代价 |
 | `/mpc/transaction_diagnostics` | `std_msgs/Float64MultiArray` | 观测时效、事务耗时及是否执行 LFPC 积分 |
 | `/mpc/stop_advice`、`/mpc/stop_reason` | `std_msgs/Bool`、`std_msgs/String` | 停止建议及原因 |
@@ -244,9 +252,11 @@ beam 宽度和预测步数均支持 `1..32`。配置中的最大转角用于筛�
 
 `/mpc/debug_metrics` 保留原有 0–25 索引，5 为动态拒绝数，19 为仅空间模式标志；新增 26=时间检查启用且有行人，27=时间检查点数，28=已执行时间原点复查，29=复查安全。距离和 CPA 指标仍为 `-1`，SAT 相交结果不冒充欧氏距离。
 
+MPPI 模式下，索引 1 为全部采样中的可行比例，7 为实际采样总数，16/17 为可行采样数，20/21 为加权检查／全轮加权失败后回退标志；拒绝计数包含加权检查与重演，不是独立轨迹数。索引 2 是本轮所有已验证候选的最低代价，22 是实际执行序列代价，两者可能不同。`optimization_evidence` 的 0–13 为固定头，随后依次为各轮最低已验证代价、各轮加权结果代价；`-1` 表示不可用。最低代价曲线非增只表示保留了最佳候选，不是最优性证明；执行前时效与碰撞复查仍以 STOP 和索引 28/29 为准。
+
 里程计和点云输入由 launch remap 决定：轻量仿真使用仿真生成器；FAST-LIO 使用 `/Odometry`、`/cloud_registered`；重定位入口使用 `/localization_odom`、`/corrected_current_pcd`。
 
-STOP 时先检查 `/mpc/stop_reason`，再查看 `/mpc/convex_corridor_debug`。常见原因有 `DYNAMIC_DATA_INVALID`、`DYNAMIC_REFERENCE_BLOCKED`、`INVALID_STATIC_CORRIDOR` 和 `NO_FEASIBLE_TRAJECTORY`。`Float64MultiArray` 的字段含义应按消息的 `layout.dim[].label` 和发布代码读取；beam 统计中的展开边数、完整叶节点数不能当作旧 MPPI 的采样成功率。
+STOP 时先检查 `/mpc/stop_reason`，再查看 `/mpc/convex_corridor_debug`。常见原因有 `DYNAMIC_DATA_INVALID`、`DYNAMIC_REFERENCE_BLOCKED`、`INVALID_STATIC_CORRIDOR` 和 `NO_FEASIBLE_TRAJECTORY`。`Float64MultiArray` 的字段含义应按消息的 `layout.dim[].label` 和发布代码读取；采样可行比例不是碰撞概率。
 
 轻量仿真录包：
 
@@ -272,7 +282,7 @@ catkin_test_results build/path_searching
 catkin_test_results build/plan_manage
 ```
 
-测试覆盖 A* 边碰撞、FIRI 几何、MVIE 数值情况、行人多边形、beam 轨迹与代价，以及 manager 的 STOP、里程计心跳和观测事务等。测试通过与实际导航场景验证需分别记录。
+测试覆盖 A* 边碰撞、FIRI 几何、MVIE 数值情况、行人多边形、MPPI 连续优化、加权复检、热启动、轨迹与代价，以及 manager 的 STOP、里程计心跳和观测事务等。测试通过与实际导航场景验证需分别记录。
 
 planner 3 会记录每个目标的首个符合条件的静态走廊失败快照，保存路径见运行日志。使用同一生成器回放：
 
@@ -287,7 +297,7 @@ rosrun path_searching convex_corridor_replay /path/to/failure.snapshot
 | 路径 | 职责 |
 | --- | --- |
 | [planner_manager.cpp](plan_manage/src/planner_manager.cpp) | 状态机、全局路径、行人事务、走廊恢复与执行 |
-| [mpc_controller.cpp](path_searching/src/mpc_controller.cpp) | planner 3 的 LFPC beam search |
+| [mpc_controller.cpp](path_searching/src/mpc_controller.cpp) | planner 3 的 LFPC MPPI 连续转向优化 |
 | [convex_corridor.cpp](path_searching/src/convex_corridor.cpp) | FIRI 几何分离、MVIE 与走廊证书 |
 | [pedestrian_polygon.cpp](path_searching/src/pedestrian_polygon.cpp) | 当前帧行人凸多边形 |
 | [lfpc.cpp](path_searching/src/lfpc.cpp) | LFPC 落脚控制与 LIPM 状态推演 |

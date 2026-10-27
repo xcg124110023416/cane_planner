@@ -119,12 +119,22 @@ Ownership correction: start wrapper delegates to pedsim_round.py supervisor. Per
 
 Each new planner-3 local corridor starts at actual current LFPC CoM, connects to the projection on the authoritative forward A* polyline, then retains the existing `max(8 m,2*lookahead)` forward reference length. Only a projection less than 1e-9 m from CoM is replaced by CoM to avoid a degenerate FIRI edge; no previously predicted trajectory supplies reference geometry. The connector participates in the same selected static-grid/full current-pedestrian polygon FIRI certificates as every other edge. Blockage fails closed with existing static/dynamic reasons; only DYNAMIC_REFERENCE_BLOCKED can enter existing recovery. No old-cell fallback or clearance relaxation.
 
-A feasible new result must contain actual CoM under the controller's 1e-6 containment tolerance before publication/controller replacement, and a recovered result before authoritative route replacement. A failed root postcondition clears partial geometry and reports OUTPUT_CERTIFICATE / OUTPUT_CERTIFICATE stage at the actual root, not beam NO_FEASIBLE. Accepted-observation locking, freshness, final rollout checks and STOP remain unchanged. Geometric root coverage alone does not certify support foot, full future LFPC motion, or physical braking.
+A feasible new result must contain actual CoM under the controller's 1e-6 containment tolerance before publication/controller replacement, and a recovered result before authoritative route replacement. A failed root postcondition clears partial geometry and reports OUTPUT_CERTIFICATE / OUTPUT_CERTIFICATE stage at the actual root, not optimizer NO_FEASIBLE. Accepted-observation locking, freshness, final rollout checks and STOP remain unchanged. Geometric root coverage alone does not certify support foot, full future LFPC motion, or physical braking.
 
-## LFPC beam runtime replacement (4fff814 follow-up)
-Planner3 MpcController now expands relative [-30,-15,0,15,30]degree LFPC steering increments with nominal validated al/aw. Default beam8 survivors PER root, width1..32, horizon1..32 (launch10). Maximum retained/evaluated ancestry nodes1+5+25*width*(N-1). No random MPPI averaging/runtime fallback remains. One full-step evaluator checks support/static/CoM spatial union; winner rerolls from original full LFPC state before first action execution. All full leaves mark ancestry found. Pruned/not-found is bounded-search uncertainty, not proof of dead-end. Early local arrival suppresses only goal-distance cost; every simulated walking edge still incurs original steering/rate costs and safety checks.
-/mpc/beam_evidence Float64MultiArray v1: indices0 version,1 horizon,2 width/root,3 evaluated edges,4 retained full leaves,5 selected root,6 selected leaf,7 reroll valid; indices8..22 five triples available/found/pruned in action order. Legacy debug indices remain but ratio1=-1 unavailable,7 evaluated edges,16/17 retained full leaves; weighted20/21 false. No Monte Carlo probability claim. Existing union and accepted-observation transaction/STOP unchanged; the additive timed SAT check now handles CV future polygon intersections; see the timed checker contract for sampling and execution-time limits.
+## LFPC optimizer and arrival
 
-Arrival correction: manager passes actual end_pt and global_wp_arrival_radius separately from local lookahead goal. Only a FULLY validated incoming step inside that strict final radius becomes terminal with idle continuation; local-goal arrival never terminates safety expansion. Terminal leaves are collected before beam pruning, ancestry marked found, winner rerolled through its incoming steps and final radius recertified. Others retain full configured horizon. Next actual manager cycle detects arrival before any integration and WAIT_TARGET maintains existing authoritative idle heartbeat. No enlarged threshold or unsafe-step exemption. Beam field4 now includes safe horizon OR final-terminal leaves; appended field23 indicates selected terminal leaf (24 fields total). Original early-arrival cost convention remains separate from final safety termination.
+The intermediate five-angle beam implementation (after 4fff814, through 80f8ab2)
+is superseded by continuous steering MPPI. Its beam_width and beam_evidence
+contracts are historical; use [lfpc-mppi.md](./lfpc-mppi.md) for current sampling,
+weighted-update validation, fallback, bounds and evidence. Current-frame FIRI,
+accepted-observation transactions and timed SAT remain mandatory.
 
-Local-target scoring correction: arrived flag only suppresses original goal-distance term. Every safe walking edge accumulates w_steer*abs(api) plus w_dapi*abs(api-prev_api), with no rate penalty at the first edge. True final-terminal leaves have no subsequent simulated walking edges or fictitious cost. Independent final replay reconstructs motion/arrival/objective using identical arithmetic and requires exact finite equality with selected node cost before execution. No weight/tie-order/beam/horizon/constraint change.
+Manager passes actual end_pt and global_wp_arrival_radius separately from the
+local lookahead goal. Only a fully validated incoming step inside the strict
+final radius permits terminal idle continuation. Local arrival only suppresses
+the goal-distance term; every later walking step still incurs steering and
+variation cost and all safety checks. Independent replay reconstructs the full
+LFPC rollout/objective and requires exact finite equality before execution.
+The next manager cycle detects actual arrival before integration; WAIT_TARGET
+maintains the existing authoritative idle heartbeat. No enlarged arrival radius
+or unsafe-step exemption.

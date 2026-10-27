@@ -44,3 +44,15 @@ the future. All are in world. Dedicated DELETEALL and .6-second marker lifetimes
 prevent leftover IDs. STOP/empty/invalid/reset/arrival publishes an empty timed
 path. Model timestamps do not imply that the lightweight jump-step plant plays
 support phases continuously. Geometry/timing contract: planning-runtime/lfpc-timed-collision.md.
+
+## LFPC MPPI outputs
+
+`/mpc/sample_trajectories` displays uniformly selected last-iteration sampled
+rollouts (default 20, cap 50), cyan for feasible and orange for rejected prefixes.
+It does not draw new random samples or display an unsafe weighted trajectory as
+the executed path. `/mpc/best_traj` remains the selected verified rollout.
+`/mpc/optimization_evidence` Float64MultiArray replaces historical beam_evidence;
+its versioned layout label defines counts, ESS, weighted rechecks, replay and
+per-iteration costs. The retained-best curve is nonincreasing by construction,
+not a certificate of local optimality. Execution-epoch authorization still uses
+STOP and debug indices 28/29. See planning-runtime/lfpc-mppi.md.
