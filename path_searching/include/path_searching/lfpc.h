@@ -48,6 +48,7 @@ namespace cane_planner
 
         // every step path
         std::vector<Eigen::Vector3d> step_path_;
+        std::vector<double> step_times_; // actual LIPM phase of each sample (seconds)
 
         Vector2d calculateLFPC(double vx, double vy);
         Vector4d calculateXtVt(double t);
@@ -78,6 +79,8 @@ namespace cane_planner
 
         // API function
         std::vector<Eigen::Vector3d> getStepCOMPath();
+        const std::vector<double>& getStepCOMTimes() const { return step_times_; }
+        double getPhaseTime() const { return t_; }
         Vector2d getFootPosition();
         char getSupportFeet();
         Vector3d getCOMPos();

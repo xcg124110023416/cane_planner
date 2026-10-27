@@ -1,5 +1,7 @@
 <launch>
     <arg name="odometry_topic" value = "/simulation_generator/odom"/>
+    <arg name="mpc_timed_collision_enable" default="true"/>
+    <arg name="mpc_timed_robot_radius" default="0.25"/>
     <arg name="planner" default="2"/>  <!-- A*:1, kinodynamic:2, LFPC-MPPI:3, kinematic MPPI:4 -->
     <!-- MPC ablation switches for lightweight simulation. -->
     <arg name="mpc_w_risk" default="0.0"/>
@@ -58,6 +60,8 @@
     <!-- unified planner (A*/kinodynamic/MPC all via kin_replan_node FSM) -->
     <include file="$(find plan_manage)/launch/include/algorithm.launch">
         <arg name="planner" value="$(arg planner)"/>
+        <arg name="mpc_timed_collision_enable" value="$(arg mpc_timed_collision_enable)"/>
+        <arg name="mpc_timed_robot_radius" value="$(arg mpc_timed_robot_radius)"/>
         <arg name="use_pedestrians" value="$(arg use_pedestrians)"/>
         <arg name="odometry_topic" value = "$(arg odometry_topic)"/>
         <arg name="odometry_world" value = "$(arg odometry_topic)"/>

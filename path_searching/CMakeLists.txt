@@ -55,6 +55,7 @@ add_library( path_searching
     src/dynamic_walking_corridor.cpp
     src/timed_trajectory_builder.cpp
     src/path_smoother.cpp
+    src/timed_pedestrian_collision.cpp
     src/mpc_controller.cpp
     src/kinematic_mppi_controller.cpp
     )
@@ -77,6 +78,8 @@ if(CATKIN_ENABLE_TESTING)
   catkin_add_gtest(test_astar_edges test/test_astar_edges.cpp)
   target_compile_definitions(test_astar_edges PRIVATE ASTAR_EDGE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/corridor_failures/")
   target_link_libraries(test_astar_edges path_searching ${catkin_LIBRARIES})
+  catkin_add_gtest(test_timed_pedestrian_collision test/test_timed_pedestrian_collision.cpp)
+  target_link_libraries(test_timed_pedestrian_collision path_searching ${catkin_LIBRARIES})
   catkin_add_gtest(test_static_mpc test/test_static_mpc.cpp)
   target_link_libraries(test_static_mpc path_searching ${catkin_LIBRARIES})
   catkin_add_gtest(test_kinematic_mppi_controller

@@ -629,6 +629,14 @@ Visualization Manager:
         {}
       Queue Size: 1
       Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /mpc/timed_collision
+      Name: MPC_TimedCollision
+      Namespaces:
+        {}
+      Queue Size: 1
+      Value: true
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /mpc/best_traj

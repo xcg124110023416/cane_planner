@@ -82,6 +82,8 @@ public:
         m.sim_odom_pub_ = nh.advertise<nav_msgs::Odometry>("sim_odom", 20);
         m.mpc_stop_advice_pub_ = nh.advertise<std_msgs::Bool>("stop", 20);
         m.mpc_stop_reason_pub_ = nh.advertise<std_msgs::String>("reason", 20);
+        m.mpc_timed_collision_pub_ = nh.advertise<visualization_msgs::MarkerArray>("timed_collision",20);
+        m.mpc_timed_path_pub_ = nh.advertise<nav_msgs::Path>("timed_path",20);
         m.mpc_best_traj_pub_ = nh.advertise<visualization_msgs::Marker>("best", 20);
         m.mpc_fov_pub_ = nh.advertise<visualization_msgs::Marker>("fov", 20);
         m.mpc_wp_pub_ = nh.advertise<visualization_msgs::Marker>("wp", 20);
@@ -153,6 +155,8 @@ public:
     static void initialHook(PlannerManager&m,std::function<void()> h) {m.after_initial_search_test_hook_=std::move(h);}
     static void goalEntry(PlannerManager&m,std::function<void()> h) {m.goal_entry_test_hook_=std::move(h);}
     static void goalB(PlannerManager&m) {geometry_msgs::PoseStamped::Ptr g(new geometry_msgs::PoseStamped);g->pose.position.x=4.;g->pose.position.y=1.;g->pose.orientation.w=1.;m.GoalCallback(g);}
+    static MpcController& controller(PlannerManager&m) {return *m.mpc_controller_;}
+    static void smallPedestrian(PlannerManager&m) {m.pedestrian_config_.safety_radius=.1;m.pedestrian_config_.alpha=0.;}
     static bool planValid(PlannerManager&m) {return m.mpc_controller_->lastPlanValid();}
     static void receive(PlannerManager& m,const onboard_detector::DynamicObstacles::Ptr& msg) {m.dynamicObstaclesCallback(msg);}
     static ConvexCorridor::Result corridor(PlannerManager&m) {
@@ -370,6 +374,82 @@ void addPedestrian(onboard_detector::DynamicObstacles& msg,const Eigen::Vector2d
     geometry_msgs::Vector3 pos,vel,size;pos.x=p.x();pos.y=p.y();vel.x=1.;size.x=.4;size.y=.6;size.z=1.7;
     msg.position.push_back(pos);msg.velocity.push_back(vel);msg.size.push_back(size);msg.num=1;
 }
+TEST_F(SimOdomTest, TimedSnapshotUsesSourceAgeAndPublishesMatchedGeometry) {
+    ros::Time::setNow(ros::Time(500));SimOdomTestAccess::dynamicSetup(manager_);
+    SimOdomTestAccess::recoverySetup(manager_,nh_);
+    auto msg=frame(ros::Time(499.9));addPedestrian(*msg,Eigen::Vector2d(1,2));
+    msg->velocity[0].x=.2;SimOdomTestAccess::receive(manager_,msg);
+    std::vector<visualization_msgs::MarkerArray> visual;
+    std::vector<nav_msgs::Path> paths;
+    auto vs=nh_.subscribe<visualization_msgs::MarkerArray>("timed_collision",20,
+        [&](const visualization_msgs::MarkerArray::ConstPtr& m){visual.push_back(*m);});
+    auto ps=nh_.subscribe<nav_msgs::Path>("timed_path",20,
+        [&](const nav_msgs::Path::ConstPtr& m){paths.push_back(*m);});
+    const auto deadline=ros::WallTime::now()+ros::WallDuration(2.);
+    while((!vs.getNumPublishers() || !ps.getNumPublishers()) && ros::WallTime::now()<deadline) {
+        ros::spinOnce();ros::WallDuration(.005).sleep();
+    }
+    std::atomic<bool> done{false};std::thread clock;
+    SimOdomTestAccess::afterMppi(manager_,[&]{
+        auto& c=SimOdomTestAccess::controller(manager_);
+        EXPECT_TRUE(c.lastPlanValid());EXPECT_NEAR(.1,c.timedObservationAge(),1e-9);
+        ASSERT_EQ(1u,c.timedCollision().obstacles().size());
+        EXPECT_EQ(Eigen::Vector2d(.2,0),c.timedCollision().obstacles()[0].velocity);
+        clock=std::thread([&]{double t=500.;while(!done){t+=.001;ros::Time::setNow(ros::Time(t));ros::WallDuration(.002).sleep();}});
+    });
+    EXPECT_FALSE(SimOdomTestAccess::step(manager_));done=true;if(clock.joinable())clock.join();
+    SimOdomTestAccess::afterMppi(manager_,{});waitForDecision(1,false);
+    ASSERT_FALSE(visual.empty());ASSERT_FALSE(paths.empty());ASSERT_FALSE(paths.back().poses.empty());
+    const auto& c=SimOdomTestAccess::controller(manager_);
+    EXPECT_TRUE(c.getDebugMetrics().timed_execution_checked);EXPECT_TRUE(c.getDebugMetrics().timed_execution_safe);
+    ASSERT_EQ(c.getBestTimes().size(),paths.back().poses.size());
+    for(size_t i=0;i<c.getBestTimes().size();++i) {
+        EXPECT_NEAR(c.getBestTimes()[i],(paths.back().poses[i].header.stamp-paths.back().header.stamp).toSec(),1e-8);
+        EXPECT_DOUBLE_EQ(c.getBestPath()[i].z(),paths.back().poses[i].pose.position.z);
+    }
+    bool robot=false,pedestrian=false,label=false;
+    for(const auto& m:visual.back().markers) {
+        if(m.action!=visualization_msgs::Marker::ADD)continue;
+        if(m.ns=="timed_robot")robot=true;
+        if(m.ns=="timed_labels")label=true;
+        if(m.ns=="timed_pedestrian" && m.id==0) {
+            pedestrian=true;const auto& obstacle=c.timedCollision().obstacles()[0];
+            const auto expected=(obstacle.hull[0]+obstacle.velocity*(c.timedObservationAge()+c.getBestTimes()[0])).eval();
+            ASSERT_FALSE(m.points.empty());EXPECT_NEAR(expected.x(),m.points[0].x,1e-8);EXPECT_NEAR(expected.y(),m.points[0].y,1e-8);
+        }
+    }
+    EXPECT_TRUE(robot);EXPECT_TRUE(pedestrian);EXPECT_TRUE(label);
+    // Accepting fresh empty input clears both prediction and all visible marker IDs.
+    SimOdomTestAccess::receive(manager_,frame(ros::Time::now()));
+    ros::WallDuration(.05).sleep();ros::spinOnce();
+    EXPECT_TRUE(c.timedCollision().empty());ASSERT_FALSE(visual.back().markers.empty());
+    EXPECT_EQ(visualization_msgs::Marker::DELETEALL,visual.back().markers[0].action);
+    EXPECT_EQ(1u,visual.back().markers.size());EXPECT_TRUE(paths.back().poses.empty());
+}
+
+TEST_F(SimOdomTest, TimedExecutionCollisionStopsBeforeAnyIntegration) {
+    ros::Time::setNow(ros::Time(510));SimOdomTestAccess::dynamicSetup(manager_);
+    SimOdomTestAccess::recoverySetup(manager_,nh_);SimOdomTestAccess::smallPedestrian(manager_);
+    auto msg=frame(ros::Time::now());addPedestrian(*msg,Eigen::Vector2d(0,1.5));
+    msg->size[0].x=msg->size[0].y=.1;msg->velocity[0].x=0.;msg->velocity[0].y=-10.;
+    SimOdomTestAccess::receive(manager_,msg);
+    const auto before=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
+    const auto pos=SimOdomTestAccess::model(manager_).getCOMPos();
+    SimOdomTestAccess::afterMppi(manager_,[&]{
+        EXPECT_TRUE(SimOdomTestAccess::planValid(manager_));
+        // Still within the existing 0.5-second source/receipt freshness limit.
+        ros::Time::setNow(ros::Time(510.15));
+    });
+    EXPECT_FALSE(SimOdomTestAccess::step(manager_));SimOdomTestAccess::afterMppi(manager_,{});
+    waitForStops(1);waitForOdom(1);
+    EXPECT_EQ(before,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
+    EXPECT_EQ(pos,SimOdomTestAccess::model(manager_).getCOMPos());
+    EXPECT_EQ(geometry_msgs::Twist(),odom_.back().twist.twist);
+    const auto dbg=SimOdomTestAccess::controller(manager_).getDebugMetrics();
+    EXPECT_TRUE(dbg.timed_execution_checked);EXPECT_FALSE(dbg.timed_execution_safe);
+    EXPECT_FALSE(SimOdomTestAccess::planValid(manager_));
+}
+
 TEST_F(SimOdomTest, DynamicValidityTransitionsAndFrozenStop)
 {
     ros::Time::setNow(ros::Time(200));SimOdomTestAccess::dynamicSetup(manager_);

@@ -1,4 +1,6 @@
 #include <gtest/gtest.h>
+#include <chrono>
+#include <iostream>
 #include <path_searching/mpc_controller.h>
 
 namespace fast_planner {
@@ -55,6 +57,7 @@ public:
     }
 
     static void beam(MpcController& c,int horizon,int width) {c.cfg_.horizon_steps=horizon;c.cfg_.beam_width=width;c.cfg_.w_goal=10.;c.cfg_.goal_arrival_threshold=0.;}
+    static void timedEnable(MpcController& c,bool value) {c.cfg_.timed_collision_enable=value;}
     static void angleLimit(MpcController& c,double limit) {c.cfg_.max_api=limit;}
     static CollisionDetection::Ptr wideMap() {auto c=map();c->static_origin_=Eigen::Vector2d(-10,-10);c->static_map_resolution_=.025;c->static_map_inv_resolution_=40.;return c;}
     static void suffixCost(MpcController& c) {c.cfg_.horizon_steps=10;c.cfg_.beam_width=8;c.cfg_.w_steer=.5;c.cfg_.w_dapi=.7;c.cfg_.w_goal=10.;c.cfg_.goal_arrival_threshold=.2;}
@@ -413,6 +416,88 @@ TEST(StaticMpcRuntime, CorridorGridPreservesSelectedModelSemantics)
 {
     auto c = StaticMpcTestAccess::map();
     StaticMpcTestAccess::corridorGrid(*c);
+}
+
+static TimedPedestrianCollision::Obstacle movingBox(const Eigen::Vector2d& p,const Eigen::Vector2d& v) {
+    const double r=.02;
+    return {{{p.x()-r,p.y()-r},{p.x()+r,p.y()-r},{p.x()+r,p.y()+r},{p.x()-r,p.y()+r}},v};
+}
+
+TEST(TimedMpcRuntime, ActualSampleTimesAcrossStepsAndCopies) {
+    auto model=StaticMpcTestAccess::model();
+    model->SetCtrlParams(Eigen::Vector3d(.25,0,0));model->updateOneStep();
+    const auto phases=model->getStepCOMTimes();
+    ASSERT_EQ(model->getStepCOMPath().size(),phases.size());ASSERT_FALSE(phases.empty());
+    for(size_t i=0;i<phases.size();++i)EXPECT_NEAR((i+1)*.07,phases[i],1e-12);
+    LFPC copy;copy.copyState(*model);EXPECT_EQ(phases,copy.getStepCOMTimes());
+    model->prepareNextStep();EXPECT_TRUE(model->getStepCOMTimes().empty());
+    model->reset(Eigen::Vector3d::Zero(),Eigen::Vector3d::Zero(),LEFT_LEG,0);
+    MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::beam(c,3,8);
+    StaticMpcTestAccess::angleLimit(c,0.);c.setCollision(StaticMpcTestAccess::wideMap());
+    c.setConvexCorridor({box(-9,9,-9,9)});c.plan(model,Eigen::Vector3d(5,0,0));
+    ASSERT_TRUE(c.lastPlanValid());const auto& times=c.getBestTimes();
+    ASSERT_EQ(phases.size()*3,times.size());ASSERT_EQ(c.getBestPath().size(),times.size());
+    for(size_t i=0;i<times.size();++i)EXPECT_NEAR((i+1)*.07,times[i],1e-12);
+    EXPECT_NEAR(times.back(),c.tree().back().elapsed,1e-12);
+}
+
+TEST(TimedMpcRuntime, CrossingBeyondFirstStepRejectsFullContinuation) {
+    auto m=StaticMpcTestAccess::model();MpcController c;
+    StaticMpcTestAccess::configure(c);StaticMpcTestAccess::beam(c,3,8);StaticMpcTestAccess::angleLimit(c,0.);
+    c.setCollision(StaticMpcTestAccess::wideMap());c.setConvexCorridor({box(-9,9,-9,9)});
+    const auto command=c.plan(m,Eigen::Vector3d(5,0,0));ASSERT_TRUE(c.lastPlanValid());
+    const auto target=c.getBestPath().back().head<2>().eval();const double time=c.getBestTimes().back();
+    m->updateOneStep();const double first_duration=m->getStepCOMTimes().back();
+    m=StaticMpcTestAccess::model();
+    ASSERT_TRUE(c.setTimedPedestrians({movingBox(target+Eigen::Vector2d(0,time),Eigen::Vector2d(0,-1))},0.));
+    c.plan(m,Eigen::Vector3d(5,0,0));EXPECT_FALSE(c.lastPlanValid());
+    ASSERT_TRUE(c.collisionWitness().valid);EXPECT_GT(c.collisionWitness().future_time,first_duration);
+    EXPECT_GT(c.getDebugMetrics().dynamic_reject_count,0);
+    EXPECT_GT(c.getDebugMetrics().timed_collision_checks,0);
+    EXPECT_TRUE(c.getBestPath().empty());EXPECT_TRUE(c.getBestTimes().empty());
+    // Fresh empty data clears prediction; static baseline command is unchanged.
+    ASSERT_TRUE(c.setTimedPedestrians({},0.));
+    EXPECT_EQ(command,c.plan(m,Eigen::Vector3d(5,0,0)));EXPECT_TRUE(c.lastPlanValid());
+    EXPECT_FALSE(c.getDebugMetrics().timed_collision_active);
+}
+
+TEST(TimedMpcRuntime, ExecutionEpochRecheckCatchesLatencyWithoutChangingModel) {
+    auto m=StaticMpcTestAccess::model();MpcController c;StaticMpcTestAccess::configure(c);
+    StaticMpcTestAccess::angleLimit(c,0.);c.setCollision(StaticMpcTestAccess::map());c.setConvexCorridor({box()});
+    ASSERT_TRUE(c.setTimedPedestrians({movingBox(Eigen::Vector2d(0,1),Eigen::Vector2d(0,-2))},0.));
+    c.plan(m,Eigen::Vector3d(2,0,0));ASSERT_TRUE(c.lastPlanValid());
+    const auto pos=m->getCOMPos();const auto state=m->getState();
+    EXPECT_FALSE(c.revalidateTimedPath(.2));EXPECT_FALSE(c.lastPlanValid());
+    EXPECT_TRUE(c.getDebugMetrics().timed_execution_checked);EXPECT_FALSE(c.getDebugMetrics().timed_execution_safe);
+    EXPECT_EQ(pos,m->getCOMPos());EXPECT_EQ(state,m->getState());
+    ASSERT_TRUE(c.collisionWitness().valid);EXPECT_DOUBLE_EQ(.2,c.collisionWitness().observation_age);
+}
+
+TEST(TimedMpcRuntime, InvalidBindingFailsClosedAndExplicitAblationRestoresBaseline) {
+    auto m=StaticMpcTestAccess::model();MpcController c;StaticMpcTestAccess::configure(c);
+    c.setCollision(StaticMpcTestAccess::map());c.setConvexCorridor({box()});
+    EXPECT_FALSE(c.setTimedPedestrians({movingBox(Eigen::Vector2d(0,0),Eigen::Vector2d::Zero())},-1.));
+    c.plan(m,Eigen::Vector3d(2,0,0));EXPECT_FALSE(c.lastPlanValid());
+    StaticMpcTestAccess::timedEnable(c,false);
+    EXPECT_TRUE(c.setTimedPedestrians({movingBox(Eigen::Vector2d(0,0),Eigen::Vector2d::Zero())},0.));
+    c.plan(m,Eigen::Vector3d(2,0,0));EXPECT_TRUE(c.lastPlanValid());
+}
+
+// Opt-in measured benchmark; same full search, no pruning difference or timing assertion.
+TEST(TimedMpcRuntime, DISABLED_BenchmarkSameBeamWork) {
+    auto m=StaticMpcTestAccess::model();MpcController c;StaticMpcTestAccess::configure(c);
+    StaticMpcTestAccess::suffixCost(c);c.setCollision(StaticMpcTestAccess::wideMap());c.setConvexCorridor({box(-9,9,-9,9)});
+    std::array<std::vector<double>,2> timings;
+    for(int repeat=0;repeat<105;++repeat)for(int mode=0;mode<2;++mode) {
+        if(mode)c.setTimedPedestrians({movingBox(Eigen::Vector2d(6,6),Eigen::Vector2d(.1,0))},.1);
+        else c.clearTimedPedestrians();
+        c.plan(m,Eigen::Vector3d(5,0,0));ASSERT_TRUE(c.lastPlanValid());
+        if(repeat>=5)timings[mode].push_back(c.lastPlanTimeMs());
+    }
+    for(int mode=0;mode<2;++mode) {
+        auto& t=timings[mode];std::sort(t.begin(),t.end());
+        std::cout << "TIMED_BENCH mode="<<mode<<" median_ms="<<t[t.size()/2]<<" p95_ms="<<t[95]<<std::endl;
+    }
 }
 
 int main(int argc, char **argv)

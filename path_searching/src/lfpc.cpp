@@ -22,6 +22,7 @@ namespace cane_planner
         b_ = 0.0;
         // path
         step_path_.clear();
+        step_times_.clear();
     }
     void LFPC::initializeModel(ros::NodeHandle &nh)
     {
@@ -41,6 +42,7 @@ namespace cane_planner
     LFPC::~LFPC()
     {
         step_path_.clear();
+        step_times_.clear();
     }
     void LFPC::SetCtrlParams(Vector3d input)
     {
@@ -78,12 +80,13 @@ namespace cane_planner
 
         // path clear;
         step_path_.clear();
+        step_times_.clear();
     }
     void LFPC::updateOneStep()
     {
         // 在一个支撑相中需要计算的离散时间点数量
         // 如t_sup_ = 0.35s (支撑相持续时间), delta_t_ = 0.07s (离散步长)
-        // swing_data_len = 0.35 / 0.07 = 5, 取整为 5 个时间点
+        // 保持现有截断规则；浮点除法可能少一个采样，时间戳记录实际积分时刻。
         int swing_data_len = int(t_sup_ / delta_t_);
         
         // 使用当前的初始速度 vx_0_, vy_0_ 来计算下一步脚的着地位置
@@ -108,6 +111,7 @@ namespace cane_planner
         {
             updateOneDt();//按 LIPM 方程推进质心的运动
             step_path_.push_back(COM_pos_);//保存本步质心轨迹
+            step_times_.push_back(t_);
         }
         // 更新下一个支撑相的初始速度：当前支撑相结束时的速度
         // 这样确保LIPM轨迹的连续性和动态性（速度会影响下一步的落脚位置）
@@ -267,6 +271,7 @@ namespace cane_planner
         y_t_ = 0.0;
         vy_t_ = 0.0;
         step_path_.clear();
+        step_times_.clear();
     }
 
     void LFPC::copyState(const LFPC& other)
@@ -294,6 +299,7 @@ namespace cane_planner
         support_leg_pos_ = other.support_leg_pos_;
         COM_pos_ = other.COM_pos_;
         step_path_ = other.step_path_;
+        step_times_ = other.step_times_;
     }
 
     double LFPC::getTimeUpdate(){

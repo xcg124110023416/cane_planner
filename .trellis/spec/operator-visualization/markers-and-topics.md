@@ -32,3 +32,15 @@ Before changing an operator-facing message:
 - Do not use a custom message where `Path`, `Marker(Array)`, `PoseStamped`, or `PointCloud2` already expresses the contract.
 - Do not publish markers with zero dimensions, an invalid frame, or an unbounded lifetime when the consumer expects transient updates.
 - Do not treat RViz markers as persistent application state; they are visualization output derived from runtime ROS state.
+
+## LFPC time-matched prediction display
+
+Planner 3 publishes `/mpc/timed_collision` MarkerArray and `/mpc/timed_best_path`
+Path. RViz MPC_TimedCollision shows up to ten same-color robot envelope/pedestrian
+hull pairs, cyan to magenta with +seconds text. Red Rejected on STOP denotes one
+rejected sample; it is not an executed trajectory. Path pose headers carry actual
+future times; marker headers stay at the prediction epoch so TF is not queried in
+the future. All are in world. Dedicated DELETEALL and .6-second marker lifetimes
+prevent leftover IDs. STOP/empty/invalid/reset/arrival publishes an empty timed
+path. Model timestamps do not imply that the lightweight jump-step plant plays
+support phases continuously. Geometry/timing contract: planning-runtime/lfpc-timed-collision.md.

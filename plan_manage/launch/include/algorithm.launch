@@ -7,6 +7,8 @@
     <arg name="sensor_pose_topic"/>
     <!-- simulation param -->
     <arg name="simulation"/>
+    <arg name="mpc_timed_collision_enable" default="true"/>
+    <arg name="mpc_timed_robot_radius" default="0.25"/>
     <arg name="planner"/> <!-- A*:1, kinodynamic:2, LFPC-MPPI:3, kinematic MPPI:4 -->
     <arg name="use_pedestrians" default="false"/>
     <arg name="gazebo_sim" default="false"/>
@@ -246,6 +248,10 @@
         <param name="mpc/sample_vis_count" value="20" type="int"/>
         <param name="mpc/horizon_steps" value="10" type="int"/>
         <param name="mpc/beam_width" value="8" type="int"/>
+        <!-- Planner 3: CV prediction + matched-time polygon intersection (SAT).
+             The circumscribed octagon encloses this COM-centered circular radius. -->
+        <param if="$(eval arg('planner') == 3)" name="mpc/timed_collision_enable" value="$(arg mpc_timed_collision_enable)" type="bool"/>
+        <param if="$(eval arg('planner') == 3)" name="mpc/timed_robot_radius" value="$(arg mpc_timed_robot_radius)" type="double"/>
         <!-- MPPI温度：越小越贪心(选最优)，越大越平滑(加权平均) -->
         <param name="mpc/temperature" value="0.4" type="double"/>
         <param name="mpc/mpc_iters" value="1" type="int"/>

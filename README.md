@@ -30,6 +30,8 @@ flowchart LR
     MAP --> FIRI
     PED["当前帧行人观测"] --> HULL["行人凸多边形"]
     HULL --> FIRI
+    HULL --> CV["匀速预测凸包 P(t)"]
+    CV --> BEAM
     FIRI --> BEAM["LFPC/LIPM beam search"]
     MAP --> BEAM
     BEAM --> EXEC["验证选中序列，执行首步或 STOP"]
@@ -38,7 +40,7 @@ flowchart LR
 1. **全局参考。** 保留 A* 输出的全部折线顶点，统一用于局部目标选择、投影跟踪、走廊生成和可视化；planner 3 不对它做稀疏航点抽取或圆角平滑。
 2. **空间走廊。** FIRI 沿局部参考路径生成相邻凸区域，排除完整静态障碍栅格。启用行人后，将当前观测构造为凸多边形，用同一套 FIRI 分离约束排除。
 3. **步态搜索。** 每步枚举相对转角 `[-30°, -15°, 0°, 15°, 30°]`，分别为各首步方向保留 beam 候选。当前 launch 配置预测 10 步、每个首步方向最多保留 8 个候选，步长与步宽固定。
-4. **轨迹检查与执行。** 检查落脚点的静态可通行性，以及每个质心采样点的静态碰撞和走廊并集包含关系。选中序列从原始完整 LFPC 状态重新推演，通过后只执行第一步，再进入下一轮规划。
+4. **轨迹检查与执行。** 检查落脚点的静态可通行性，以及每个质心采样点的静态碰撞和走廊并集包含关系。启用行人时，另按每个采样点的未来时间，检查机器人包络与匀速预测行人凸包是否相交。选中序列从原始完整 LFPC 状态重新推演，执行前按最新时间原点复查，通过后只执行第一步。
 5. **动态路径恢复。** 行人多边形阻断参考路径时，尝试将同一多边形作为临时硬障碍重新跑 A*。新路径须通过走廊重建及观测时效检查，才会替换当前参考。
 6. **失败处理。** 无有效走廊、无可行搜索结果或行人数据无效时，发布 STOP 建议；轻量仿真保持 LFPC 状态并发布静止里程计，Gazebo 输出零速度。
 
@@ -47,8 +49,27 @@ flowchart LR
 - `use_pedestrians:=false` 为静态模式；启用后要求持续收到有效观测。
 - 当前 planner 3 支持每帧 **零或一个行人**。新鲜空帧有效；超过一个行人、数组不匹配、非有限数值、无效时间戳或缺失 TF 均视为输入无效。
 - 规划坐标系为 `world`。外部观测按原始时间戳变换；默认最大观测与接收时效均为 **0.5 s**，计算结束、执行前仍需检查。
-- 行人约束是**当前帧空间几何约束**。速度与局部排斥力参与多边形构造，当前路径未启用历史设计中的时空走廊或多速度区间鲁棒检查。
-- 碰撞检查覆盖落脚点及离散质心点，尚不构成完整人杖外形或未来行人运动的安全证明。有限 beam 搜索未找到延伸，也不等于证明不存在可行路径。
+- 行人约束包括**当前帧 FIRI 空间约束 + LFPC 时间同步凸包碰撞检查**。未来凸包按观测速度匀速平移，现有空间走廊仍为必需约束。历史时空走廊与多速度区间鲁棒设计没有接入。
+- 动态检查使用离散质心点及质心周围的八边形包络；尚不覆盖采样间连续运动、完整人杖外形、行人加速度或转向。有限 beam 搜索未找到延伸，不等于证明不存在可行路径。
+
+### LFPC 时间同步避障
+
+对轨迹采样点 `(qᵢ, τᵢ)`，用同一观测帧的凸包 `P₀` 和速度 `v` 预测：
+
+```text
+Pᵢ = P₀ + v × [(执行时间原点 − 观测时间戳) + τᵢ]
+拒绝条件：机器人包络(qᵢ) 与 Pᵢ 相交或接触
+```
+
+`τᵢ` 来自 LFPC 实际积分时刻并跨步累积，Z 坐标仍是高度。保留原有采样截断规则，因此不能用“第几步 × 0.35 s”替代真实采样时间。机器人包络为外切八边形，完整覆盖默认半径 **0.25 m** 的质心圆盘；行人凸包保留原有身体尺寸和社会安全区。使用缓存分离轴（SAT）判断相交，不在搜索内部重复求 FIRI 或社会力。
+
+搜索、选中序列重演、执行前复查使用同一份观测。执行前复查会补偿规划耗时；复查失败发布 `TIMED_EXECUTION_COLLISION`，轻量仿真不推进 LFPC。原有 0.5 s 观测／接收时效限制不变。
+
+原启动命令会默认启用该功能；可追加 `mpc_timed_collision_enable:=false` 做消融，或用 `mpc_timed_robot_radius:=0.25` 调整包络。RViz 新增 **MPC_TimedCollision**：同色机器人轮廓与行人凸包对应同一未来时刻，颜色由青到紫，文字标注 `+τ s`；STOP 时红色 `Rejected` 表示一个被拒绝的碰撞样本。最多显示十组安全预测，完整采样通过 `/mpc/timed_best_path` 输出，各 `PoseStamped.header.stamp` 为时间原点加 `τᵢ`。
+
+性能基准和横穿运行证据见 [验证记录](docs/LFPC_TIMED_COLLISION_VALIDATION.md)。
+
+该检查叠加在现有当前帧空间走廊上，所以暂不利用“行人将来离开、机器人稍后再经过”的空间。轻量仿真仍按 FSM 周期整步更新位置，**不连续播放 LFPC 支撑相**；上述时间是预测模型时间，不能据此声称已完成真实执行速度同步或连续运动验证。
 
 ## 编译
 
@@ -182,6 +203,8 @@ roslaunch plan_manage kin_replan.launch planner:=2
 | --- | --- | --- |
 | `mpc/horizon_steps` | `10` | 搜索预测步数 |
 | `mpc/beam_width` | `8` | 每个首步方向的 beam 保留宽度 |
+| `mpc/timed_collision_enable` | `true` | 行人未来凸包与机器人包络的时间同步 SAT 硬检查；关闭用于消融 |
+| `mpc/timed_robot_radius` | `0.25 m` | 质心包络内切圆半径，须为有限正数 |
 | `mpc/nominal_al` | `0.40 m` | 固定步长参数，由 launch 参数 `user_step_length` 提供 |
 | `mpc/nominal_aw` | `0.0 m` | 固定步宽参数 |
 | `lfpc/t_sup` | `0.35 s` | 单支撑相持续时间 |
@@ -209,6 +232,8 @@ beam 宽度和预测步数均支持 `1..32`。配置中的最大转角用于筛�
 | `/mpc/convex_corridor` | `visualization_msgs/MarkerArray` | FIRI 走廊及 planner 3 行人多边形可视化 |
 | `/mpc/convex_corridor_debug` | `std_msgs/String` | 走廊可行性、失败原因和路径恢复诊断 |
 | `/mpc/best_traj` | `visualization_msgs/Marker` | 当前选中的预测轨迹 |
+| `/mpc/timed_best_path` | `nav_msgs/Path` | 带未来时间戳的选中轨迹；无有效动态预测时为空 |
+| `/mpc/timed_collision` | `visualization_msgs/MarkerArray` | 同时刻机器人包络、匀速预测行人凸包及冲突样本 |
 | `/mpc/path` | `nav_msgs/Path` | 累积轨迹历史 |
 | `/mpc/beam_evidence` | `std_msgs/Float64MultiArray` | 各首步方向、剪枝、完整延伸及选中分支证据 |
 | `/mpc/debug_metrics` | `std_msgs/Float64MultiArray` | 规划耗时、拒绝计数和执行代价 |
@@ -216,6 +241,8 @@ beam 宽度和预测步数均支持 `1..32`。配置中的最大转角用于筛�
 | `/mpc/stop_advice`、`/mpc/stop_reason` | `std_msgs/Bool`、`std_msgs/String` | 停止建议及原因 |
 | `/sim_odom` | `nav_msgs/Odometry` | 轻量仿真的 LFPC 状态与静止心跳 |
 | `/cmd_vel_footprint` | `geometry_msgs/Twist` | Gazebo 模式下的速度输出 |
+
+`/mpc/debug_metrics` 保留原有 0–25 索引，5 为动态拒绝数，19 为仅空间模式标志；新增 26=时间检查启用且有行人，27=时间检查点数，28=已执行时间原点复查，29=复查安全。距离和 CPA 指标仍为 `-1`，SAT 相交结果不冒充欧氏距离。
 
 里程计和点云输入由 launch remap 决定：轻量仿真使用仿真生成器；FAST-LIO 使用 `/Odometry`、`/cloud_registered`；重定位入口使用 `/localization_odom`、`/corrected_current_pcd`。
 

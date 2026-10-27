@@ -19,6 +19,8 @@ TOPICS = [
     "/mpc/stop_reason",
     "/mpc/path",
     "/mpc/best_traj",
+    "/mpc/timed_best_path",
+    "/mpc/timed_collision",
     "/mpc/current_waypoint",
     "/mpc/waypoints",
     "/astar/path",

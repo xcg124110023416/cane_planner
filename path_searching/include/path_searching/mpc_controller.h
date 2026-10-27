@@ -10,6 +10,7 @@
 
 #include <path_searching/lfpc.h>
 #include <path_searching/convex_corridor.h>
+#include <path_searching/timed_pedestrian_collision.h>
 #include <plan_env/collision_detection.h>
 
 namespace cane_planner
@@ -43,6 +44,9 @@ public:
         double nominal_al = 0.25;
         double nominal_aw = 0.0;
 
+        bool timed_collision_enable = true;
+        double timed_robot_radius = 0.25;
+
     };
 
     struct DebugMetrics
@@ -55,6 +59,10 @@ public:
         double best_min_dynamic_clearance = std::numeric_limits<double>::infinity();
         double best_min_cpa_time = std::numeric_limits<double>::infinity();
         int dynamic_reject_count = 0;
+        int timed_collision_checks = 0;
+        bool timed_collision_active = false;
+        bool timed_execution_checked = false;
+        bool timed_execution_safe = false;
         int static_reject_count = 0;
         int corridor_reject_count = 0;
         int convex_corridor_reject_count = 0;
@@ -75,7 +83,7 @@ public:
         LFPC state;
         int id=0, parent=-1, root=-1, depth=0;
         std::vector<int> children;
-        double action=0., motion_cost=0., objective=0.;
+        double action=0., motion_cost=0., objective=0., elapsed=0.;
         bool terminal=false, arrived=false, safe=false, pruned=false, continuation_found=false;
     };
     struct BeamEvidence {
@@ -99,8 +107,22 @@ public:
     void setCollision(const CollisionDetection::Ptr &col);
     void setConvexCorridor(const std::vector<ConvexCorridor::Segment> &segments);
     void clearConvexCorridor();
+    bool setTimedPedestrians(const std::vector<TimedPedestrianCollision::Obstacle>& obstacles,
+                             double observation_age);
+    void clearTimedPedestrians();
+    // Called with the SAME observation at the actual execution epoch, before integration.
+    bool revalidateTimedPath(double observation_age);
+    const TimedPedestrianCollision& timedCollision() const { return timed_collision_; }
+    double timedObservationAge() const { return timed_observation_age_; }
+    const std::vector<double>& getBestTimes() const { return best_times_; }
+    struct CollisionWitness {
+        bool valid = false;
+        Eigen::Vector2d com = Eigen::Vector2d::Zero();
+        double future_time = 0., observation_age = 0.;
+    };
+    const CollisionWitness& collisionWitness() const { return collision_witness_; }
 
-    // Static planner API: one LFPC step, returns [al, aw, api].
+    // One LFPC command, with spatial and optional time-synchronized hard checks.
     Eigen::Vector3d plan(const LFPC::Ptr &lfpc_base,
                          const Eigen::Vector3d &goal_pos,
                          const Eigen::Vector2d* final_goal = nullptr, double final_radius = 0.);
@@ -127,10 +149,18 @@ private:
     BeamEvidence beam_evidence_;
     ros::Publisher beam_pub_;
     void publishBeamEvidence();
-    bool advance(LFPC& state, double action, std::vector<Eigen::Vector3d>& path);
+    bool advance(LFPC& state, double action, std::vector<Eigen::Vector3d>& path,
+                 double& elapsed, std::vector<double>* times = nullptr);
+    bool timedFree(const Eigen::Vector2d& com, double future_time, double age);
+    TimedPedestrianCollision timed_collision_;
+    bool timed_input_valid_ = true;
+    double timed_observation_age_ = 0.;
+    Eigen::Vector2d timed_root_ = Eigen::Vector2d::Zero();
+    CollisionWitness collision_witness_;
     double distanceToGoal(LFPC&,const Eigen::Vector3d&) const;
     // Best path from last plan
     std::vector<Eigen::Vector3d> best_path_;
+    std::vector<double> best_times_;
 
     // Timing
     double last_plan_time_ms_;

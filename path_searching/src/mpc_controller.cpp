@@ -38,6 +38,8 @@ void MpcController::setParam(ros::NodeHandle &nh)
 
     nh.param("mpc/nominal_al", cfg_.nominal_al, 0.25);
     nh.param("mpc/nominal_aw", cfg_.nominal_aw, 0.0);
+    nh.param("mpc/timed_collision_enable", cfg_.timed_collision_enable, true);
+    nh.param("mpc/timed_robot_radius", cfg_.timed_robot_radius, 0.25);
 
 }
 
@@ -49,7 +51,8 @@ void MpcController::init()
 void MpcController::reset()
 {
     tree_.clear();beam_evidence_=BeamEvidence();
-    best_path_.clear();
+    best_path_.clear(); best_times_.clear();
+    clearTimedPedestrians();
     last_plan_valid_ = false;
     last_plan_time_ms_ = 0.0;
     last_debug_metrics_ = DebugMetrics();
@@ -161,18 +164,72 @@ void MpcController::publishBeamEvidence()
 double MpcController::distanceToGoal(LFPC& state,const Eigen::Vector3d& goal) const
 {return (state.getCOMPos().head<2>()-goal.head<2>()).norm();}
 
-bool MpcController::advance(LFPC& state,double action,std::vector<Eigen::Vector3d>& path)
+bool MpcController::setTimedPedestrians(
+    const std::vector<TimedPedestrianCollision::Obstacle>& obstacles, double age)
 {
+    clearTimedPedestrians();
+    if (!cfg_.timed_collision_enable || obstacles.empty()) return true;
+    timed_observation_age_ = age;
+    timed_input_valid_ = timed_collision_.bind(obstacles, cfg_.timed_robot_radius) &&
+                         std::isfinite(age) && age >= 0.;
+    return timed_input_valid_;
+}
+
+void MpcController::clearTimedPedestrians()
+{
+    timed_collision_.clear(); timed_input_valid_ = true; timed_observation_age_ = 0.;
+    collision_witness_ = CollisionWitness();
+}
+
+bool MpcController::timedFree(const Eigen::Vector2d& com, double time, double age)
+{
+    if (timed_collision_.empty() && timed_input_valid_) return true;
+    ++last_debug_metrics_.timed_collision_checks;
+    if (timed_input_valid_ && timed_collision_.intersects(com, age+time) == false) return true;
+    ++last_debug_metrics_.dynamic_reject_count;
+    // Keep one bounded witness, not every rejected beam sample.
+    if (!collision_witness_.valid) collision_witness_ = {true, com, time, age};
+    return false;
+}
+
+bool MpcController::revalidateTimedPath(double age)
+{
+    if (!last_plan_valid_) return false;
+    if (timed_collision_.empty() && timed_input_valid_) return true;
+    last_debug_metrics_.timed_execution_checked = true;
+    bool safe = timed_input_valid_ && std::isfinite(age) && age >= 0. &&
+                best_path_.size() == best_times_.size();
+    // A latency-induced failure must replace a search witness for visualization.
+    collision_witness_ = CollisionWitness();
+    if (safe) safe = timedFree(timed_root_, 0., age);
+    for (size_t i=0; safe && i<best_path_.size(); ++i)
+        safe = timedFree(best_path_[i].head<2>(), best_times_[i], age);
+    last_debug_metrics_.timed_execution_safe = safe;
+    if (safe) timed_observation_age_ = age;
+    else {
+        last_plan_valid_ = last_debug_metrics_.plan_valid = false;
+        best_path_.clear(); best_times_.clear();
+    }
+    return safe;
+}
+
+bool MpcController::advance(LFPC& state,double action,std::vector<Eigen::Vector3d>& path,
+                            double& elapsed,std::vector<double>* times)
+{
+    const size_t previous_samples = state.getStepCOMPath().size();
+    const double phase_start = state.getPhaseTime();
     state.SetCtrlParams(Eigen::Vector3d(cfg_.nominal_al,cfg_.nominal_aw,action));
     state.updateOneStep();
     const auto points=state.getStepCOMPath();
+    const auto& phases=state.getStepCOMTimes();
     auto free=[&](const Eigen::Vector2d& p){return p.allFinite() && (collision_->hasStaticGlobalMap()?
         collision_->isStaticTraversable(p.x(),p.y()):collision_->isTraversable(p.x(),p.y()));};
-    if(points.empty() || !state.getCOMPos().allFinite() || !free(state.getFootPosition())) {
+    if(points.size()<=previous_samples || phases.size()!=points.size() ||
+       !state.getCOMPos().allFinite() || !free(state.getFootPosition())) {
         ++last_debug_metrics_.static_reject_count;return false;
     }
-    for(const auto& pt:points) {
-        const Eigen::Vector2d p=pt.head<2>();
+    for(size_t i=previous_samples;i<points.size();++i) {
+        const Eigen::Vector2d p=points[i].head<2>();
         last_debug_metrics_.corridor_evaluated=true;
         const bool inside=p.allFinite() && std::any_of(convex_corridor_segments_.begin(),convex_corridor_segments_.end(),
             [&](const ConvexCorridor::Segment& seg){return ConvexCorridor::contains(seg,p,1e-6);});
@@ -183,15 +240,22 @@ bool MpcController::advance(LFPC& state,double action,std::vector<Eigen::Vector3
             ++last_debug_metrics_.convex_corridor_reject_count;return false;
         }
         if(!free(p)){++last_debug_metrics_.static_reject_count;return false;}
+        const double time=elapsed+phases[i]-phase_start;
+        if (!std::isfinite(time) || time<=elapsed || !timedFree(p,time,timed_observation_age_)) return false;
     }
-    path.insert(path.end(),points.begin(),points.end());
+    for(size_t i=previous_samples;i<points.size();++i) {
+        path.push_back(points[i]);
+        if(times) times->push_back(elapsed+phases[i]-phase_start);
+    }
+    elapsed += phases.back()-phase_start;
     state.prepareNextStep();return true;
 }
 
 Eigen::Vector3d MpcController::plan(const LFPC::Ptr& base,const Eigen::Vector3d& goal,const Eigen::Vector2d* final_goal,double final_radius)
 {
     const auto started=std::chrono::steady_clock::now();
-    tree_.clear();best_path_.clear();last_plan_valid_=false;last_debug_metrics_=DebugMetrics();beam_evidence_=BeamEvidence();
+    tree_.clear();best_path_.clear();best_times_.clear();collision_witness_=CollisionWitness();last_plan_valid_=false;last_debug_metrics_=DebugMetrics();beam_evidence_=BeamEvidence();
+    last_debug_metrics_.timed_collision_active = !timed_collision_.empty() || !timed_input_valid_;
     const int N=cfg_.horizon_steps,W=cfg_.beam_width;
     beam_evidence_.horizon=N;beam_evidence_.width=W;
     Eigen::Vector3d command=Eigen::Vector3d::Zero();
@@ -208,9 +272,13 @@ Eigen::Vector3d MpcController::plan(const LFPC::Ptr& base,const Eigen::Vector3d&
         cfg_.w_steer>=0 && cfg_.w_dapi>=0 && cfg_.w_goal>=0 && cfg_.goal_arrival_threshold>=0;
     const bool inside=base && base->getCOMPos().allFinite() && std::any_of(convex_corridor_segments_.begin(),convex_corridor_segments_.end(),
         [&](const ConvexCorridor::Segment& seg){return ConvexCorridor::contains(seg,base->getCOMPos().head<2>(),1e-6);});
-    if(!config || !collision_ || !goal.allFinite() || !has_convex_corridor_ || !inside ||
+    if(!config || !timed_input_valid_ || !collision_ || !goal.allFinite() || !has_convex_corridor_ || !inside ||
        !(collision_->hasStaticGlobalMap()?collision_->isStaticTraversable(base->getCOMPos().x(),base->getCOMPos().y()):
          collision_->isTraversable(base->getCOMPos().x(),base->getCOMPos().y()))) {
+        publishSampleTrajectories({},Eigen::VectorXd());return finish();
+    }
+    timed_root_ = base->getCOMPos().head<2>();
+    if (!timedFree(timed_root_,0.,timed_observation_age_)) {
         publishSampleTrajectories({},Eigen::VectorXd());return finish();
     }
     constexpr double rad=3.14159265358979323846/180.;
@@ -223,7 +291,8 @@ Eigen::Vector3d MpcController::plan(const LFPC::Ptr& base,const Eigen::Vector3d&
     auto expand=[&](int parent,int ai,int ri) {
         TreeNode node;node.id=tree_.size();node.parent=parent;node.root=ri;node.depth=tree_[parent].depth+1;node.action=actions[ai];
         node.state.copyState(tree_[parent].state);node.motion_cost=tree_[parent].motion_cost;node.arrived=tree_[parent].arrived;
-        std::vector<Eigen::Vector3d> ignored;node.safe=advance(node.state,node.action,ignored);++beam_evidence_.evaluated;
+        node.elapsed=tree_[parent].elapsed;
+        std::vector<Eigen::Vector3d> ignored;node.safe=advance(node.state,node.action,ignored,node.elapsed);++beam_evidence_.evaluated;
         if(node.safe) {
             node.motion_cost+=cfg_.w_steer*std::abs(node.action)+(node.depth>1?cfg_.w_dapi*std::abs(node.action-tree_[parent].action):0.);
             node.arrived=node.arrived || distanceToGoal(node.state,goal)<cfg_.goal_arrival_threshold;
@@ -267,10 +336,10 @@ Eigen::Vector3d MpcController::plan(const LFPC::Ptr& base,const Eigen::Vector3d&
         for(int id=selected;tree_[id].parent>=0;id=tree_[id].parent)ancestry.push_back(id);
         std::reverse(ancestry.begin(),ancestry.end());
         LFPC checked;checked.copyState(*base);bool valid=true,arrived=false;
-        double replay_motion=0.,previous_action=0.;
+        double replay_motion=0.,previous_action=0.,elapsed=0.;
         for(size_t step=0;step<ancestry.size();++step) {
             const double action=tree_[ancestry[step]].action;
-            if(!advance(checked,action,best_path_)){valid=false;break;}
+            if(!advance(checked,action,best_path_,elapsed,&best_times_)){valid=false;break;}
             replay_motion+=cfg_.w_steer*std::abs(action)+(step>0?cfg_.w_dapi*std::abs(action-previous_action):0.);
             previous_action=action;
             arrived=arrived || distanceToGoal(checked,goal)<cfg_.goal_arrival_threshold;
@@ -283,7 +352,7 @@ Eigen::Vector3d MpcController::plan(const LFPC::Ptr& base,const Eigen::Vector3d&
             last_plan_valid_=true;command=Eigen::Vector3d(cfg_.nominal_al,cfg_.nominal_aw,tree_[ancestry.front()].action);
             last_debug_metrics_.best_total_cost=last_debug_metrics_.executed_total_cost=tree_[selected].objective;
             display_paths.push_back(best_path_);display_costs.push_back(tree_[selected].objective);
-        }else best_path_.clear();
+        }else {best_path_.clear();best_times_.clear();}
         for(size_t k=1;k<leaves.size() && display_paths.size()<size_t(sample_vis_count_);++k) {
             std::vector<int> chain;for(int id=leaves[k];tree_[id].parent>=0;id=tree_[id].parent)chain.push_back(id);
             std::vector<Eigen::Vector3d> path;
