@@ -4,6 +4,7 @@
 #include <visualization_msgs/MarkerArray.h>
 #include <chrono>
 #include <std_msgs/Float64MultiArray.h>
+#include <Eigen/Geometry>
 
 namespace cane_planner
 {
@@ -44,6 +45,12 @@ void MpcController::setParam(ros::NodeHandle &nh)
     nh.param("mpc/nominal_aw", cfg_.nominal_aw, 0.0);
     nh.param("mpc/timed_collision_enable", cfg_.timed_collision_enable, true);
     nh.param("mpc/timed_robot_radius", cfg_.timed_robot_radius, 0.25);
+    nh.param("human_cane/enabled",cfg_.footprint.enabled,true);
+    nh.param("human_cane/body_radius",cfg_.footprint.body_radius,.25);
+    nh.param("human_cane/cane_length",cfg_.footprint.cane_length,.65);
+    nh.param("human_cane/front_radius",cfg_.footprint.front_radius,.12);
+    nh.param("human_cane/margin",cfg_.footprint.margin,.03);
+    footprint_local_=HumanCaneFootprint::relative(cfg_.footprint,0.);
 
 }
 
@@ -55,7 +62,7 @@ void MpcController::init()
 void MpcController::reset()
 {
     resetWarmStart(); optimization_evidence_=OptimizationEvidence();
-    best_path_.clear(); best_times_.clear(); best_controls_.clear();
+    best_path_.clear(); best_times_.clear(); best_yaws_.clear(); best_controls_.clear();
     clearTimedPedestrians();
     last_plan_valid_ = false;
     last_plan_time_ms_ = 0.0;
@@ -179,7 +186,8 @@ bool MpcController::setTimedPedestrians(
     clearTimedPedestrians();
     if (!cfg_.timed_collision_enable || obstacles.empty()) return true;
     timed_observation_age_ = age;
-    timed_input_valid_ = timed_collision_.bind(obstacles, cfg_.timed_robot_radius) &&
+    timed_input_valid_ = (cfg_.footprint.enabled?timed_collision_.bind(obstacles,HumanCaneFootprint::relative(cfg_.footprint,0.)):
+                         timed_collision_.bind(obstacles, cfg_.timed_robot_radius)) &&
                          std::isfinite(age) && age >= 0.;
     return timed_input_valid_;
 }
@@ -190,14 +198,14 @@ void MpcController::clearTimedPedestrians()
     collision_witness_ = CollisionWitness();
 }
 
-bool MpcController::timedFree(const Eigen::Vector2d& com, double time, double age)
+bool MpcController::timedFree(const Eigen::Vector2d& com, double time, double age,double yaw)
 {
     if (timed_collision_.empty() && timed_input_valid_) return true;
     ++last_debug_metrics_.timed_collision_checks;
-    if (timed_input_valid_ && timed_collision_.intersects(com, age+time) == false) return true;
+    if (timed_input_valid_ && timed_collision_.intersects(com, age+time,cfg_.footprint.enabled?yaw:0.) == false) return true;
     ++last_debug_metrics_.dynamic_reject_count;
     // Keep one bounded witness, not every rejected rollout sample.
-    if (!collision_witness_.valid) collision_witness_ = {true, com, time, age};
+    if (!collision_witness_.valid) collision_witness_ = {true, com, time, age,yaw};
     return false;
 }
 
@@ -207,26 +215,58 @@ bool MpcController::revalidateTimedPath(double age)
     if (timed_collision_.empty() && timed_input_valid_) return true;
     last_debug_metrics_.timed_execution_checked = true;
     bool safe = timed_input_valid_ && std::isfinite(age) && age >= 0. &&
-                best_path_.size() == best_times_.size();
+                best_path_.size() == best_times_.size() && best_path_.size()==best_yaws_.size();
     // A latency-induced failure must replace a search witness for visualization.
     collision_witness_ = CollisionWitness();
-    if (safe) safe = timedFree(timed_root_, 0., age);
+    if (safe) safe = timedFree(timed_root_, 0., age,timed_root_yaw_);
     for (size_t i=0; safe && i<best_path_.size(); ++i)
-        safe = timedFree(best_path_[i].head<2>(), best_times_[i], age);
+        safe = timedFree(best_path_[i].head<2>(), best_times_[i], age,best_yaws_[i]);
     last_debug_metrics_.timed_execution_safe = safe;
     if (safe) timed_observation_age_ = age;
     else {
         last_plan_valid_ = last_debug_metrics_.plan_valid = false;
-        best_path_.clear(); best_times_.clear(); best_controls_.clear();
+        best_path_.clear(); best_times_.clear(); best_yaws_.clear(); best_controls_.clear();
     }
     return safe;
 }
 
+HumanCaneFootprint::Polygon MpcController::robotFootprintAt(const Eigen::Vector2d& p,double yaw) const {
+    if(cfg_.footprint.enabled) {auto shape=relativeFootprint(yaw);for(auto& v:shape)v+=p;return shape;}
+    TimedPedestrianCollision checker;if(!checker.bind({},cfg_.timed_robot_radius))return {};
+    auto shape=checker.robotFootprint();for(auto& v:shape)v+=p;return shape;
+}
+HumanCaneFootprint::Polygon MpcController::relativeFootprint(double yaw) const {
+    const auto& local=footprint_local_;
+    if(local.empty())return HumanCaneFootprint::relative(cfg_.footprint,yaw);
+    const Eigen::Rotation2Dd rotation(yaw);HumanCaneFootprint::Polygon shape;shape.reserve(local.size());
+    for(const auto& v:local)shape.push_back(rotation*v);
+    return shape;
+}
+bool MpcController::spatialFree(const Eigen::Vector2d& p,double yaw) {
+    if(!p.allFinite() || !std::isfinite(yaw))return false;
+    if(!cfg_.footprint.enabled)return std::any_of(convex_corridor_segments_.begin(),convex_corridor_segments_.end(),
+        [&](const ConvexCorridor::Segment& region){return ConvexCorridor::contains(region,p,1e-6);});
+    const auto shape=relativeFootprint(yaw);
+    return std::any_of(convex_corridor_segments_.begin(),convex_corridor_segments_.end(),
+        [&](const ConvexCorridor::Segment& region){return ConvexCorridor::containsFootprint(region,p,shape,1e-6);});
+}
 bool MpcController::advance(LFPC& state,double action,std::vector<Eigen::Vector3d>& path,
-                            double& elapsed,std::vector<double>* times)
+                            double& elapsed,std::vector<double>* times,std::vector<double>* yaws)
 {
     const size_t previous_samples = state.getStepCOMPath().size();
     const double phase_start = state.getPhaseTime();
+    const double initial_yaw=state.getNextIterState()(2);
+    const Eigen::Vector3d initial_com=state.getCOMPos();
+    if(cfg_.footprint.enabled) {
+        // LFPC changes torso yaw at a step boundary. Sample the swept yaw there;
+        // these model-time-zero checks are retained for execution-age revalidation.
+        const int rotations=std::max(1,int(std::ceil(std::abs(action)/.0872664625997165)));
+        for(int i=1;i<=rotations;++i) {
+            const double yaw=initial_yaw+action*double(i)/rotations;
+            if(!spatialFree(initial_com.head<2>(),yaw) || !timedFree(initial_com.head<2>(),elapsed,timed_observation_age_,yaw))return false;
+            path.push_back(initial_com);if(times)times->push_back(elapsed);if(yaws)yaws->push_back(yaw);
+        }
+    }
     state.SetCtrlParams(Eigen::Vector3d(cfg_.nominal_al,cfg_.nominal_aw,action));
     state.updateOneStep();
     const auto points=state.getStepCOMPath();
@@ -240,8 +280,7 @@ bool MpcController::advance(LFPC& state,double action,std::vector<Eigen::Vector3
     for(size_t i=previous_samples;i<points.size();++i) {
         const Eigen::Vector2d p=points[i].head<2>();
         last_debug_metrics_.corridor_evaluated=true;
-        const bool inside=p.allFinite() && std::any_of(convex_corridor_segments_.begin(),convex_corridor_segments_.end(),
-            [&](const ConvexCorridor::Segment& seg){return ConvexCorridor::contains(seg,p,1e-6);});
+        const bool inside=spatialFree(p,state.getNextIterState()(2));
         if(!inside) {
             double v=std::numeric_limits<double>::infinity();
             for(const auto& seg:convex_corridor_segments_)v=std::min(v,ConvexCorridor::violation(seg,p));
@@ -250,11 +289,12 @@ bool MpcController::advance(LFPC& state,double action,std::vector<Eigen::Vector3
         }
         if(!free(p)){++last_debug_metrics_.static_reject_count;return false;}
         const double time=elapsed+phases[i]-phase_start;
-        if (!std::isfinite(time) || time<=elapsed || !timedFree(p,time,timed_observation_age_)) return false;
+        if (!std::isfinite(time) || time<=elapsed || !timedFree(p,time,timed_observation_age_,state.getNextIterState()(2))) return false;
     }
     for(size_t i=previous_samples;i<points.size();++i) {
         path.push_back(points[i]);
         if(times) times->push_back(elapsed+phases[i]-phase_start);
+        if(yaws)yaws->push_back(state.getNextIterState()(2));
     }
     elapsed += phases.back()-phase_start;
     state.prepareNextStep();return true;
@@ -310,7 +350,7 @@ MpcController::Rollout MpcController::rolloutSequence(const LFPC& base,
     for(size_t n=0;n<controls.size();++n) {
         const double action=controls[n];
         if(!std::isfinite(action) || std::abs(action)>cfg_.max_api ||
-           !advance(state,action,result.path,elapsed,&result.times))return result;
+           !advance(state,action,result.path,elapsed,&result.times,&result.yaws))return result;
         motion_cost+=cfg_.w_steer*std::abs(action)+(n>0?cfg_.w_dapi*std::abs(action-previous_action):0.);
         previous_action=action;++result.steps;
         arrived=arrived || distanceToGoal(state,goal)<cfg_.goal_arrival_threshold;
@@ -328,7 +368,8 @@ Eigen::Vector3d MpcController::plan(const LFPC::Ptr& base,const Eigen::Vector3d&
                                    const Eigen::Vector2d* final_goal,double final_radius)
 {
     const auto started=std::chrono::steady_clock::now();
-    best_path_.clear();best_times_.clear();best_controls_.clear();collision_witness_=CollisionWitness();
+    footprint_local_=HumanCaneFootprint::relative(cfg_.footprint,0.);
+    best_path_.clear();best_times_.clear();best_yaws_.clear();best_controls_.clear();collision_witness_=CollisionWitness();
     last_plan_valid_=false;last_debug_metrics_=DebugMetrics();optimization_evidence_=OptimizationEvidence();
     last_debug_metrics_.timed_collision_active=!timed_collision_.empty() || !timed_input_valid_;
     const int N=cfg_.horizon_steps,K=cfg_.num_samples,I=cfg_.mpc_iters;
@@ -340,24 +381,22 @@ Eigen::Vector3d MpcController::plan(const LFPC::Ptr& base,const Eigen::Vector3d&
         last_debug_metrics_.plan_time_ms=last_plan_time_ms_;last_debug_metrics_.plan_valid=last_plan_valid_;
         publishOptimizationEvidence();return command;
     };
-    bool config=!final_goal || (final_goal->allFinite() && std::isfinite(final_radius) && final_radius>0.);
+    bool config=HumanCaneFootprint::validConfig(cfg_.footprint) && (!final_goal || (final_goal->allFinite() && std::isfinite(final_radius) && final_radius>0.));
     for(double x:{cfg_.nominal_al,cfg_.nominal_aw,cfg_.min_al,cfg_.max_al,cfg_.max_aw,cfg_.max_api,
                   cfg_.w_steer,cfg_.w_dapi,cfg_.w_goal,cfg_.goal_arrival_threshold,cfg_.sigma_api,cfg_.temperature})
         config=config && std::isfinite(x);
     config=config && N>=1 && N<=32 && K>=1 && K<=4096 && I>=1 && I<=16 && cfg_.random_seed>=0 &&
         cfg_.min_al>=0 && cfg_.nominal_al>=cfg_.min_al && cfg_.nominal_al<=cfg_.max_al &&
         cfg_.nominal_aw>=0 && cfg_.nominal_aw<=cfg_.max_aw && cfg_.max_api>=0 && cfg_.sigma_api>=0 &&
-        cfg_.temperature>0 && cfg_.w_steer>=0 && cfg_.w_dapi>=0 && cfg_.w_goal>=0 && cfg_.goal_arrival_threshold>=0;
-    const bool inside=base && base->getCOMPos().allFinite() && std::any_of(
-        convex_corridor_segments_.begin(),convex_corridor_segments_.end(),
-        [&](const ConvexCorridor::Segment& seg){return ConvexCorridor::contains(seg,base->getCOMPos().head<2>(),1e-6);});
+        cfg_.max_api<=3.14159265358979323846 && cfg_.temperature>0 && cfg_.w_steer>=0 && cfg_.w_dapi>=0 && cfg_.w_goal>=0 && cfg_.goal_arrival_threshold>=0;
+    const bool inside=base && spatialFree(base->getCOMPos().head<2>(),base->getNextIterState()(2));
     if(!config || !timed_input_valid_ || !collision_ || !goal.allFinite() || !has_convex_corridor_ || !inside ||
        !(collision_->hasStaticGlobalMap()?collision_->isStaticTraversable(base->getCOMPos().x(),base->getCOMPos().y()):
          collision_->isTraversable(base->getCOMPos().x(),base->getCOMPos().y()))) {
         publishSampleTrajectories({},Eigen::VectorXd());return finish();
     }
-    timed_root_=base->getCOMPos().head<2>();
-    if(!timedFree(timed_root_,0.,timed_observation_age_)) {
+    timed_root_=base->getCOMPos().head<2>();timed_root_yaw_=base->getNextIterState()(2);
+    if(!timedFree(timed_root_,0.,timed_observation_age_,timed_root_yaw_)) {
         publishSampleTrajectories({},Eigen::VectorXd());return finish();
     }
     ControlSequence mean=warm_start_.size()==size_t(N)?warm_start_:ControlSequence(N,0.);
@@ -422,7 +461,7 @@ Eigen::Vector3d MpcController::plan(const LFPC::Ptr& base,const Eigen::Vector3d&
                               replay.terminal==selected.terminal;
         if(evidence.reroll_valid) {
             last_plan_valid_=true;last_debug_metrics_.executed_total_cost=replay.cost;
-            best_path_=std::move(replay.path);best_times_=std::move(replay.times);
+            best_path_=std::move(replay.path);best_times_=std::move(replay.times);best_yaws_=std::move(replay.yaws);
             best_controls_.assign(controls.begin(),controls.begin()+replay.steps);
             evidence.selected_steps=replay.steps;evidence.selected_terminal=replay.terminal;
             command=Eigen::Vector3d(cfg_.nominal_al,cfg_.nominal_aw,controls.front());

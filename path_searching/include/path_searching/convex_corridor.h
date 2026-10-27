@@ -5,13 +5,14 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <path_searching/human_cane_footprint.h>
 namespace cane_planner {
 class ConvexCorridor {
 public:
     struct Halfspace { Eigen::Vector2d normal = Eigen::Vector2d::Zero(); double offset = 0.; };
     struct Segment {
-        // Original protected seed interval, not maximal polygon/path coverage.
-        // Pruning preserves these intervals; gaps in metadata are intentional.
+        // Sampling metadata: protected seed interval in legacy mode, or seed to
+        // coverage exit in adaptive mode. Original-edge coverage is certified separately.
         double s0 = 0., s1 = 0.;
         Eigen::Vector2d center = Eigen::Vector2d::Zero();
         std::vector<Halfspace> halfspaces;
@@ -30,6 +31,9 @@ public:
         double max_segment_length = 1.;
         double max_seconds = .5;
         int iterations = 4, optimizer_iterations = 150, max_regions = 100;
+        bool adaptive_sampling = false;
+        HumanCaneFootprint::Config footprint;
+        double root_yaw = 0.;
     };
     enum class FailureReason {
         NONE, INVALID_INPUT, REFERENCE_OCCUPIED, DEGENERATE_PATH,
@@ -64,13 +68,20 @@ public:
         Eigen::Vector2d failure_position = Eigen::Vector2d::Zero();
         bool failure_position_valid = false;
         double min_overlap_area = 0., min_overlap_depth = 0., elapsed_seconds = 0.;
+        int generated_regions = 0;
     };
     static const char* failureReasonName(FailureReason);
     static const char* failureStageName(FailureStage);
     static std::string diagnosticsText(const Result&);
     static bool contains(const Segment&, const Eigen::Vector2d&, double tol = 1e-6);
+    // One common region must contain the entire relative polygon (conservative at joins).
+    static bool containsFootprint(const Segment&, const Eigen::Vector2d&,
+                                  const std::vector<Eigen::Vector2d>& relative, double tol = 1e-6);
     static double violation(const Segment&, const Eigen::Vector2d&);
     static double polygonArea(const std::vector<Eigen::Vector2d>&);
+    // Exact root -> route projection -> original edges. length=0 selects the rest.
+    static std::vector<Eigen::Vector2d> referencePath(const std::vector<Eigen::Vector2d>& route,
+        size_t index,const Eigen::Vector2d& root,double length);
     using Polygon = std::vector<Eigen::Vector2d>;
     Result buildStatic(const std::vector<Eigen::Vector2d>&, const Grid&,
                        const std::vector<Polygon>& dynamic_polygons = {}) const;

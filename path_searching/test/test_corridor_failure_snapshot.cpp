@@ -1,12 +1,36 @@
 #include <gtest/gtest.h>
 #include <path_searching/corridor_failure_snapshot.h>
 #include <nlopt.hpp>
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <unistd.h>
 using C=cane_planner::ConvexCorridor;
 using V=Eigen::Vector2d;
 using Capture=cane_planner::CorridorFailureCapture;
+TEST(HistoricalSnapshot, AdaptiveOfficeForwardProgress) {
+    for(const char* name:{"adaptive-office-diagonal.snapshot","adaptive-office-south.snapshot"}) {
+        cane_planner::CorridorFailureSnapshot s;std::string error;
+        const std::string source=__FILE__;
+        const std::string root=source.substr(0,source.find_last_of('/'))+"/fixtures/corridor_failures/";
+        ASSERT_TRUE(cane_planner::readCorridorFailureSnapshot(root+name,s,error))<<error;
+        ASSERT_EQ(s.failure.failure_reason,C::FailureReason::NO_PROGRESS);
+        C corridor;corridor.setConfig(s.config);const auto result=corridor.buildStatic(s.path,s.grid);
+        ASSERT_TRUE(result.feasible)<<name<<" "<<C::failureReasonName(result.failure_reason)<<" s="<<result.failure_s;
+        EXPECT_LE(result.generated_regions,16);EXPECT_GE(result.min_overlap_depth,1e-6);
+        for(size_t e=0;e+1<s.path.size();++e) {
+            const V d=s.path[e+1]-s.path[e];
+            const auto shape=cane_planner::HumanCaneFootprint::relative(s.config.footprint,
+                e==0?s.config.root_yaw:std::atan2(d.y(),d.x()));
+            for(int i=0;i<=10;++i) {
+                const V p=s.path[e]+d*(i/10.);
+                EXPECT_TRUE(std::any_of(result.segments.begin(),result.segments.end(),
+                    [&](const C::Segment& r){return C::containsFootprint(r,p,shape);}))<<name<<" edge="<<e;
+            }
+        }
+        std::cout<<name<<" generated="<<result.generated_regions<<" seconds="<<result.elapsed_seconds<<std::endl;
+    }
+}
 TEST(HistoricalSnapshot, EdgeSeeds) {
     for(const char* name:{"failure-T08XXn","failure-tXyExX","failure-inIHM2"}) {
         cane_planner::CorridorFailureSnapshot snapshot;std::string error;
@@ -68,6 +92,7 @@ TEST_F(Snapshot, ExactRoundTripAndSameBuilder) {
     auto g=grid();g.blocked[12*48+14]=255;C::Config c;
     c.local_radius=2.987654321012345;c.clearance=.003;c.max_segment_length=.6;
     c.max_seconds=.75;c.iterations=3;c.optimizer_iterations=1;c.max_regions=99;
+    c.adaptive_sampling=true;c.footprint.enabled=true;c.root_yaw=.123;c.footprint.cane_length=.61;
     auto r=failure(g,c);ASSERT_FALSE(r.feasible);
     // Exercise quoted exception/optional metadata independently of NLopt's platform-specific exceptions.
     r.diagnostics.solver_exception="roundoff \"detail\"\\test";
@@ -81,6 +106,8 @@ TEST_F(Snapshot, ExactRoundTripAndSameBuilder) {
 #define SAME(field) EXPECT_EQ(s.config.field,c.field)
     SAME(local_radius);SAME(clearance);SAME(max_segment_length);
     SAME(max_seconds);SAME(iterations);SAME(optimizer_iterations);SAME(max_regions);
+    SAME(adaptive_sampling);SAME(root_yaw);SAME(footprint.enabled);SAME(footprint.cane_length);
+    SAME(footprint.body_radius);SAME(footprint.front_radius);SAME(footprint.margin);
 #undef SAME
     EXPECT_EQ(s.failure.failure_reason,r.failure_reason);EXPECT_EQ(s.failure.failure_segment_index,r.failure_segment_index);
     EXPECT_EQ(s.failure.failure_s,r.failure_s);EXPECT_EQ(s.failure.failure_position,r.failure_position);

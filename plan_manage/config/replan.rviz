@@ -616,7 +616,23 @@ Visualization Manager:
     - Class: rviz/MarkerArray
       Enabled: true
       Marker Topic: /mpc/convex_corridor
-      Name: Static_Corridor
+      Name: MPC_ActiveCorridor
+      Namespaces:
+        {}
+      Queue Size: 1
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /mpc/corridor_preview
+      Name: MPC_CorridorPreview
+      Namespaces:
+        {}
+      Queue Size: 1
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /mpc/human_cane
+      Name: MPC_HumanCane
       Namespaces:
         {}
       Queue Size: 1

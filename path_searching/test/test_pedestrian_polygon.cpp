@@ -20,14 +20,24 @@ void excluded(const C::Result&r,const P::Polygon&p,double clearance) {
     }EXPECT_TRUE(common);}
 }
 }
-TEST(PedestrianPolygon, ReverseAndZeroForceAlwaysContainBodyAndSafetyDisk) {
+TEST(PedestrianPolygon, ReverseAndZeroForceAlwaysContainPaddedBody) {
     P::Config c;const auto o=observation();
     for(const V& f:{V(-4,0),V(0,0),V(4,0)}) {
         const auto r=P::fromForce(o,f,c);ASSERT_TRUE(r.valid);
         for(const auto&p:r.body)EXPECT_TRUE(inside(r.hull,p));
-        for(int i=0;i<360;++i)EXPECT_TRUE(inside(r.hull,o.position+c.safety_radius*V(std::cos(i*.0174532925199433),std::sin(i*.0174532925199433))));
+        for(const auto& p:r.body)for(const V& d:{V(-c.body_margin,-c.body_margin),V(c.body_margin,c.body_margin)})
+            EXPECT_TRUE(inside(r.hull,p+d));
         if(f.x()<0) { EXPECT_TRUE(inside(r.hull,o.position+V(-1.6,0))); }
     }
+}
+TEST(PedestrianPolygon, HeadingAndWeakForceRemainVisible) {
+    auto o=observation(V::Zero());o.full_size=V(.5,.5);P::Config c;
+    const auto east=P::fromForce(o,V(.05,0),c);
+    o.velocity=V(0,1);const auto north=P::fromForce(o,V(.05,0),c);
+    ASSERT_TRUE(east.valid);ASSERT_TRUE(north.valid);EXPECT_NE(east.hull,north.hull);
+    o.velocity=V(1,0);const auto zero=P::fromForce(o,V::Zero(),c);
+    EXPECT_NE(zero.hull,east.hull);EXPECT_EQ(3u,east.social.size());
+    EXPECT_TRUE(inside(east.hull,V(.415,0)));EXPECT_FALSE(inside(zero.hull,V(.415,0)));
 }
 TEST(PedestrianPolygon, StationaryIsSymmetricRegardlessOfForce) {
     auto o=observation();o.velocity.setZero();P::Config c;

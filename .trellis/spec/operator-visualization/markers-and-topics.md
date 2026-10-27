@@ -56,3 +56,17 @@ its versioned layout label defines counts, ESS, weighted rechecks, replay and
 per-iteration costs. The retained-best curve is nonincreasing by construction,
 not a certificate of local optimality. Execution-epoch authorization still uses
 STOP and debug indices 28/29. See planning-runtime/lfpc-mppi.md.
+
+## Planner-3 directional geometry and preview (2026-10-27)
+
+`/mpc/human_cane` draws production geometry at the current pose in yellow and up
+to eight checked prediction poses in cyan, including when no pedestrians exist.
+Timed robot markers rotate the identical envelope using saved sample yaw; timed
+Path orientations carry that yaw, and step-root rotation samples may share times.
+`/mpc/convex_corridor` includes physical body, raw social triangle, used collision
+hull, force/FOV and active failure point. Do not emit an empty social LINE_STRIP
+for a stationary observation. `/mpc/corridor_preview` is a separate pale outline
+with an explicit Preview only / Preview blocked label and observation age. Its
+async result must pass source/receipt freshness and route/goal revision before
+publication; TTL never outlives the bound source. No motion authority. RViz names
+are MPC_ActiveCorridor, MPC_HumanCane and MPC_CorridorPreview.

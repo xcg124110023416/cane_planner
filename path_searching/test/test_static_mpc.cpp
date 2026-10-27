@@ -73,6 +73,7 @@ public:
         c.cfg_.goal_arrival_threshold=.2;seed(c,0);
     }
     static void timedEnable(MpcController& c,bool value) {c.cfg_.timed_collision_enable=value;}
+    static void footprint(MpcController& c,bool value) {c.cfg_.footprint.enabled=value;}
     static void angleLimit(MpcController& c,double limit) {c.cfg_.max_api=limit;}
     static CollisionDetection::Ptr wideMap() {auto c=map();c->static_origin_=Eigen::Vector2d(-10,-10);c->static_map_resolution_=.025;c->static_map_inv_resolution_=40.;return c;}
     static void suffixCost(MpcController& c) {c.cfg_.horizon_steps=10;c.cfg_.w_steer=.5;c.cfg_.w_dapi=.7;c.cfg_.w_goal=10.;c.cfg_.goal_arrival_threshold=.2;}
@@ -171,6 +172,23 @@ static ConvexCorridor::Segment box(double xmin = -1.0, double xmax = 1.0,
     s.halfspaces = {{Eigen::Vector2d(1, 0), xmax}, {Eigen::Vector2d(-1, 0), -xmin},
                     {Eigen::Vector2d(0, 1), ymax}, {Eigen::Vector2d(0, -1), -ymin}};
     return s;
+}
+TEST(FootprintMpcRuntime, CaneOutsideCorridorRejectsAlthoughCenterFits) {
+    MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::footprint(c,true);
+    c.setCollision(StaticMpcTestAccess::map());c.setConvexCorridor({box(-1,.6)});
+    auto model=StaticMpcTestAccess::model();c.plan(model,Eigen::Vector3d(2,0,0));
+    EXPECT_FALSE(c.lastPlanValid());EXPECT_TRUE(c.getBestPath().empty());
+    c.setConvexCorridor({box()});c.plan(model,Eigen::Vector3d(2,0,0));EXPECT_TRUE(c.lastPlanValid());
+    EXPECT_EQ(c.getBestPath().size(),c.getBestYaws().size());EXPECT_EQ(c.getBestTimes().size(),c.getBestYaws().size());
+}
+TEST(FootprintMpcRuntime, CaneOnlyTimedCollisionAndExecutionAge) {
+    MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::footprint(c,true);
+    StaticMpcTestAccess::angleLimit(c,0.);c.setCollision(StaticMpcTestAccess::map());c.setConvexCorridor({box()});
+    const TimedPedestrianCollision::Polygon obstacle{{.7,.49},{.74,.49},{.74,.53},{.7,.53}};
+    ASSERT_TRUE(c.setTimedPedestrians({{obstacle,Eigen::Vector2d(0,-1)}},0.));
+    c.plan(StaticMpcTestAccess::model(),Eigen::Vector3d(2,0,0));ASSERT_TRUE(c.lastPlanValid());
+    EXPECT_FALSE(c.revalidateTimedPath(.5));EXPECT_FALSE(c.lastPlanValid());
+    EXPECT_TRUE(c.collisionWitness().valid);EXPECT_NEAR(c.collisionWitness().com.norm(),0.,1e-12);
 }
 
 static void expectExecutedPath(MpcController &c, const LFPC::Ptr &m,
@@ -480,6 +498,22 @@ TEST(TimedMpcRuntime, InvalidBindingFailsClosedAndExplicitAblationRestoresBaseli
     StaticMpcTestAccess::timedEnable(c,false);
     EXPECT_TRUE(c.setTimedPedestrians({movingBox(Eigen::Vector2d(0,0),Eigen::Vector2d::Zero())},0.));
     c.plan(m,Eigen::Vector3d(2,0,0));EXPECT_TRUE(c.lastPlanValid());
+}
+
+TEST(FootprintMpcRuntime, DISABLED_BenchmarkSameBudget) {
+    auto m=StaticMpcTestAccess::model();MpcController c;StaticMpcTestAccess::coldStartBudget(c);
+    c.setCollision(StaticMpcTestAccess::wideMap());c.setConvexCorridor({box(-9,9,-9,9)});
+    std::array<std::vector<double>,2> timings;
+    for(int repeat=0;repeat<55;++repeat)for(int mode=0;mode<2;++mode) {
+        StaticMpcTestAccess::footprint(c,mode);c.resetWarmStart();StaticMpcTestAccess::seed(c,0);
+        ASSERT_TRUE(c.setTimedPedestrians({movingBox(Eigen::Vector2d(6,6),Eigen::Vector2d(.1,0))},.1));
+        c.plan(m,Eigen::Vector3d(5,0,0));ASSERT_TRUE(c.lastPlanValid());
+        if(repeat>=5)timings[mode].push_back(c.lastPlanTimeMs());
+    }
+    for(int mode=0;mode<2;++mode) {
+        auto& t=timings[mode];std::sort(t.begin(),t.end());
+        std::cout<<"FOOTPRINT_BENCH enabled="<<mode<<" median_ms="<<t[t.size()/2]<<" p95_ms="<<t[47]<<std::endl;
+    }
 }
 
 // Opt-in measured benchmark; same seed and sample budget, no timing assertion.

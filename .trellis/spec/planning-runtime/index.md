@@ -12,6 +12,7 @@ This layer covers the C++ ROS nodes and libraries that implement mapping, planni
 | [ROS interfaces and configuration](./ros-interfaces-and-config.md) | Topics, timers, TF, parameters, launch files, and message contracts |
 | [Failure handling and diagnostics](./failure-logging.md) | Guard clauses, planner failures, TF/serial errors, and logging |
 | [Current-frame pedestrian corridor](./current-frame-pedestrian-corridor.md) | Planner-3 source validity, pure social hulls, whole-polygon FIRI exclusion and STOP limits |
+| [Directional footprints and adaptive corridors](./directional-footprint-corridor.md) | Current planner-3 geometry, whole human-cane poses, sampling and preview |
 | [LFPC timed collision](./lfpc-timed-collision.md) | Planner-3 CV prediction, actual LFPC sample times, SAT and execution-epoch revalidation |
 | [LFPC MPPI](./lfpc-mppi.md) | Planner-3 continuous steering sampling, weighted optimization, feasible fallback and diagnostics |
 | [Robust underactuated corridor](./robust-underactuated-corridor.md) | Bounded user-speed intervals, conservative timed occupancy, and same-sequence MPPI checks |

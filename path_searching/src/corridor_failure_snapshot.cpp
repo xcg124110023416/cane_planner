@@ -44,9 +44,12 @@ void optionalNumber(std::ostream& out, bool valid, double value) {
 void writeSnapshot(std::ostream& o,const C::Grid& g,const std::vector<Eigen::Vector2d>& p,
                    const C::Config& c,const C::Result& r) {
     o.imbue(std::locale::classic()); o << std::setprecision(17);
-    o << "CANE_CORRIDOR_FAILURE 2\nconfig " << c.local_radius << ' ' << c.clearance << ' '
+    o << "CANE_CORRIDOR_FAILURE 3\nconfig " << c.local_radius << ' ' << c.clearance << ' '
       << c.max_segment_length << ' ' << c.max_seconds
       << ' ' << c.iterations << ' ' << c.optimizer_iterations << ' ' << c.max_regions;
+    o << "\ngeometry " << c.adaptive_sampling << ' ' << c.root_yaw << ' ' << c.footprint.enabled
+      << ' ' << c.footprint.body_radius << ' ' << c.footprint.cane_length
+      << ' ' << c.footprint.front_radius << ' ' << c.footprint.margin;
     o << "\ngrid " << g.origin.x() << ' ' << g.origin.y() << ' ' << g.resolution << ' ' << g.width << ' ' << g.height;
     o << "\nblocked " << g.blocked.size() << '\n';
     // Full row-major byte mask, not obstacle centers or a resampled map.
@@ -126,7 +129,7 @@ bool readCorridorFailureSnapshot(const std::string& file,CorridorFailureSnapshot
         struct stat st;check(::stat(file.c_str(),&st)==0&&S_ISREG(st.st_mode)&&st.st_size<=64*1024*1024);
         std::ifstream in(file);in.imbue(std::locale::classic());check(bool(in));
         CorridorFailureSnapshot s;auto& c=s.config;auto& g=s.grid;auto& r=s.failure;auto& d=r.diagnostics;
-        token(in,"CANE_CORRIDOR_FAILURE");int version;in>>version;check(in&&(version==1||version==2));
+        token(in,"CANE_CORRIDOR_FAILURE");int version;in>>version;check(in&&(version>=1&&version<=3));
         token(in,"config");in>>c.local_radius>>c.clearance;
         if(version==1) {
             // Historical geometric-only progress/depth/area fields are consumed,
@@ -135,6 +138,11 @@ bool readCorridorFailureSnapshot(const std::string& file,CorridorFailureSnapshot
             check(in&&std::isfinite(progress)&&std::isfinite(depth)&&std::isfinite(area));
         } else in>>c.max_segment_length;
         in>>c.max_seconds>>c.iterations>>c.optimizer_iterations>>c.max_regions;check(bool(in));
+        if(version>=3) {
+            token(in,"geometry");in>>c.adaptive_sampling>>c.root_yaw>>c.footprint.enabled
+              >>c.footprint.body_radius>>c.footprint.cane_length>>c.footprint.front_radius>>c.footprint.margin;
+            check(in&&std::isfinite(c.root_yaw)&&HumanCaneFootprint::validConfig(c.footprint));
+        }
         token(in,"grid");in>>g.origin.x()>>g.origin.y()>>g.resolution>>g.width>>g.height;
         check(in&&g.width>0&&g.height>0&&g.width<=10000&&g.height<=10000&&size_t(g.width)*size_t(g.height)<=kMaxEntries);
         token(in,"blocked");size_t n;in>>n;check(in&&n==size_t(g.width)*size_t(g.height));g.blocked.resize(n);

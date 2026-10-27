@@ -1,10 +1,12 @@
 # Static FIRI corridor contract
 
+Current default sampling and whole-footprint details are in [directional-footprint-corridor.md](directional-footprint-corridor.md), approved 2026-10-27. Legacy edge mode remains for comparison and old snapshots.
+
 Planner 3 uses one ConvexCorridor generator with whole-cell grid input, normalized halfspaces and arbitrary polygon vertices. Do not restore rectangle width scanning or interpret occupied centers as zero-size obstacles.
 
 - Whole-cell exclusion requires one separating plane whose obstacle-side support includes every vertex of that convex cell.
 - Preserve selected backend semantics: global ESDF then static PCD via isStaticTraversable, otherwise local isTraversable. Do not add observed-FREE requirements, alter unknown policy or silently switch sources. Static known masks are inferred-model support, not observed-free proof. All current queries are floor-indexed XY bins; whole rejected bins are obstacles. Review this abstraction if interpolation is introduced. Out-of-domain remains excluded.
-- Preserve continuous original A* edges. Generate endpoint-protected segments, then prune backwards using earliest certified predecessors. A skipped span needs analytic halfspace clipping/interval-union coverage of every original edge and the existing positive-interior overlap witness. Final full-path coverage and all joins are rechecked within the global deadline. s0/s1 remain original seed metadata, not coverage certificates. No shortcut across uncovered path intervals; raw-generation region caps still apply.
+- Preserve continuous original A* edges. Default adaptive mode advances by continuous footprint coverage; legacy mode generates endpoint-protected segments and prunes backwards using earliest certified predecessors. A skipped span needs analytic halfspace clipping/interval-union coverage of every original edge and the existing positive-interior overlap witness. Final full-path coverage and all joins are rechecked within the global deadline. s0/s1 are metadata; always use independent analytic coverage certificates (adaptive mode records coverage extent, legacy mode original seed intervals). No shortcut across uncovered path intervals; raw-generation region caps still apply.
 - Rebase optimization/intersections and compute area after subtracting a vertex. Absolute-coordinate shoelace can falsely pass an impossible overlap threshold at large offsets.
 - Reject unsupported numerical scales; see ConvexCorridor::buildStatic. Geometric separation has no solver status. MVIE max-evaluation/time and other solver failures reject; only its existing ROUNDOFF_LIMITED exception may provide a candidate to the unchanged finite, positive-diagonal, containment and shrink certificates, never advertise solver success. Clear partial output on any failed certificate.
 - Geometric overlap is not a footprint/LFPC/dynamic guarantee. Iterative volume-seeking inflation is not global polygon-volume optimization.
@@ -13,9 +15,9 @@ Planner 3 uses one ConvexCorridor generator with whole-cell grid input, normaliz
 
 Required regressions include dense-vs-sparse straight paths, corners/S, cell-edge crossings, unknown/map edge, insufficient overlap, invalid/no-progress/budgets, solver failure, translated valid geometry, unattainable overlap threshold and rejected unsupported scales. Build plan_manage as well as the geometry library after interface changes.
 
-## Approved original-edge segment revision (2026-09-07)
+## Historical original-edge segment revision (2026-09-07; retained legacy mode)
 
-The runtime now walks original A* edges without shortcuts, subdividing at a configurable maximum segment length (default 1 m). Each restrictive solve protects both endpoints with the metric clearance norm included in its constraints; final normalized planes certify both endpoints and whole blocked cells. MVIE-only certified roundoff handling is unchanged.
+The legacy mode walks original A* edges without shortcuts, subdividing at a configurable maximum segment length (default 1 m). Each restrictive solve protects both endpoints with the metric clearance norm included in its constraints; final normalized planes certify both endpoints and whole blocked cells. MVIE-only certified roundoff handling is unchanged.
 
 The old min_progress, overlap_depth and overlap_area configuration is removed. Adjacent regions require a local-frame witness with at least 1e-6 m slack (100 times the 1e-8 m vertex feasibility tolerance), rather than a physical-sized disk or fixed area. A failed direct overlap inserts the same FIRI at the shared endpoint and checks both joins; failure clears all output. Connection regions count toward the global region/time budget. No footprint or LFPC guarantee follows.
 

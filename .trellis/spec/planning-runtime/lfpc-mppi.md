@@ -59,11 +59,14 @@ No penalty or safety guarantee is inferred from the Gaussian distribution.
 
 ## Feasibility, selection and execution
 
-One production rollout evaluator checks support-foot static traversability,
-every generated COM sample's static traversability and membership in the spatial
-union, plus timed pedestrian SAT at its actual future time. Root spatial/static/
-timed checks remain mandatory. A sequence must safely complete the horizon or
-reach the actual final goal through a fully checked step.
+One production rollout evaluator checks support-foot and every generated COM
+sample's static traversability. At each checked pose the complete configured
+human-cane envelope must fit in one common spatial region, with timed pedestrian
+SAT at its actual future time and torso yaw. Intermediate step-root turn poses
+are retained with their yaw/time for execution revalidation. Root spatial/static/
+timed checks remain mandatory. See [directional-footprint-corridor.md](./directional-footprint-corridor.md).
+A sequence must safely complete the horizon or reach the actual final goal
+through a fully checked step.
 
 The weighted mean must pass the same full rollout evaluator: a mean of feasible
 controls can collide with static obstacles, cross the gap in a nonconvex union,
@@ -125,9 +128,10 @@ seed, warm-start shifting, continuous cost reduction and exact sequence replay.
 Keep local-arrival suffix cost/full-horizon checks, true final termination,
 timed crossing/latency and real manager transaction/STOP/arrival tests.
 
-Measure with the opt-in same-budget benchmark documented in
-[lfpc-timed-collision.md](./lfpc-timed-collision.md). Full lightweight launch
-evidence and observed runtime limits belong in docs/LFPC_MPPI_VALIDATION.md.
+Measure the full-footprint overhead with the opt-in same-budget benchmark in
+docs/PLANNER3_CORRIDOR_USAGE.md. The earlier center/circle benchmark remains in
+[lfpc-timed-collision.md](./lfpc-timed-collision.md); historical lightweight launch
+evidence is recorded in docs/LFPC_MPPI_VALIDATION.md.
 Finite sampling can miss feasible routes. Fixed gait does not add waiting/speed
 actions. Current-frame FIRI does not reclaim future-vacated space. Sampled CV
 collision checks and jump-step simulation retain the timed-checker limitations;

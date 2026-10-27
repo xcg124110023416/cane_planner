@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <path_searching/timed_pedestrian_collision.h>
+#include <path_searching/human_cane_footprint.h>
 
 namespace cane_planner {
 using Checker = TimedPedestrianCollision;
@@ -60,6 +61,36 @@ TEST(TimedPedestrianCollision, CircumscribedRobotAndMultipleObstacles) {
         Eigen::Vector2d n(-e.y(),e.x());n.normalize();
         EXPECT_NEAR(.25,std::abs(n.dot(robot[i])),1e-12);
     }
+}
+TEST(TimedPedestrianCollision, CaneTipAndRotatingEnvelopeUseSameTime) {
+    HumanCaneFootprint::Config config;config.enabled=true;Checker c;
+    const auto footprint=HumanCaneFootprint::relative(config,0.);
+    ASSERT_TRUE(c.bind({{square(.72,0,.03),Eigen::Vector2d::Zero()}},footprint));
+    EXPECT_TRUE(c.intersects(Eigen::Vector2d::Zero(),0.,0.));
+    EXPECT_FALSE(c.intersects(Eigen::Vector2d::Zero(),0.,1.5707963267948966));
+    // Repeated yaw changes must rebuild supports, rather than reusing stale axes.
+    EXPECT_TRUE(c.intersects(Eigen::Vector2d::Zero(),0.,0.));
+    ASSERT_TRUE(c.bind({{square(.72,1,.03),Eigen::Vector2d(0,-1)}},footprint));
+    EXPECT_FALSE(c.intersects(Eigen::Vector2d::Zero(),0.,0.));
+    EXPECT_TRUE(c.intersects(Eigen::Vector2d::Zero(),1.,0.));
+    EXPECT_TRUE(c.intersects(Eigen::Vector2d::Zero(),1.,NAN));
+}
+TEST(HumanCaneFootprint, BothCompleteDisksRemainCoveredWhenRotated) {
+    HumanCaneFootprint::Config config;config.enabled=true;
+    for(double yaw:{0.,.4,1.57,-2.}) {
+        const auto hull=HumanCaneFootprint::relative(config,yaw);ASSERT_GE(hull.size(),8u);
+        for(int disk=0;disk<2;++disk)for(int j=0;j<720;++j) {
+            const double angle=j*3.14159265358979323846/360.;
+            const double r=(disk?config.front_radius:config.body_radius)+config.margin;
+            const Eigen::Vector2d p=r*Eigen::Vector2d(std::cos(angle),std::sin(angle))+
+                (disk?Eigen::Vector2d(config.cane_length*std::cos(yaw),config.cane_length*std::sin(yaw)):Eigen::Vector2d::Zero());
+            for(size_t i=0;i<hull.size();++i) {
+                const Eigen::Vector2d e=hull[(i+1)%hull.size()]-hull[i],d=p-hull[i];
+                EXPECT_GE(e.x()*d.y()-e.y()*d.x(),-1e-10);
+            }
+        }
+    }
+    config.cane_length=NAN;EXPECT_TRUE(HumanCaneFootprint::relative(config,0.).empty());
 }
 }
 int main(int argc,char** argv) {

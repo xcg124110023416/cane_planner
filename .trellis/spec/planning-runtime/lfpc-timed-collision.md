@@ -8,14 +8,14 @@ current-frame FIRI. No additional SFM solve, FIRI inflation, intent inference or
 polygon rasterization. CV occupancy at future relative time tau is
 `P0 + velocity * (execution_epoch - source_stamp + tau)`.
 
-The robot uses a fixed, circumscribed regular octagon enclosing a COM-centered
-circular radius (`mpc/timed_robot_radius`, default .25 m, finite positive). It is
-an engineering COM envelope, not a complete human/cane footprint certificate.
-Precompute SAT normals/support intervals from both convex polygons once per
-binding. Every query is scalar projections against cached intervals; contact is
-collision with 1e-9 m numerical tolerance. Invalid geometry/time fails closed.
-Empty/disabled source clears prediction. `mpc/timed_collision_enable` defaults true
-and provides an explicit ablation; it does not bypass source freshness or FIRI.
+The robot defaults to the rigid full human-cane envelope shared with FIRI and
+visualization (human_cane parameters). Rotate it by LFPC torso yaw at each queried
+pose; cache SAT normals/support intervals for that yaw. Same-yaw LFPC samples and
+execution queries reuse intervals. Contact is collision with 1e-9 m tolerance.
+Explicit human_cane/enabled=false retains the fixed circumscribed COM octagon for
+historical comparisons. Invalid geometry/time fails closed. The optional timed
+ablation does not bypass source freshness, spatial footprint checks or FIRI.
+See [directional-footprint-corridor.md](directional-footprint-corridor.md).
 
 LFPC records actual integration phases alongside COM samples. Copy/reset/prepare
 preserve or clear both arrays together. Keep existing `int(t_sup/delta_t)` behavior
@@ -23,8 +23,9 @@ preserve or clear both arrays together. Keep existing `int(t_sup/delta_t)` behav
 last sample or encode time in Z. Controller edges consider newly generated samples,
 subtract the incoming phase, and accumulate actual elapsed time through ancestry.
 Re-roll the selected sequence with identical point/time checks. Root time zero is
-also checked. Search/replay timestamps must agree; static/disabled steering and
-cost decisions remain unchanged.
+also checked. Full-footprint mode adds <=5-degree intermediate turn poses at each
+step root, at that root model time. Keep path/yaw/time arrays together through replay
+and actual execution-age recheck. Legacy point/circle mode retains original samples.
 
 ## Transaction and execution
 
@@ -39,7 +40,7 @@ continues. No retry, deadline widening, old-prediction fallback or moving output
 One bounded collision witness retains COM, future offset and source age at check.
 
 Current-frame FIRI remains mandatory, so newly vacated space is not reclaimed and
-waiting/speed actions are not added. This certifies only sampled model points
+waiting/speed actions are not added. This certifies only sampled configured rigid-envelope poses
 under CV; no continuous swept LIPM, acceleration/turning uncertainty or physical
 braking claim. Lightweight simulation still jumps whole LFPC steps at the FSM
 cadence rather than continuously executing model time. Do not claim wall-time

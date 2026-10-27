@@ -1,4 +1,18 @@
 <launch>
+    <!-- Planner-3 geometry, coverage-driven corridors and independent preview. -->
+    <arg name="convex_corridor_adaptive_sampling" default="true"/>
+    <arg name="convex_corridor_planning_length" default="8.0"/>
+    <arg name="convex_corridor_preview_enabled" default="true"/>
+    <arg name="convex_corridor_preview_length" default="20.0"/>
+    <arg name="convex_corridor_preview_period" default="0.5"/>
+    <arg name="human_cane_enabled" default="true"/>
+    <arg name="human_cane_body_radius" default="0.25"/>
+    <arg name="human_cane_cane_length" default="0.65"/>
+    <arg name="human_cane_front_radius" default="0.12"/>
+    <arg name="human_cane_margin" default="0.03"/>
+    <arg name="pedestrian_body_margin" default="0.03"/>
+    <arg name="pedestrian_social_radius" default="0.4"/>
+
     <arg name="odometry_topic" value = "/simulation_generator/odom"/>
     <arg name="mpc_timed_collision_enable" default="true"/>
     <arg name="mpc_timed_robot_radius" default="0.25"/>
@@ -60,6 +74,19 @@
     <!-- unified planner (A*/kinodynamic/MPC all via kin_replan_node FSM) -->
     <include file="$(find plan_manage)/launch/include/algorithm.launch">
         <arg name="planner" value="$(arg planner)"/>
+        <arg name="convex_corridor_adaptive_sampling" value="$(arg convex_corridor_adaptive_sampling)"/>
+        <arg name="convex_corridor_planning_length" value="$(arg convex_corridor_planning_length)"/>
+        <arg name="convex_corridor_preview_enabled" value="$(arg convex_corridor_preview_enabled)"/>
+        <arg name="convex_corridor_preview_length" value="$(arg convex_corridor_preview_length)"/>
+        <arg name="convex_corridor_preview_period" value="$(arg convex_corridor_preview_period)"/>
+        <arg name="human_cane_enabled" value="$(arg human_cane_enabled)"/>
+        <arg name="human_cane_body_radius" value="$(arg human_cane_body_radius)"/>
+        <arg name="human_cane_cane_length" value="$(arg human_cane_cane_length)"/>
+        <arg name="human_cane_front_radius" value="$(arg human_cane_front_radius)"/>
+        <arg name="human_cane_margin" value="$(arg human_cane_margin)"/>
+        <arg name="pedestrian_body_margin" value="$(arg pedestrian_body_margin)"/>
+        <arg name="pedestrian_social_radius" value="$(arg pedestrian_social_radius)"/>
+
         <arg name="mpc_timed_collision_enable" value="$(arg mpc_timed_collision_enable)"/>
         <arg name="mpc_timed_robot_radius" value="$(arg mpc_timed_robot_radius)"/>
         <arg name="use_pedestrians" value="$(arg use_pedestrians)"/>

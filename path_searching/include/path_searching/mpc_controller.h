@@ -50,6 +50,7 @@ public:
 
         bool timed_collision_enable = true;
         double timed_robot_radius = 0.25;
+        HumanCaneFootprint::Config footprint;
 
     };
 
@@ -113,10 +114,14 @@ public:
     const TimedPedestrianCollision& timedCollision() const { return timed_collision_; }
     double timedObservationAge() const { return timed_observation_age_; }
     const std::vector<double>& getBestTimes() const { return best_times_; }
+    const std::vector<double>& getBestYaws() const { return best_yaws_; }
+    const HumanCaneFootprint::Config& footprintConfig() const { return cfg_.footprint; }
+    HumanCaneFootprint::Polygon robotFootprintAt(const Eigen::Vector2d&,double yaw) const;
     struct CollisionWitness {
         bool valid = false;
         Eigen::Vector2d com = Eigen::Vector2d::Zero();
         double future_time = 0., observation_age = 0.;
+        double yaw = 0.;
     };
     const CollisionWitness& collisionWitness() const { return collision_witness_; }
 
@@ -149,6 +154,7 @@ private:
         double cost=std::numeric_limits<double>::infinity();
         std::vector<Eigen::Vector3d> path;
         std::vector<double> times;
+        std::vector<double> yaws;
     };
     OptimizationEvidence optimization_evidence_;
     ros::Publisher optimization_pub_;
@@ -165,17 +171,22 @@ private:
                             const Eigen::Vector3d& goal, const Eigen::Vector2d* final_goal,
                             double final_radius);
     bool advance(LFPC& state, double action, std::vector<Eigen::Vector3d>& path,
-                 double& elapsed, std::vector<double>* times = nullptr);
-    bool timedFree(const Eigen::Vector2d& com, double future_time, double age);
+                 double& elapsed, std::vector<double>* times = nullptr, std::vector<double>* yaws = nullptr);
+    bool spatialFree(const Eigen::Vector2d& com,double yaw);
+    HumanCaneFootprint::Polygon relativeFootprint(double yaw) const;
+    HumanCaneFootprint::Polygon footprint_local_;
+    bool timedFree(const Eigen::Vector2d& com, double future_time, double age,double yaw = 0.);
     TimedPedestrianCollision timed_collision_;
     bool timed_input_valid_ = true;
     double timed_observation_age_ = 0.;
     Eigen::Vector2d timed_root_ = Eigen::Vector2d::Zero();
+    double timed_root_yaw_ = 0.;
     CollisionWitness collision_witness_;
     double distanceToGoal(LFPC&,const Eigen::Vector3d&) const;
     // Best path from last plan
     std::vector<Eigen::Vector3d> best_path_;
     std::vector<double> best_times_;
+    std::vector<double> best_yaws_;
 
     // Timing
     double last_plan_time_ms_;

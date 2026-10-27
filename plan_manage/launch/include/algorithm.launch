@@ -1,4 +1,18 @@
 <launch>
+    <!-- Planner-3 geometry, coverage-driven corridors and independent preview. -->
+    <arg name="convex_corridor_adaptive_sampling" default="true"/>
+    <arg name="convex_corridor_planning_length" default="8.0"/>
+    <arg name="convex_corridor_preview_enabled" default="true"/>
+    <arg name="convex_corridor_preview_length" default="20.0"/>
+    <arg name="convex_corridor_preview_period" default="0.5"/>
+    <arg name="human_cane_enabled" default="true"/>
+    <arg name="human_cane_body_radius" default="0.25"/>
+    <arg name="human_cane_cane_length" default="0.65"/>
+    <arg name="human_cane_front_radius" default="0.12"/>
+    <arg name="human_cane_margin" default="0.03"/>
+    <arg name="pedestrian_body_margin" default="0.03"/>
+    <arg name="pedestrian_social_radius" default="0.4"/>
+
     <!-- topic -->
     <arg name="odometry_topic"/>
     <arg name="odometry_world"/>
@@ -359,6 +373,19 @@
         <!-- Planner 3 mandatory static A* corridor; sampling follows map backend resolution. -->
         <param name="convex_corridor/local_radius" value="$(arg convex_corridor_local_radius)" type="double"/>
         <param name="convex_corridor/max_segment_length" value="$(arg convex_corridor_max_segment_length)" type="double"/>
+        <param if="$(eval arg('planner') == 3)" name="convex_corridor/adaptive_sampling" value="$(arg convex_corridor_adaptive_sampling)" type="bool"/>
+        <param if="$(eval arg('planner') == 3)" name="convex_corridor/planning_length" value="$(arg convex_corridor_planning_length)" type="double"/>
+        <param if="$(eval arg('planner') == 3)" name="convex_corridor/preview_enabled" value="$(arg convex_corridor_preview_enabled)" type="bool"/>
+        <param if="$(eval arg('planner') == 3)" name="convex_corridor/preview_length" value="$(arg convex_corridor_preview_length)" type="double"/>
+        <param if="$(eval arg('planner') == 3)" name="convex_corridor/preview_period" value="$(arg convex_corridor_preview_period)" type="double"/>
+        <param if="$(eval arg('planner') == 3)" name="human_cane/enabled" value="$(arg human_cane_enabled)" type="bool"/>
+        <param if="$(eval arg('planner') == 3)" name="human_cane/body_radius" value="$(arg human_cane_body_radius)" type="double"/>
+        <param if="$(eval arg('planner') == 3)" name="human_cane/cane_length" value="$(arg human_cane_cane_length)" type="double"/>
+        <param if="$(eval arg('planner') == 3)" name="human_cane/front_radius" value="$(arg human_cane_front_radius)" type="double"/>
+        <param if="$(eval arg('planner') == 3)" name="human_cane/margin" value="$(arg human_cane_margin)" type="double"/>
+        <param if="$(eval arg('planner') == 3)" name="pedestrian/body_margin" value="$(arg pedestrian_body_margin)" type="double"/>
+        <param if="$(eval arg('planner') == 3)" name="pedestrian/safety_radius" value="$(arg pedestrian_social_radius)" type="double"/>
+
 
         <!-- kinematic MPPI baseline (planner=4): same risk/goal/static costs, unicycle rollout. -->
         <!-- Match planner=3 timing: 10 control steps, each LFPC support duration 0.35s. -->

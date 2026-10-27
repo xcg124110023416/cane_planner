@@ -14,7 +14,8 @@ public:
         Eigen::Vector2d full_size = Eigen::Vector2d::Zero(); // world-axis enclosing box, m
     };
     struct Config {
-        double safety_radius = .4;       // m; raised to physical enclosing radius
+        double safety_radius = .4;       // social keypoint radius, independent of body margin
+        double body_margin = .03;        // independent hard physical padding, m
         double wall_gain = 1., system_gain = 1.; // m/s^2
         double decay_length = .5;        // m
         double fov_amplification = 2.;   // dimensionless, +/-110 degrees
@@ -27,7 +28,7 @@ public:
     struct Result {
         bool valid = false;
         std::string reason;
-        Polygon body, hull;
+        Polygon body, social, hull;
         Eigen::Vector2d force = Eigen::Vector2d::Zero();
     };
     static bool validConfig(const Config&);

@@ -1,5 +1,7 @@
 # LFPC 连续转向 MPPI：实现与验证
 
+> 此记录保留 MPPI 初版的中心点/圆包络实验。2026-10-27 的完整人杖及自适应走廊改动与新性能见 [使用说明](PLANNER3_CORRIDOR_USAGE.md)。
+
 2026-10-27，分支 `mpc-lfpc-prototype`，替换基线 `80f8ab2` 的 beam 控制器。
 本次保留 A*、当前帧 FIRI、LFPC 模型、时间同步行人 SAT 及管理器执行前复查。
 

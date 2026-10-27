@@ -9,10 +9,10 @@ double cross(const V& a,const V& b) { return a.x()*b.y()-a.y()*b.x(); }
 constexpr double pi = 3.14159265358979323846;
 }
 bool PedestrianPolygon::validConfig(const Config& c) {
-    for(double x:{c.safety_radius,c.wall_gain,c.system_gain,c.decay_length,c.fov_amplification,
+    for(double x:{c.safety_radius,c.body_margin,c.wall_gain,c.system_gain,c.decay_length,c.fov_amplification,
                   c.alpha,c.max_force,c.max_extension,c.influence_distance,c.max_seconds})
         if(!std::isfinite(x))return false;
-    return c.safety_radius>=.01 && c.safety_radius<=2. && c.wall_gain>=0 && c.wall_gain<=20 &&
+    return c.safety_radius>=.01 && c.safety_radius<=2. && c.body_margin>=0 && c.body_margin<=.5 && c.wall_gain>=0 && c.wall_gain<=20 &&
         c.system_gain>=0 && c.system_gain<=20 && c.decay_length>=.01 && c.decay_length<=5 &&
         c.fov_amplification>=1 && c.fov_amplification<=10 && c.alpha>=0 && c.alpha<=5 &&
         c.max_force>0 && c.max_force<=20 && c.max_extension>=0 && c.max_extension<=5 &&
@@ -41,16 +41,19 @@ PedestrianPolygon::Result PedestrianPolygon::fromForce(const Observation&o,const
     if(r.force.norm()>c.max_force)r.force*=c.max_force/r.force.norm();
     const V half=o.full_size*.5;
     for(const V& p:{V(-half.x(),-half.y()),V(half.x(),-half.y()),V(half.x(),half.y()),V(-half.x(),half.y())})r.body.push_back(o.position+p);
-    Polygon points=r.body;
-    const double ds=std::max(c.safety_radius,half.norm());
-    // Circumscribed regular octagon contains the ENTIRE safety disk, including
-    // the physical rectangle. No inscribed polygon masquerading as disk coverage.
-    const double radius=ds/std::cos(pi/8.);
-    for(int i=0;i<8;++i)points.push_back(o.position+radius*V(std::cos(i*pi/4.),std::sin(i*pi/4.)));
+    Polygon points;
+    for(const auto& p:r.body) {
+        const V sign=(p-o.position).cwiseSign();
+        points.push_back(p+c.body_margin*sign);
+    }
+    const double ds=c.safety_radius;
     if(o.velocity.norm()>1e-6) {
         const double heading=std::atan2(o.velocity.y(),o.velocity.x());
-        for(double angle:{heading-110*pi/180.,heading+110*pi/180.})points.push_back(o.position+ds*V(std::cos(angle),std::sin(angle)));
-        if(r.force.norm()>1e-9)points.push_back(o.position+(ds+std::min(c.max_extension,c.alpha*r.force.norm()))*r.force.normalized());
+        for(double angle:{heading+110*pi/180.,heading-110*pi/180.})r.social.push_back(o.position+ds*V(std::cos(angle),std::sin(angle)));
+        const V direction=r.force.norm()>1e-9?V(r.force.normalized()):V(o.velocity.normalized());
+        r.social.push_back(o.position+(ds+std::min(c.max_extension,c.alpha*r.force.norm()))*direction);
+        r.social=convexHull(std::move(r.social));
+        points.insert(points.end(),r.social.begin(),r.social.end());
     }
     r.hull=convexHull(std::move(points));
     r.valid=r.hull.size()>=3 && ConvexCorridor::polygonArea(r.hull)>0;

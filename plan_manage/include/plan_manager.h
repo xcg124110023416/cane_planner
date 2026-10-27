@@ -6,6 +6,7 @@
 #include <vector>
 #include <mutex>
 #include <array>
+#include <future>
 #include <std_msgs/Float64MultiArray.h>
 #include <cstdint>
 #ifdef CANE_MANAGER_INTERLEAVING_TEST
@@ -78,6 +79,22 @@ namespace cane_planner
         unique_ptr<ConvexCorridor> convex_corridor_;
         CorridorFailureCapture corridor_failure_capture_;
         std::string corridor_failure_directory_;
+        double corridor_planning_length_ = 8., corridor_preview_length_ = 20.;
+        bool corridor_preview_enabled_ = false;
+        double corridor_preview_period_ = .5;
+        ros::Time corridor_preview_started_;
+        uint64_t corridor_preview_revision_ = 0;
+        struct CorridorPreview {
+            ConvexCorridor::Result result;
+            ros::Time stamp,receipt;
+            uint64_t revision=0;
+            bool dynamic=false;
+        };
+        std::future<CorridorPreview> corridor_preview_job_;
+        ros::Publisher corridor_preview_pub_,human_cane_pub_;
+        void updateCorridorPreviewLocked(const Eigen::Vector3d& pose,bool active_valid);
+        void publishCorridorPreviewLocked(const CorridorPreview* preview);
+        void publishHumanCaneLocked(const Eigen::Vector3d& pose,bool show_plan);
         BsplineOptimizer::Ptr bspline_optimizers_;
         NonUniformBspline::Ptr bspline_init_;
 

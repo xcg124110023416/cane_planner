@@ -53,6 +53,7 @@ class SimOdomTestAccess
 public:
     static void setup(PlannerManager& m, ros::NodeHandle& nh)
     {
+        nh.setParam("human_cane/enabled",false); // historical point/circle transaction fixtures
         m.initial_route_active_ = true; // existing step fixtures model an already activated route
         m.simulation_ = true;
         m.gazebo_sim_ = false;
@@ -158,6 +159,24 @@ public:
     static MpcController& controller(PlannerManager&m) {return *m.mpc_controller_;}
     static void smallPedestrian(PlannerManager&m) {m.pedestrian_config_.safety_radius=.1;m.pedestrian_config_.alpha=0.;}
     static bool planValid(PlannerManager&m) {return m.mpc_controller_->lastPlanValid();}
+    static void fullGeometrySetup(PlannerManager& m,ros::NodeHandle& nh) {
+        dynamicSetup(m);recoverySetup(m,nh);m.pedestrians_enabled_=false;
+        nh.setParam("human_cane/enabled",true);m.mpc_controller_->setParam(nh);m.mpc_controller_->init();
+        auto config=m.convex_corridor_->getConfig();config.adaptive_sampling=true;m.convex_corridor_->setConfig(config);
+        m.corridor_planning_length_=2.;m.corridor_preview_length_=8.;m.corridor_preview_enabled_=true;
+        m.global_waypoints_={Eigen::Vector2d(0,0),Eigen::Vector2d(2,0),Eigen::Vector2d(4,0),Eigen::Vector2d(8,0)};
+        m.end_pt_=Eigen::Vector2d(8,0);m.mpc_sim_goal_=Eigen::Vector3d(3,0,0);
+        m.corridor_preview_pub_=nh.advertise<visualization_msgs::MarkerArray>("preview",20);
+        m.human_cane_pub_=nh.advertise<visualization_msgs::MarkerArray>("human_cane",20);
+    }
+    static void preview(PlannerManager& m,bool valid=true) {
+        std::lock_guard<std::mutex> lock(m.dynObsMutex_);
+        auto pose=m.lfpc_model_->getCOMPos();pose.z()=m.lfpc_model_->getNextIterState()(2);
+        m.updateCorridorPreviewLocked(pose,valid);
+    }
+    static auto humanShape(PlannerManager& m) {
+        return m.mpc_controller_->robotFootprintAt(m.lfpc_model_->getCOMPos().head<2>(),m.lfpc_model_->getNextIterState()(2));
+    }
     static void receive(PlannerManager& m,const onboard_detector::DynamicObstacles::Ptr& msg) {m.dynamicObstaclesCallback(msg);}
     static ConvexCorridor::Result corridor(PlannerManager&m) {
         std::lock_guard<std::mutex> lock(m.dynObsMutex_);
@@ -296,6 +315,44 @@ protected:
         ASSERT_EQ(count, odom_.size());
     }
 };
+
+TEST_F(SimOdomTest, DistantPreviewFailureCannotStopOrReplaceActivePlan) {
+    ros::Time::setNow(ros::Time(100.));SimOdomTestAccess::fullGeometrySetup(manager_,nh_);
+    SimOdomTestAccess::block(manager_,Eigen::Vector2d(6,0));
+    std::vector<visualization_msgs::MarkerArray> previews,humans;
+    auto preview=nh_.subscribe<visualization_msgs::MarkerArray>("preview",20,[&](const visualization_msgs::MarkerArray::ConstPtr& m){previews.push_back(*m);});
+    auto human=nh_.subscribe<visualization_msgs::MarkerArray>("human_cane",20,[&](const visualization_msgs::MarkerArray::ConstPtr& m){humans.push_back(*m);});
+    const auto connected=ros::WallTime::now()+ros::WallDuration(2.);
+    while((preview.getNumPublishers()==0 || human.getNumPublishers()==0) && ros::WallTime::now()<connected) {ros::spinOnce();ros::WallDuration(.005).sleep();}
+    const auto route=SimOdomTestAccess::route(manager_);
+    std::atomic<bool> done{false};
+    std::thread clock([&]{double t=100.;while(!done){t+=.001;ros::Time::setNow(ros::Time(t));ros::WallDuration(.002).sleep();}});
+    const bool finished=SimOdomTestAccess::step(manager_);done=true;clock.join();
+    EXPECT_FALSE(finished);waitForDecision(1,false);ASSERT_TRUE(SimOdomTestAccess::planValid(manager_));
+    const auto held=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
+    const auto end=ros::WallTime::now()+ros::WallDuration(2.);bool blocked=false;
+    while(!blocked && ros::WallTime::now()<end) {
+        SimOdomTestAccess::preview(manager_);ros::spinOnce();ros::WallDuration(.005).sleep();
+        for(const auto& frame:previews)for(const auto& marker:frame.markers)
+            blocked=blocked || marker.text.find("Preview blocked")!=std::string::npos;
+    }
+    EXPECT_TRUE(blocked);EXPECT_EQ(route,SimOdomTestAccess::route(manager_));
+    EXPECT_EQ(held,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
+    ASSERT_FALSE(humans.empty());const auto expected=SimOdomTestAccess::humanShape(manager_);bool found=false;
+    for(const auto& marker:humans.back().markers)if(marker.ns=="human_cane_current") {
+        found=true;ASSERT_EQ(expected.size()+1,marker.points.size());
+        for(size_t i=0;i<expected.size();++i){EXPECT_DOUBLE_EQ(expected[i].x(),marker.points[i].x);EXPECT_DOUBLE_EQ(expected[i].y(),marker.points[i].y);}
+    }
+    EXPECT_TRUE(found);
+    // A malformed callback must clear the preview immediately, before the next
+    // planning cycle, and invalidate any outstanding copied-input result.
+    SimOdomTestAccess::enabled(manager_,true);
+    onboard_detector::DynamicObstacles::Ptr malformed(new onboard_detector::DynamicObstacles);
+    malformed->header.frame_id="world";malformed->header.stamp=ros::Time::now();malformed->num=2;
+    SimOdomTestAccess::receive(manager_,malformed);ros::WallDuration(.03).sleep();ros::spinOnce();
+    ASSERT_FALSE(previews.empty());ASSERT_EQ(1u,previews.back().markers.size());
+    EXPECT_EQ(visualization_msgs::Marker::DELETEALL,previews.back().markers.front().action);
+}
 
 TEST_F(SimOdomTest, RepeatedRealStopPublishesFrozenPoseAndZeroTwist)
 {

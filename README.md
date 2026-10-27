@@ -38,9 +38,9 @@ flowchart LR
 ```
 
 1. **全局参考。** 保留 A* 输出的全部折线顶点，统一用于局部目标选择、投影跟踪、走廊生成和可视化；planner 3 不对它做稀疏航点抽取或圆角平滑。
-2. **空间走廊。** FIRI 沿局部参考路径生成相邻凸区域，排除完整静态障碍栅格。启用行人后，将当前观测构造为凸多边形，用同一套 FIRI 分离约束排除。
+2. **空间走廊。** FIRI 默认根据当前区域对原始路径的连续覆盖范围推进，排除完整静态栅格与行人凸包，为整个人杖外形预留空间。规划长度默认 8 m，远处预览默认 20 m，两者独立。
 3. **转向优化。** 默认预测 10 步，每轮采样 256 条连续转向序列、迭代 2 轮，逐步相对转角限于 `±30°`。在上次解移位后的序列附近施加高斯扰动，按可行序列的代价做指数加权，更新整条序列。步长与步宽固定。
-4. **轨迹检查与执行。** 检查落脚点的静态可通行性，以及每个质心采样点的静态碰撞和走廊并集包含关系。启用行人时，另按每个采样点的未来时间，检查机器人包络与匀速预测行人凸包是否相交。选中序列从原始完整 LFPC 状态重新推演，执行前按最新时间原点复查，通过后只执行第一步。
+4. **轨迹检查与执行。** 检查落脚点的静态可通行性，以及每个质心采样点的静态碰撞；每个检查姿态的完整人杖包络须包含在某一块凸区域中。启用行人时，另按每个采样点的未来时间，检查机器人包络与匀速预测行人凸包是否相交。选中序列从原始完整 LFPC 状态重新推演，执行前按最新时间原点复查，通过后只执行第一步。
 5. **动态路径恢复。** 行人多边形阻断参考路径时，尝试将同一多边形作为临时硬障碍重新跑 A*。新路径须通过走廊重建及观测时效检查，才会替换当前参考。
 6. **失败处理。** 加权序列也必须重新通过完整约束检查。若加权结果不可行，保留本轮已验证的可行候选继续迭代；所有加权更新都失败时使用本轮最佳可行候选。无有效走廊、无可行序列或行人数据无效时，发布 STOP 建议；轻量仿真保持 LFPC 状态并发布静止里程计，Gazebo 输出零速度。
 
@@ -52,7 +52,7 @@ flowchart LR
 - 当前 planner 3 支持每帧 **零或一个行人**。新鲜空帧有效；超过一个行人、数组不匹配、非有限数值、无效时间戳或缺失 TF 均视为输入无效。
 - 规划坐标系为 `world`。外部观测按原始时间戳变换；默认最大观测与接收时效均为 **0.5 s**，计算结束、执行前仍需检查。
 - 行人约束包括**当前帧 FIRI 空间约束 + LFPC 时间同步凸包碰撞检查**。未来凸包按观测速度匀速平移，现有空间走廊仍为必需约束。历史时空走廊与多速度区间鲁棒设计没有接入。
-- 动态检查使用离散质心点及质心周围的八边形包络；尚不覆盖采样间连续运动、完整人杖外形、行人加速度或转向。有限 MPPI 采样没有找到可行序列，不等于证明不存在可行路径。
+- 默认使用随 LFPC 躯干朝向旋转的完整人杖刚性包络，保留离散姿态与中间转角检查；尚不覆盖采样间连续运动、手杖独立摆动、行人加速度或转向。有限 MPPI 采样没有找到可行序列，不等于证明不存在可行路径。
 
 ### LFPC 时间同步避障
 
@@ -63,15 +63,17 @@ Pᵢ = P₀ + v × [(执行时间原点 − 观测时间戳) + τᵢ]
 拒绝条件：机器人包络(qᵢ) 与 Pᵢ 相交或接触
 ```
 
-`τᵢ` 来自 LFPC 实际积分时刻并跨步累积，Z 坐标仍是高度。保留原有采样截断规则，因此不能用“第几步 × 0.35 s”替代真实采样时间。机器人包络为外切八边形，完整覆盖默认半径 **0.25 m** 的质心圆盘；行人凸包保留原有身体尺寸和社会安全区。使用缓存分离轴（SAT）判断相交，不在搜索内部重复求 FIRI 或社会力。
+`τᵢ` 来自 LFPC 实际积分时刻并跨步累积，Z 坐标仍是高度。保留原有采样截断规则，因此不能用“第几步 × 0.35 s”替代真实采样时间。机器人包络默认覆盖人体圆盘和前方手杖圆盘，并随预测朝向旋转；行人凸包由带独立余量的身体矩形与方向性社会三角形组合。使用按朝向缓存的分离轴（SAT）判断相交，不在搜索内部重复求 FIRI 或社会力。
 
 搜索、选中序列重演、执行前复查使用同一份观测。执行前复查会补偿规划耗时；复查失败发布 `TIMED_EXECUTION_COLLISION`，轻量仿真不推进 LFPC。原有 0.5 s 观测／接收时效限制不变。
 
-原启动命令会默认启用该功能；可追加 `mpc_timed_collision_enable:=false` 做消融，或用 `mpc_timed_robot_radius:=0.25` 调整包络。RViz 新增 **MPC_TimedCollision**：同色机器人轮廓与行人凸包对应同一未来时刻，颜色由青到紫，文字标注 `+τ s`；STOP 时红色 `Rejected` 表示一个被拒绝的碰撞样本。最多显示十组安全预测，完整采样通过 `/mpc/timed_best_path` 输出，各 `PoseStamped.header.stamp` 为时间原点加 `τᵢ`。
+原启动命令会默认启用该功能；可追加 `mpc_timed_collision_enable:=false` 做消融，完整人杖尺寸通过 `human_cane_*` 启动参数调整，`mpc_timed_robot_radius` 仅在关闭完整人杖模型的对照模式中生效。RViz 新增 **MPC_TimedCollision**：同色机器人轮廓与行人凸包对应同一未来时刻，颜色由青到紫，文字标注 `+τ s`；STOP 时红色 `Rejected` 表示一个被拒绝的碰撞样本。最多显示十组安全预测，完整采样通过 `/mpc/timed_best_path` 输出，各 `PoseStamped.header.stamp` 为时间原点加 `τᵢ`。
 
 当前 MPPI 的测试、性能与运行证据见 [MPPI 验证记录](docs/LFPC_MPPI_VALIDATION.md)；[时间碰撞检查初版记录](docs/LFPC_TIMED_COLLISION_VALIDATION.md) 保留原 beam 版本的历史结果。
 
 该检查叠加在现有当前帧空间走廊上，所以暂不利用“行人将来离开、机器人稍后再经过”的空间。轻量仿真仍按 FSM 周期整步更新位置，**不连续播放 LFPC 支撑相**；上述时间是预测模型时间，不能据此声称已完成真实执行速度同步或连续运动验证。
+
+具体显示颜色、范围与尺寸调整见 [走廊使用说明](docs/PLANNER3_CORRIDOR_USAGE.md)。
 
 ## 编译
 
@@ -211,7 +213,7 @@ roslaunch plan_manage kin_replan.launch planner:=2
 | `mpc/max_api` | `π/6 rad` | 每步相对转角上限，约 30° |
 | `mpc/random_seed` | `0` | 初始化随机种子；运行中不逐周期重新播种 |
 | `mpc/timed_collision_enable` | `true` | 行人未来凸包与机器人包络的时间同步 SAT 硬检查；关闭用于消融 |
-| `mpc/timed_robot_radius` | `0.25 m` | 质心包络内切圆半径，须为有限正数 |
+| `mpc/timed_robot_radius` | `0.25 m` | 关闭完整人杖时的质心包络半径 |
 | `mpc/nominal_al` | `0.40 m` | 固定步长参数，由 launch 参数 `user_step_length` 提供 |
 | `mpc/nominal_aw` | `0.0 m` | 固定步宽参数 |
 | `lfpc/t_sup` | `0.35 s` | 单支撑相持续时间 |
@@ -221,7 +223,12 @@ roslaunch plan_manage kin_replan.launch planner:=2
 | `mpc/w_dapi` | `0.2` | 相邻步转角变化代价权重 |
 | `manager/lookahead_dist` | `3.0 m` | 沿全局参考选择局部目标的前瞻距离 |
 | `convex_corridor/local_radius` | `3.0 m` | 走廊局部地图查询与扩展范围参数 |
-| `convex_corridor/max_segment_length` | `1.0 m` | 原始参考边的最大分段长度 |
+| `convex_corridor/max_segment_length` | `1.0 m` | 自适应模式的前向保护长度上限；旧模式的最大分段长度 |
+| `convex_corridor/adaptive_sampling` | `true` | 根据连续覆盖范围推进生成位置 |
+| `convex_corridor/planning_length` | `8.0 m` | 实际规划参考长度 |
+| `convex_corridor/preview_length` | `20.0 m` | 远处预览长度，0 为剩余整条路线 |
+| `human_cane/enabled` | `true` | 完整人杖刚性包络 |
+| `human_cane/body_radius`、`cane_length`、`front_radius`、`margin` | `0.25/0.65/0.12/0.03 m` | 人体半径、前伸距离、前端半径和余量 |
 | `astar/w_clearance` | `1.0` | A* 离障碍距离的软偏好权重 |
 | `astar/clearance_sigma` | `0.8 m` | A* 偏好的额外离障碍距离范围 |
 
@@ -237,6 +244,8 @@ planner 3 始终固定步长、步宽，只优化转角；`sigma_al`、`sigma_aw
 | `/onboard_detector/dynamic_obstacles_info` | `onboard_detector/DynamicObstacles` | 行人位置、速度、完整尺寸及观测头信息 |
 | `/astar/path` | `nav_msgs/Path` | 全局参考路径 |
 | `/mpc/convex_corridor` | `visualization_msgs/MarkerArray` | FIRI 走廊及 planner 3 行人多边形可视化 |
+| `/mpc/corridor_preview` | `visualization_msgs/MarkerArray` | 浅色远处预览，不能授权运动或触发 STOP |
+| `/mpc/human_cane` | `visualization_msgs/MarkerArray` | 当前及选中轨迹上的完整人杖外形 |
 | `/mpc/convex_corridor_debug` | `std_msgs/String` | 走廊可行性、失败原因和路径恢复诊断 |
 | `/mpc/best_traj` | `visualization_msgs/Marker` | 当前选中的预测轨迹 |
 | `/mpc/timed_best_path` | `nav_msgs/Path` | 带未来时间戳的选中轨迹；无有效动态预测时为空 |
