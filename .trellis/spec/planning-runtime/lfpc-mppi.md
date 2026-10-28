@@ -35,13 +35,18 @@ regression; do not repair sampling failure by shortening the checked horizon or
 relaxing geometry. This evidence is scenario-specific, not completeness.
 
 First proposal is the prior selected sequence shifted one action, with zero
-tail; without a warm start use zeros. Revalidate every proposal on the current
+tail. Without a retained sequence the manager seeds steering from a copied LFPC
+following the current reference, advancing its projection along the polyline;
+standalone unseeded calls use zeros. Seeding preserves a retained warm start and
+never changes the actual LFPC. Revalidate every proposal on the current
 state, corridor and observation. Seed the RNG once at initialization; reset
 does not silently reseed it. Identical seed and identical calls/inputs reproduce
 the samples on the same toolchain; live sensor timing may differ between runs.
 
 Each iteration reserves slot 0 for the proposal and slot 1 for this cycle's
-best verified candidate, or the proposal if none. Remaining slots are paired
+best verified candidate, or zero steering if none. This straight anchor retains
+a simple alternative when the geometric seed turns poorly; it uses the same
+budget and receives the same checks. Remaining slots are paired
 positive/negative Gaussian perturbations around the proposal, clipped to bounds.
 K<3 has no random exploration. Samples are full control sequences, not branches
 of a quantized tree. Unsafe/nonfinite rollouts have infinite cost and zero weight.
@@ -75,6 +80,9 @@ If valid, it becomes the next proposal. Retain the lowest-cost initial feasible
 proposal / feasible weighted iterate as the optimized candidate. Separately
 retain the best verified sample or weighted iterate from this planning cycle.
 On weighted failure, use that current-cycle candidate as the next proposal.
+For a newly repaired reference the manager resets the old warm start and calls
+seedReference again. The geometric proposal receives the same full rollout checks;
+it never certifies safety or mutates the actual model.
 
 If at least one weighted update is valid, select the optimized candidate;
 otherwise select the current-cycle best verified fallback. This preserves
@@ -133,6 +141,8 @@ docs/PLANNER3_CORRIDOR_USAGE.md. The earlier center/circle benchmark remains in
 [lfpc-timed-collision.md](./lfpc-timed-collision.md); historical lightweight launch
 evidence is recorded in docs/LFPC_MPPI_VALIDATION.md.
 Finite sampling can miss feasible routes. Fixed gait does not add waiting/speed
-actions. Current-frame FIRI does not reclaim future-vacated space. Sampled CV
+actions. Default static FIRI permits evaluation of future-vacated space under timed SAT.
+A failed timed plan may request one local A* repair; see
+[time-triggered-local-repair.md](time-triggered-local-repair.md). Sampled CV
 collision checks and jump-step simulation retain the timed-checker limitations;
 no continuous-motion, physical-braking or real-hardware tracking claim.

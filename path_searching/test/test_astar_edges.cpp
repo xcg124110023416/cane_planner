@@ -2,6 +2,7 @@
 #include <path_searching/astar.h>
 #include <iomanip>
 #include <path_searching/corridor_failure_snapshot.h>
+#include <path_searching/timed_pedestrian_collision.h>
 #include <chrono>
 #ifndef ASTAR_EDGE_FIXTURE_DIR
 #define ASTAR_EDGE_FIXTURE_DIR "path_searching/test/fixtures/corridor_failures/"
@@ -273,6 +274,52 @@ TEST(AstarRecovery, WholePolygonCrossingTangencyAndContainment) {
     EXPECT_FALSE(Astar::polygonEdgeFree({-.5,-.001},{1.5,-.001},p,.002));
     EXPECT_TRUE(Astar::polygonEdgeFree({-.5,-.002},{1.5,-.002},p,.002));
     EXPECT_FALSE(Astar::validRecoveryPolygon({{0,0},{0,1},{1,0}}));
+}
+TEST(AstarLocalRecovery, FullFootprintDetourPreservesSuffixAndBuildsCorridor) {
+    ConvexCorridor::Grid g;g.origin={-5,-5};g.resolution=.1;g.width=g.height=180;
+    g.blocked.assign(g.width*g.height,0);Astar a;AstarEdgeTestAccess::init(a,g);
+    HumanCaneFootprint::Config footprint;footprint.enabled=true;
+    const std::vector<Eigen::Vector2d> route{{-2,0},{-1,0},{0,0},{1,0},{2,0},{3,0},{4,0},{5,0},{6,0},{7,.2},{8,.4}};
+    const std::vector<Eigen::Vector2d> obstacle{{2.7,-.3},{3.3,-.3},{3.3,.3},{2.7,.3}};
+    const auto r=a.repairLocalReference(route,obstacle,footprint,0.,
+        std::chrono::steady_clock::now()+std::chrono::seconds(2));
+    ASSERT_EQ(Astar::RecoveryStatus::FOUND,r.status)<<r.seconds;
+    EXPECT_EQ(route.front(),r.path.front());EXPECT_EQ(route.back(),r.path.back());
+    ASSERT_GT(r.repair_begin,0u);
+    EXPECT_TRUE(std::equal(route.begin(),route.begin()+r.repair_begin,r.path.begin()));
+    ASSERT_LT(r.repair_end,route.size()-1);
+    const size_t suffix=route.size()-r.repair_end;
+    EXPECT_TRUE(std::equal(route.end()-suffix,route.end(),r.path.end()-suffix));
+    TimedPedestrianCollision checker;
+    ASSERT_TRUE(checker.bind({{obstacle,Eigen::Vector2d::Zero()}},HumanCaneFootprint::relative(footprint,0.)));
+    double previous_yaw=0.;
+    for(size_t i=1;i<r.path.size();++i) {
+        const Eigen::Vector2d d=r.path[i]-r.path[i-1];const double yaw=std::atan2(d.y(),d.x());
+        const double turn=std::atan2(std::sin(yaw-previous_yaw),std::cos(yaw-previous_yaw));
+        const int rotations=std::max(1,int(std::ceil(std::abs(turn)/.05)));
+        for(int k=0;k<=rotations;++k)EXPECT_FALSE(checker.intersects(r.path[i-1],0.,previous_yaw+turn*k/rotations));
+        const int steps=std::max(1,int(std::ceil(d.norm()/.02)));
+        for(int k=0;k<=steps;++k)EXPECT_FALSE(checker.intersects(r.path[i-1]+d*double(k)/steps,0.,yaw));
+        previous_yaw=yaw;
+    }
+    ConvexCorridor generator;auto config=generator.getConfig();config.footprint=footprint;config.adaptive_sampling=true;
+    generator.setConfig(config);const auto corridor=generator.buildStatic(r.path,g,{obstacle});
+    EXPECT_TRUE(corridor.feasible)<<ConvexCorridor::failureReasonName(corridor.failure_reason);
+    std::cout<<"LOCAL_RECOVERY seconds="<<r.seconds<<" expanded="<<r.profile.expanded<<" interval="<<r.repair_begin<<":"<<r.repair_end<<std::endl;
+}
+TEST(AstarLocalRecovery, RootBodyBlockClosedPassageAndDeadlineFailClosed) {
+    auto g=passage(.1,1.);Astar a;AstarEdgeTestAccess::init(a,g);
+    HumanCaneFootprint::Config footprint;footprint.enabled=true;
+    const std::vector<Eigen::Vector2d> route{{.5,.5},{1,.5},{2,.5},{3,.5},{4,.5},{5,.5}};
+    const std::vector<Eigen::Vector2d> wall{{2.,-.1},{3.,-.1},{3.,1.1},{2.,1.1}};
+    auto deadline=[] {return std::chrono::steady_clock::now()+std::chrono::milliseconds(200);};
+    auto r=a.repairLocalReference(route,wall,footprint,0.,deadline());
+    EXPECT_NE(Astar::RecoveryStatus::FOUND,r.status);EXPECT_TRUE(r.path.empty());
+    const std::vector<Eigen::Vector2d> tip{{1.1,.4},{1.2,.4},{1.2,.6},{1.1,.6}};
+    r=a.repairLocalReference(route,tip,footprint,0.,deadline());
+    EXPECT_NE(Astar::RecoveryStatus::FOUND,r.status);EXPECT_TRUE(r.path.empty());
+    r=a.repairLocalReference(route,wall,footprint,0.,std::chrono::steady_clock::now());
+    EXPECT_EQ(Astar::RecoveryStatus::TIMEOUT,r.status);EXPECT_TRUE(r.path.empty());
 }
 TEST(AstarRecovery, ExactGoalDetourAndEmptyOverlayEquivalence) {
     auto g=passage(.1,3.);Astar a;AstarEdgeTestAccess::init(a,g);AstarEdgeTestAccess::preference(a);

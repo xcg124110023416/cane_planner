@@ -50,6 +50,7 @@ target_link_libraries(convex_corridor
 
 add_library( path_searching
     src/astar.cpp
+    src/astar_local_recovery.cpp
     src/kinodynamic_astar.cpp
     src/lfpc.cpp
     src/dynamic_risk_field.cpp

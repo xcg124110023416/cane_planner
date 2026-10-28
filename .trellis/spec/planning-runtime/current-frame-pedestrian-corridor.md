@@ -2,7 +2,7 @@
 
 ## Scope
 
-Planner 3 with private `use_pedestrians=true`. False preserves the existing static corridor. Planner 4 retains its legacy timed-corridor/obstacle flow. This is one ConvexCorridor/FIRI generator; the additive LFPC timed SAT checker is documented in [lfpc-timed-collision.md](./lfpc-timed-collision.md), independently of the legacy timed walking corridor. The robust-speed timed spec is not activated by this feature.
+Planner 3 with private `use_pedestrians=true`. Default static FIRI plus timed SAT and optional local repair are described in [time-triggered-local-repair.md](time-triggered-local-repair.md). False preserves static planning. Planner 4 retains its legacy timed-corridor/obstacle flow. This is one ConvexCorridor/FIRI generator; the additive LFPC timed SAT checker is documented in [lfpc-timed-collision.md](./lfpc-timed-collision.md), independently of the legacy timed walking corridor. The robust-speed timed spec is not activated by this feature.
 
 ## Source validity and transforms
 
@@ -47,7 +47,12 @@ the earlier full pedestrian octagon and COM-only corridor conventions.
 
 ## FIRI and failure evidence
 
-`buildStatic(path,grid,dynamic_polygons={})` shares the existing separator template with four-corner static arrays. Complete strictly convex CCW polygons (3–32 vertices, diameter <=20 m) use the same stationary/support-switch/endpoint-active directions, one common separating plane and unmodified metric/MVIE certificates. Empty dynamic input retains the selected static geometry/sampling mode. Precheck all original local reference edges before inflation, then use the configured coverage-driven or legacy edge sampling with the same original-edge coverage, joins and global budgets. Whole human-cane seed vertices participate when enabled. Any reference obstruction with clearance gives `DYNAMIC_REFERENCE_BLOCKED`. Approved recovery reuses existing A* only on this result, with the same validated immutable hull as a temporary hard overlay, exact CoM start/final goal, and a recovery-only cooperative deadline. Static classification/comfort cost and persistent maps remain unchanged. Full exact-goal output is recertified, then same-hull FIRI rebuilt and original frame freshness checked before atomic authoritative route replacement. No partial horizon acceptance, dynamic comfort cost, seed repair or second planner. Failed recovery remains STOP; a valid detour is retained and does not cause every-frame search or automatic return to the old route.
+Default production wiring changed on 2026-10-28: see
+[time-triggered-local-repair.md](time-triggered-local-repair.md). Static FIRI now
+provides the base domain; timed SAT handles pedestrians. The optional dynamic
+polygon mode below remains available for geometry tests and spatial ablation.
+
+`buildStatic(path,grid,dynamic_polygons={})` shares the existing separator template with four-corner static arrays. Complete strictly convex CCW polygons (3–32 vertices, diameter <=20 m) use the same stationary/support-switch/endpoint-active directions, one common separating plane and unmodified metric/MVIE certificates. Empty dynamic input retains the selected static geometry/sampling mode. Precheck all original local reference edges before inflation, then use the configured coverage-driven or legacy edge sampling with the same original-edge coverage, joins and global budgets. Whole human-cane seed vertices participate when enabled. Any reference obstruction with clearance gives `DYNAMIC_REFERENCE_BLOCKED`. Default timed production does not use this obstruction as a prerequisite; see the local repair contract for the current trigger and transaction.
 
 `Result::has_dynamic_input` prevents `CorridorFailureCapture::saveOnce` from saving a static-only file even for an otherwise eligible numeric failure. It returns SKIPPED with `DYNAMIC_INPUT_NOT_CAPTURED`, without consuming the static capture latch. Manager also suppresses such capture and logs the limitation. Existing v1/v2 snapshots replay point/edge mode; v3 also records footprint/sampling/root yaw; exact dynamic runtime replay is **not implemented**. Dynamic regressions preserve complete polygons as source fixtures instead.
 
@@ -68,7 +73,7 @@ native_resolution*sqrt(2)/4 (about 3.54 cm at 0.1 m); this is NOT a hard certifi
 Retain complete-edge midpoint integration, nonnegative metre costs, the existing
 sigma/weight meaning, and the Euclidean lower-bound heuristic.
 
-A* lazily builds native-spaced tiles with cores up to 64 bins and halos of
+Initial A* and legacy searchRecovery lazily build native-spaced tiles with cores up to 64 bins and halos of
 ceil((sigma+clearance)/native)+1 bins. A cropped side cannot affect the truncated
 cost inside its core; real map boundaries still contribute. Reduce core size to
 respect existing finite snapshot budgets and reject unsupported configurations
@@ -90,21 +95,25 @@ TIMEOUT and never weaken FIRI to make a benchmark pass.
 
 `Astar::searchRecovery(start,goal,polygon,steady_deadline)` reuses the existing search and static certificates. The immutable query polygon is validated as complete strictly convex CCW geometry (3–32 vertices, finite bounded coordinates); continuous segment/polygon clipping rejects closed intersections and segment-edge distances enforce the same FIRI clearance. Empty overlay does not affect the static objective/edge decisions. No overlay persists beyond the call, including timeout/failure. Dynamic geometry is hard-only, never a new comfort penalty. Recovery output must end at the exact actual final goal; partial horizon success is returned as `INCOMPLETE_PATH` with empty output, never committed.
 
-Only actual `DYNAMIC_REFERENCE_BLOCKED` triggers recovery. Manager searches from current exact LFPC CoM to `end_pt_`, under the existing accepted-observation transaction. It allows at most min(0.2 s, half the remaining header/receipt freshness) of cooperative steady-clock search, checking expansion/static-cell/comfort loops and final full-route certificates. Normal search has no new wall deadline. Backend calls and reset/allocation work are finite but not hard-preemptible; timing is not hard real time. ROS-time age is independently checked after search, after FIRI rebuild and before LFPC advance; no 0.5 s timeout increase.
+Default recovery now runs only after timed MPPI returns no feasible candidate and
+records a matching-time collision witness. It uses footprint-aware local A* on
+the witnessed predicted hull, rebuilds static FIRI, seeds/retries timed MPPI and
+commits only after final execution-epoch authorization. The legacy searchRecovery
+API above remains covered for existing callers/tests; it is not the production
+planner-3 repair entry point. See the current local repair contract for bounded
+windows, heading states, suffix preservation, cache lifetime and failure statuses.
+The original accepted-observation lock, generation/stamp/receipt checks, exact
+final goal, 0.5 s freshness, authoritative path publication and frozen STOP remain.
+Preview never triggers recovery. There is no automatic return to an old route.
 
-Candidate paths stay temporary until all edges/endpoint checks, same-hull FIRI rebuild and original-frame freshness pass. A new selected-grid crop is allowed, but SFM is not recomputed: the original physical-body-covering hull is reused. Commit updates `global_waypoints_`, index/projection/lookahead subgoal and warm start. Planner-3 `/astar/path` reads this accepted authority rather than uncommitted A* workspace. Goal callbacks, initial planner-3 search and path materialization serialize with recovery; Locked reset helpers never reacquire the mutex. Goal updates encompass final-goal state under that lock.
-
-Failure leaves the old authoritative reference for later safe reevaluation, but motion still requires a valid current corridor and MPPI. No fallback through a blocked old route, no return-to-original-route rule after an obstacle leaves, no search while the current local reference remains valid. Still-blocked/no-path cases may retry on the next existing cycle, bounded as above; no timer/cooldown/voting/retry loop. Configured planning_length (default 8 m) may trigger a far crossing conservatively. Preview length is independent and never triggers recovery. Start/goal inside the hull or a fully closed passage legitimately STOP.
-
-Existing debug text appends recovery status (`NOT_NEEDED`, `RECOVERY_UNAVAILABLE`, `ATTEMPTED`, `SUCCESS`, `NO_PATH`, `TIMEOUT`, `EXACT_GOAL_UNAVAILABLE`, `EXPIRED`, `REBUILD_FAILED`), attempt count and elapsed seconds. Existing metric indices and top-level dynamic/static STOP categories are retained. Dynamic replay limitations remain unchanged.
 
 ## Output and safety limits
 
 Body/social outlines share `/mpc/convex_corridor` MarkerArray with stable namespaces `mpc_pedestrian_body` and `mpc_pedestrian_social_hull`, id 0, world frame and 0.3 s lifetime. DELETE on invalid/empty/reset and expired FSM data prevents persistent ghosts; corridor publication DELETEALL precedes current geometry. No tracking-ID persistence is assumed. Existing corridor/A*/MPPI visuals remain.
 
-Metric positions 0–25 retain their indices. Field 5 now counts timed SAT rejects; field 19 indicates spatial-only mode (zero when timed SAT is active). Fields 23=source enabled, 24=current-frame corridor feasible, 25=FailureReason enum. Timed fields 26–29 are documented in the timed checker contract. Legacy MPPI validity/cost fields describe the evaluated rollout; if data expires after MPPI, field 24 is false and STOP reason is authoritative. Stop/debug text distinguishes `DYNAMIC_REFERENCE_BLOCKED`, `DYNAMIC_DATA_INVALID`, static invalidity and no feasible rollout.
+Metric positions 0–25 retain their indices. Field 5 now counts timed SAT rejects; field 19 indicates spatial-only mode (zero when timed SAT is active). Fields 23=source enabled, 24=active corridor feasible, 25=FailureReason enum. Timed fields 26–29 are documented in the timed checker contract. Legacy MPPI validity/cost fields describe the evaluated rollout; if data expires after MPPI, field 24 is false and STOP reason is authoritative. Stop/debug text distinguishes `DYNAMIC_REFERENCE_BLOCKED`, `DYNAMIC_DATA_INVALID`, static invalidity and no feasible rollout.
 
-The timed checker adds hard feasibility checks without changing motion costs, foot/CoM static collision or the LFPC STOP serializer. Spatial checking now requires the full configured human-cane envelope in one common region. Invalid or expired data withholds integration and preserves the lightweight STOP heartbeat. Current-frame corridor exclusion does not predict pedestrian motion or provide physical braking. Configured planning_length defaults to 8 m; farther reference crossings can conservatively stop the system early. Navigation evidence requires runtime checks beyond geometry/unit tests.
+The timed checker adds hard feasibility checks without changing motion costs, foot/CoM static collision or the LFPC STOP serializer. Spatial checking now requires the full configured human-cane envelope in one common region. Invalid or expired data withholds integration and preserves the lightweight STOP heartbeat. Default FIRI is static-only; timed SAT checks matching future poses. Current-frame exclusion remains an explicit spatial ablation and can conservatively stop on farther crossings within the default 8 m reference. Neither mode provides physical braking. Navigation evidence requires runtime checks beyond geometry/unit tests.
 
 ## Initial planner-3 goal activation transaction
 
@@ -127,15 +136,15 @@ One `/mpc/transaction_diagnostics` Float64MultiArray is published at each planne
 | 11 | accepted source callback lock wait, steady seconds |
 | 12 | planner entry to transaction mutex acquisition, steady seconds |
 | 13 | initial FIRI solve only |
-| 14 | recovery A* search total (including final edge recertification) |
+| 14 | local recovery A* total, including grid/field work and geometric certificates |
 | 15 | recovery FIRI rebuild only |
-| 16 | MPPI call |
+| 16 | initial proposal/MPPI time plus retry MPPI call, when recovery runs |
 | 17 | authorization/check and invalid-output cleanup |
 | 18 | entry through critical transaction output, before unlock/visualization sleep |
 | 19,20 | total step return elapsed steady / ROS delta, includes visualization sleep on success |
 | 21 | no LFPC integration =1, integrated =0; early goal/inactive returns also 1, not a physical STOP guarantee |
 | 22,23 | recovery inclusive hard-edge / soft-cost query seconds |
-| 24 | recovery grid extraction seconds, NESTED within 22/23; never sum with them |
+| 24 | local recovery grid extraction seconds; separate from 22/23; legacy searchRecovery nested this within hard/soft queries |
 | 25,26,27,28 | hard calls / soft calls / grid calls / expanded nodes |
 | 29,30 | accepted observation count / frame validation state before current computation |
 | 31 | current corridor FailureReason enum, NaN if no corridor evaluated |
@@ -145,7 +154,7 @@ Initial FIRI plus recovery rebuild is the FIRI solve total; geometry wrapper als
 
 Existing lightweight recorder includes raw DynamicObstacles, /clock even if absent in wall-time simulation, goals/initialpose, rosout, source/sim/hardware odoms, accepted A* path, corridor, trajectory/sample and debug/STOP topics. Command after reviewed integration: `rosrun plan_manage record_lightweight_mpc_eval.sh recovery_profile`. Recording is user-run; no recording was executed by implementation. A simultaneous all-topic two-second gap remains of unknown cause; ROS vs steady evidence helps investigate, not automatically attribute it to A*.
 
-Profiling-only decision: no map query cache or optimization was added. Current adapter has no map revision/read-lock contract, so search-local caching would not guarantee unchanged live classification. Same returned-grid computation retains all samples, formulas and certificate checks. Search profiling is active only in recovery; normal static search does not start profiling clocks. Timer overhead is nonzero and nested totals must not be treated as zero-cost measurement.
+The earlier profiling-only implementation was superseded by search-local comfort fields and local repair geometry caches. Initial A* tiles have query lifetime; local repair takes one selected-grid snapshot and caches exact pose/sweep certificates only inside that call. No cache survives a search or assumes a producer revision contract. Search profiling remains active only in recovery; normal static search does not start profiling clocks. Timer overhead is nonzero.
 
 ## Optional pinned pedsim source
 
@@ -159,7 +168,7 @@ Ownership correction: start wrapper delegates to pedsim_round.py supervisor. Per
 
 ## Current-CoM local reference binding
 
-Each new planner-3 local corridor starts at actual current LFPC CoM and connects to the projection on the authoritative forward A* polyline. The configured planning_length includes this connector and truncates the final original edge exactly; it is independent of lookahead and preview length. Only a projection less than 1e-9 m from CoM is replaced by CoM to avoid a degenerate FIRI edge; no previously predicted trajectory supplies reference geometry. The connector participates in the same selected static-grid/full current-pedestrian polygon FIRI certificates as every other edge. Blockage fails closed with existing static/dynamic reasons; only DYNAMIC_REFERENCE_BLOCKED can enter existing recovery. No old-cell fallback or clearance relaxation.
+Each new planner-3 local corridor starts at actual current LFPC CoM and connects to the projection on the authoritative forward A* polyline. The configured planning_length includes this connector and truncates the final original edge exactly; it is independent of lookahead and preview length. Only a projection less than 1e-9 m from CoM is replaced by CoM to avoid a degenerate FIRI edge; no previously predicted trajectory supplies reference geometry. The connector participates in the same selected static-grid/full-footprint FIRI certificates as every other edge. Blockage fails closed with existing static/dynamic reasons; only an actual failed timed MPPI with a collision witness can request local recovery. No old-cell fallback or clearance relaxation.
 
 A feasible new result must contain the entire configured envelope at actual CoM/torso yaw in one region under the controller's 1e-6 containment tolerance before publication/controller replacement, and a recovered result before authoritative route replacement. A failed root postcondition clears partial geometry and reports OUTPUT_CERTIFICATE / OUTPUT_CERTIFICATE stage at the actual root, not optimizer NO_FEASIBLE. Accepted-observation locking, freshness, final rollout checks and STOP remain unchanged. Geometric root coverage alone does not certify support foot, full future LFPC motion, or physical braking.
 
@@ -168,8 +177,8 @@ A feasible new result must contain the entire configured envelope at actual CoM/
 The intermediate five-angle beam implementation (after 4fff814, through 80f8ab2)
 is superseded by continuous steering MPPI. Its beam_width and beam_evidence
 contracts are historical; use [lfpc-mppi.md](./lfpc-mppi.md) for current sampling,
-weighted-update validation, fallback, bounds and evidence. Current-frame FIRI,
-accepted-observation transactions and timed SAT remain mandatory.
+weighted-update validation, fallback, bounds and evidence. Static base FIRI,
+accepted-observation transactions and timed SAT remain mandatory by default.
 
 Manager passes actual end_pt and global_wp_arrival_radius separately from the
 local lookahead goal. Only a fully validated incoming step inside the strict

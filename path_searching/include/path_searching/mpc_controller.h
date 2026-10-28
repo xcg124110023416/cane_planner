@@ -103,6 +103,9 @@ public:
     void init();
     void reset();
     void resetWarmStart();
+    // Seed a missing proposal from current geometry; preserve a retained sequence.
+    // plan() fully revalidates this proposal and never assumes it is safe.
+    bool seedReference(const LFPC& base,const std::vector<Eigen::Vector2d>& reference);
     void setCollision(const CollisionDetection::Ptr &col);
     void setConvexCorridor(const std::vector<ConvexCorridor::Segment> &segments);
     void clearConvexCorridor();
@@ -116,6 +119,7 @@ public:
     const std::vector<double>& getBestTimes() const { return best_times_; }
     const std::vector<double>& getBestYaws() const { return best_yaws_; }
     const HumanCaneFootprint::Config& footprintConfig() const { return cfg_.footprint; }
+    bool timedCollisionEnabled() const { return cfg_.timed_collision_enable; }
     HumanCaneFootprint::Polygon robotFootprintAt(const Eigen::Vector2d&,double yaw) const;
     struct CollisionWitness {
         bool valid = false;

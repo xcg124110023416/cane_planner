@@ -24,7 +24,7 @@ public:
     static void narrow(CollisionDetection& c) {
         for(int x=0;x<200;++x)for(int y=0;y<200;++y) {
             const double py=-10+(y+.5)*.1;
-            if(std::abs(py)>.3)c.static_inflated_[c.staticToAddress(Eigen::Vector2i(x,y))]=1;
+            if(std::abs(py)>.45)c.static_inflated_[c.staticToAddress(Eigen::Vector2i(x,y))]=1;
         }
     }
     static void block(CollisionDetection& c, const Eigen::Vector2d& p) {
@@ -54,6 +54,9 @@ public:
     static void setup(PlannerManager& m, ros::NodeHandle& nh)
     {
         nh.setParam("human_cane/enabled",false); // historical point/circle transaction fixtures
+        nh.setParam("mpc/num_samples",256);nh.setParam("mpc/horizon_steps",6);
+        nh.setParam("mpc/max_api",.5236);
+        nh.setParam("mpc/timed_collision_enable",true);
         m.initial_route_active_ = true; // existing step fixtures model an already activated route
         m.simulation_ = true;
         m.gazebo_sim_ = false;
@@ -110,7 +113,7 @@ public:
         m.lfpc_model_->reset(Eigen::Vector3d(.4,0,0),Eigen::Vector3d(0,0,0),LEFT_LEG,5);
         m.odom_pos_=m.lfpc_model_->getCOMPos();m.last_com_pos_=m.odom_pos_.head<2>();
         m.start_state_=Eigen::Vector3d::Zero();m.mpc_sim_goal_=Eigen::Vector3d(5,0,0);
-        m.end_pt_=Eigen::Vector2d(5,0);m.global_waypoints_={Eigen::Vector2d(0,0),Eigen::Vector2d(1,0),Eigen::Vector2d(2,0),Eigen::Vector2d(3,0),Eigen::Vector2d(4,0)};
+        m.end_pt_=Eigen::Vector2d(5,0);m.global_waypoints_={Eigen::Vector2d(0,0),Eigen::Vector2d(1,0),Eigen::Vector2d(2,0),Eigen::Vector2d(3,0),Eigen::Vector2d(4,0),Eigen::Vector2d(5,0)};
         m.global_wp_idx_=0;m.mpc_controller_->setParam(nh);m.mpc_controller_->init();
     }
     static void astarSetup(PlannerManager&m,ros::NodeHandle&nh,bool narrow=false) {
@@ -484,6 +487,22 @@ TEST_F(SimOdomTest, TimedSnapshotUsesSourceAgeAndPublishesMatchedGeometry) {
     EXPECT_EQ(1u,visual.back().markers.size());EXPECT_TRUE(paths.back().poses.empty());
 }
 
+TEST_F(SimOdomTest, CrossingClearsBeforeArrivalWithoutSpatialStopOrRouteSearch) {
+    ros::Time::setNow(ros::Time(505));SimOdomTestAccess::fullGeometrySetup(manager_,nh_);
+    SimOdomTestAccess::enabled(manager_,true);SimOdomTestAccess::astarSetup(manager_,nh_);
+    auto msg=frame(ros::Time::now());addPedestrian(*msg,Eigen::Vector2d(1.8,0));
+    msg->velocity[0].x=0.;msg->velocity[0].y=2.;
+    SimOdomTestAccess::receive(manager_,msg);
+    const auto route=SimOdomTestAccess::route(manager_);
+    const auto before=SimOdomTestAccess::model(manager_).getCOMPos();
+    queuedFrameStep(msg);waitForDecision(1,false);
+    EXPECT_TRUE(SimOdomTestAccess::planValid(manager_));
+    EXPECT_GT((SimOdomTestAccess::model(manager_).getCOMPos()-before).norm(),1e-6);
+    EXPECT_EQ(0u,SimOdomTestAccess::attempts(manager_));
+    EXPECT_EQ(route,SimOdomTestAccess::route(manager_));
+    EXPECT_TRUE(SimOdomTestAccess::controller(manager_).getDebugMetrics().timed_execution_safe);
+}
+
 TEST_F(SimOdomTest, TimedExecutionCollisionStopsBeforeAnyIntegration) {
     ros::Time::setNow(ros::Time(510));SimOdomTestAccess::dynamicSetup(manager_);
     SimOdomTestAccess::recoverySetup(manager_,nh_);SimOdomTestAccess::smallPedestrian(manager_);
@@ -532,15 +551,14 @@ TEST_F(SimOdomTest, DynamicValidityTransitionsAndFrozenStop)
     EXPECT_TRUE(SimOdomTestAccess::geometryEmpty(manager_));
     SimOdomTestAccess::enabled(manager_,false);EXPECT_TRUE(SimOdomTestAccess::corridor(manager_).feasible);
 }
-TEST_F(SimOdomTest, DynamicBlockedThenFreshClearRecoversCorridor)
+TEST_F(SimOdomTest, DynamicRootCollisionStopsWithinUsableStaticCorridor)
 {
     ros::Time::setNow(ros::Time(210));SimOdomTestAccess::dynamicSetup(manager_);
     const auto p=SimOdomTestAccess::model(manager_).getCOMPos().head<2>().eval();
-    auto msg=frame(ros::Time::now());addPedestrian(*msg,p+Eigen::Vector2d(1,0));
+    auto msg=frame(ros::Time::now());addPedestrian(*msg,p);
     SimOdomTestAccess::receive(manager_,msg);
     auto blocked=SimOdomTestAccess::corridor(manager_);
-    EXPECT_EQ(ConvexCorridor::FailureReason::DYNAMIC_REFERENCE_BLOCKED,blocked.failure_reason);
-    EXPECT_TRUE(blocked.segments.empty());
+    EXPECT_TRUE(blocked.feasible);EXPECT_FALSE(blocked.segments.empty());
     const auto state=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
     EXPECT_FALSE(SimOdomTestAccess::step(manager_));waitForStops(1);waitForOdom(1);
     EXPECT_EQ(state,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
@@ -551,11 +569,25 @@ TEST_F(SimOdomTest, DynamicBlockedThenFreshClearRecoversCorridor)
     EXPECT_TRUE(SimOdomTestAccess::corridor(manager_).feasible);
     EXPECT_TRUE(SimOdomTestAccess::geometryEmpty(manager_));
 }
+TEST_F(SimOdomTest, TimedAblationRetainsCurrentHullCorridorExclusion)
+{
+    ros::Time::setNow(ros::Time(225));SimOdomTestAccess::dynamicSetup(manager_);
+    nh_.setParam("mpc/timed_collision_enable",false);SimOdomTestAccess::recoverySetup(manager_,nh_);
+    auto msg=frame(ros::Time::now());addPedestrian(*msg,Eigen::Vector2d(1.3,0));
+    SimOdomTestAccess::receive(manager_,msg);
+    const auto corridor=SimOdomTestAccess::corridor(manager_);
+    EXPECT_FALSE(corridor.feasible);EXPECT_TRUE(corridor.has_dynamic_input);
+    EXPECT_EQ(ConvexCorridor::FailureReason::DYNAMIC_REFERENCE_BLOCKED,corridor.failure_reason);
+    const auto before=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
+    SimOdomTestAccess::step(manager_);waitForDecision(1,true);
+    EXPECT_EQ(before,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
+    EXPECT_EQ(0u,SimOdomTestAccess::attempts(manager_));
+}
 TEST_F(SimOdomTest, FreshEmptyAfterDynamicBlockResumesActualIntegration)
 {
     ros::Time::setNow(ros::Time(230));SimOdomTestAccess::dynamicSetup(manager_);
     SimOdomTestAccess::recoverySetup(manager_,nh_);
-    auto msg=frame(ros::Time::now());addPedestrian(*msg,Eigen::Vector2d(1,0));
+    auto msg=frame(ros::Time::now());addPedestrian(*msg,Eigen::Vector2d(0,0));
     SimOdomTestAccess::receive(manager_,msg);
     const auto before=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
     EXPECT_FALSE(SimOdomTestAccess::step(manager_));waitForStops(1);waitForOdom(1);
@@ -603,11 +635,11 @@ TEST_F(SimOdomTest, QueuedSameStampBlockerIsAcceptedAfterCommitThenStopsNextCycl
     ros::Time::setNow(ros::Time(300));SimOdomTestAccess::dynamicSetup(manager_);
     SimOdomTestAccess::recoverySetup(manager_,nh_);
     auto a=frame(ros::Time::now());SimOdomTestAccess::receive(manager_,a);
-    auto b=frame(a->header.stamp);addPedestrian(*b,Eigen::Vector2d(1,0));
+    auto b=frame(a->header.stamp);addPedestrian(*b,Eigen::Vector2d(.3,0));
     const auto position=SimOdomTestAccess::model(manager_).getCOMPos();
     queuedFrameStep(b);waitForDecision(1,false);
     EXPECT_GT((SimOdomTestAccess::model(manager_).getCOMPos()-position).norm(),1e-6);
-    EXPECT_EQ(ConvexCorridor::FailureReason::DYNAMIC_REFERENCE_BLOCKED,SimOdomTestAccess::corridor(manager_).failure_reason);
+    EXPECT_TRUE(SimOdomTestAccess::corridor(manager_).feasible);
     const auto before=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
     EXPECT_FALSE(SimOdomTestAccess::step(manager_));waitForDecision(2,true);
     EXPECT_EQ(before,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
@@ -708,11 +740,33 @@ TEST_F(SimOdomTest, GoalResetSerializesWithProductionGeometryAndPublication)
     std::thread resets([&] {for(int i=0;i<30;++i)SimOdomTestAccess::goalReset(manager_);});
     builds.join();resets.join();EXPECT_TRUE(valid);
 }
+TEST_F(SimOdomTest, TimedMppiAvoidsStationaryBlockerWithoutUnnecessaryRepair)
+{
+    ros::Time::setNow(ros::Time(499));SimOdomTestAccess::dynamicSetup(manager_);
+    nh_.setParam("human_cane/enabled",true);
+    SimOdomTestAccess::recoverySetup(manager_,nh_);SimOdomTestAccess::astarSetup(manager_,nh_);
+    auto blocker=frame(ros::Time::now());addPedestrian(*blocker,Eigen::Vector2d(1.3,0));
+    blocker->velocity[0].x=blocker->velocity[0].y=0.;SimOdomTestAccess::receive(manager_,blocker);
+    const auto route=SimOdomTestAccess::route(manager_);
+    queuedFrameStep(blocker);waitForDecision(1,false);
+    EXPECT_EQ(0u,SimOdomTestAccess::attempts(manager_));EXPECT_EQ(route,SimOdomTestAccess::route(manager_));
+    EXPECT_TRUE(SimOdomTestAccess::controller(manager_).getDebugMetrics().timed_execution_safe);
+    // Keep the blocker present until the actual CoM has passed it. Eventual
+    // progress after deleting a pedestrian would not demonstrate a bypass.
+    for(int i=0;i<15 && SimOdomTestAccess::model(manager_).getCOMPos().x()<2.3;++i) {
+        blocker->header.stamp=ros::Time::now();SimOdomTestAccess::receive(manager_,blocker);
+        queuedFrameStep(blocker);waitForDecision(i+2,false);
+        EXPECT_TRUE(SimOdomTestAccess::controller(manager_).getDebugMetrics().timed_execution_safe);
+    }
+    EXPECT_GT(SimOdomTestAccess::model(manager_).getCOMPos().x(),2.3);
+}
 TEST_F(SimOdomTest, DynamicBlockedReferenceReroutesFinalGoalAndExecutes)
 {
     ros::Time::setNow(ros::Time(500));SimOdomTestAccess::dynamicSetup(manager_);
+    nh_.setParam("human_cane/enabled",true);nh_.setParam("mpc/num_samples",1);
     SimOdomTestAccess::recoverySetup(manager_,nh_);SimOdomTestAccess::astarSetup(manager_,nh_);
-    auto blocker=frame(ros::Time::now());addPedestrian(*blocker,Eigen::Vector2d(2,0));
+    auto blocker=frame(ros::Time::now());addPedestrian(*blocker,Eigen::Vector2d(1.3,0));
+    blocker->velocity[0].x=blocker->velocity[0].y=0.;
     SimOdomTestAccess::receive(manager_,blocker);
     const auto original=SimOdomTestAccess::route(manager_);
     const auto pos=SimOdomTestAccess::model(manager_).getCOMPos();
@@ -722,19 +776,21 @@ TEST_F(SimOdomTest, DynamicBlockedReferenceReroutesFinalGoalAndExecutes)
     const auto detour=SimOdomTestAccess::route(manager_);ASSERT_FALSE(detour.empty());
     EXPECT_EQ(Eigen::Vector2d(5,0),detour.back());EXPECT_NE(original,detour);
     EXPECT_GT((SimOdomTestAccess::model(manager_).getCOMPos()-pos).norm(),1e-6);
-    for(int i=0;i<3;++i) {
-        auto clear=frame(ros::Time::now());
-        if(i==0)addPedestrian(*clear,Eigen::Vector2d(2,0)); // fresh same blocker, valid detour: no search
-        SimOdomTestAccess::receive(manager_,clear);
-        queuedFrameStep(clear);waitForDecision(i+2,false);
+    // A committed detour must remain executable while the blocker is present.
+    for(int i=0;i<15 && SimOdomTestAccess::model(manager_).getCOMPos().x()<2.3;++i) {
+        blocker->header.stamp=ros::Time::now();SimOdomTestAccess::receive(manager_,blocker);
+        queuedFrameStep(blocker);waitForDecision(i+2,false);
         EXPECT_EQ(detour,SimOdomTestAccess::route(manager_));EXPECT_EQ(1u,SimOdomTestAccess::attempts(manager_));
     }
+    EXPECT_GT(SimOdomTestAccess::model(manager_).getCOMPos().x(),2.3);
 }
 TEST_F(SimOdomTest, FullyBlockedRecoveryStopsAndFreshClearResumes)
 {
     ros::Time::setNow(ros::Time(510));SimOdomTestAccess::dynamicSetup(manager_);
+    nh_.setParam("human_cane/enabled",true);
     SimOdomTestAccess::recoverySetup(manager_,nh_);SimOdomTestAccess::astarSetup(manager_,nh_,true);
-    auto blocker=frame(ros::Time::now());addPedestrian(*blocker,Eigen::Vector2d(2,0));
+    auto blocker=frame(ros::Time::now());addPedestrian(*blocker,Eigen::Vector2d(1.3,0));
+    blocker->velocity[0].x=blocker->velocity[0].y=0.;
     SimOdomTestAccess::receive(manager_,blocker);
     const auto before=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
     const auto route=SimOdomTestAccess::route(manager_);const auto start=ros::WallTime::now();
@@ -748,8 +804,10 @@ TEST_F(SimOdomTest, FullyBlockedRecoveryStopsAndFreshClearResumes)
 TEST_F(SimOdomTest, RecoveryCandidateExpiryCannotCommitOrExecute)
 {
     ros::Time::setNow(ros::Time(520));SimOdomTestAccess::dynamicSetup(manager_);
+    nh_.setParam("human_cane/enabled",true);nh_.setParam("mpc/num_samples",1);
     SimOdomTestAccess::recoverySetup(manager_,nh_);SimOdomTestAccess::astarSetup(manager_,nh_);
-    auto blocker=frame(ros::Time::now());addPedestrian(*blocker,Eigen::Vector2d(2,0));
+    auto blocker=frame(ros::Time::now());addPedestrian(*blocker,Eigen::Vector2d(1.3,0));
+    blocker->velocity[0].x=blocker->velocity[0].y=0.;
     SimOdomTestAccess::receive(manager_,blocker);
     const auto route=SimOdomTestAccess::route(manager_);const auto state=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
     SimOdomTestAccess::afterSearch(manager_,[]{ros::Time::setNow(ros::Time(521));});
@@ -760,14 +818,43 @@ TEST_F(SimOdomTest, RecoveryCandidateExpiryCannotCommitOrExecute)
 TEST_F(SimOdomTest, RecoveryRebuildFailureCannotCommitOrExecute)
 {
     ros::Time::setNow(ros::Time(530));SimOdomTestAccess::dynamicSetup(manager_);
+    nh_.setParam("human_cane/enabled",true);nh_.setParam("mpc/num_samples",1);
     SimOdomTestAccess::recoverySetup(manager_,nh_);SimOdomTestAccess::astarSetup(manager_,nh_);
-    auto blocker=frame(ros::Time::now());addPedestrian(*blocker,Eigen::Vector2d(2,0));
+    auto blocker=frame(ros::Time::now());addPedestrian(*blocker,Eigen::Vector2d(1.3,0));
+    blocker->velocity[0].x=blocker->velocity[0].y=0.;
     SimOdomTestAccess::receive(manager_,blocker);
     const auto route=SimOdomTestAccess::route(manager_);const auto state=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
     SimOdomTestAccess::afterSearch(manager_,[&]{SimOdomTestAccess::invalidateRebuild(manager_);});
     EXPECT_FALSE(SimOdomTestAccess::step(manager_));waitForDecision(1,true);
     EXPECT_EQ(route,SimOdomTestAccess::route(manager_));EXPECT_EQ(state,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
     EXPECT_EQ("REBUILD_FAILED",SimOdomTestAccess::recoveryReason(manager_));
+}
+TEST_F(SimOdomTest, RepairedTrajectoryExpiryAtExecutionCannotCommitRoute)
+{
+    ros::Time::setNow(ros::Time(535));SimOdomTestAccess::dynamicSetup(manager_);
+    nh_.setParam("human_cane/enabled",true);nh_.setParam("mpc/num_samples",1);
+    SimOdomTestAccess::recoverySetup(manager_,nh_);SimOdomTestAccess::astarSetup(manager_,nh_);
+    auto blocker=frame(ros::Time::now());addPedestrian(*blocker,Eigen::Vector2d(1.3,0));
+    blocker->velocity[0].x=blocker->velocity[0].y=0.;SimOdomTestAccess::receive(manager_,blocker);
+    const auto route=SimOdomTestAccess::route(manager_);const auto state=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
+    SimOdomTestAccess::afterMppi(manager_,[&]{
+        EXPECT_TRUE(SimOdomTestAccess::planValid(manager_));ros::Time::setNow(ros::Time(536));
+    });
+    EXPECT_FALSE(SimOdomTestAccess::step(manager_));waitForDecision(1,true);
+    EXPECT_EQ(route,SimOdomTestAccess::route(manager_));EXPECT_EQ(state,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
+    EXPECT_EQ("EXPIRED",SimOdomTestAccess::recoveryReason(manager_));
+}
+TEST_F(SimOdomTest, GeometricDetourCannotCommitWhenItsTimedMppiFails)
+{
+    ros::Time::setNow(ros::Time(537));SimOdomTestAccess::dynamicSetup(manager_);
+    nh_.setParam("human_cane/enabled",true);nh_.setParam("mpc/num_samples",1);nh_.setParam("mpc/max_api",0.);
+    SimOdomTestAccess::recoverySetup(manager_,nh_);SimOdomTestAccess::astarSetup(manager_,nh_);
+    auto blocker=frame(ros::Time::now());addPedestrian(*blocker,Eigen::Vector2d(1.3,0));
+    blocker->velocity[0].x=blocker->velocity[0].y=0.;SimOdomTestAccess::receive(manager_,blocker);
+    const auto route=SimOdomTestAccess::route(manager_);const auto state=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
+    EXPECT_FALSE(SimOdomTestAccess::step(manager_));waitForDecision(1,true);
+    EXPECT_EQ(route,SimOdomTestAccess::route(manager_));EXPECT_EQ(state,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
+    EXPECT_EQ("MPPI_REJECTED",SimOdomTestAccess::recoveryReason(manager_));
 }
 TEST_F(SimOdomTest, InitialSearchActivationQueuesNewGoalAndRequiresItsOwnSearch)
 {
@@ -933,7 +1020,7 @@ TEST_F(SimOdomTest, StaticConnectorCannotCutBlockedCellOrAdvanceState)
     EXPECT_FALSE(SimOdomTestAccess::planValid(manager_));
 }
 
-TEST_F(SimOdomTest, PedestrianConnectorUsesExistingBlockedRecoveryAndStop)
+TEST_F(SimOdomTest, PedestrianRootBlocksExecutionWithoutInvalidatingStaticConnector)
 {
     ros::Time::setNow(ros::Time(770));SimOdomTestAccess::dynamicSetup(manager_);
     SimOdomTestAccess::recoverySetup(manager_,nh_);
@@ -942,12 +1029,10 @@ TEST_F(SimOdomTest, PedestrianConnectorUsesExistingBlockedRecoveryAndStop)
     SimOdomTestAccess::reference(manager_,route);
     SimOdomTestAccess::receive(manager_,frame(ros::Time::now()));
     ASSERT_TRUE(SimOdomTestAccess::corridor(manager_).feasible);
-    auto msg=frame(ros::Time::now());addPedestrian(*msg,Eigen::Vector2d(0,1));
+    auto msg=frame(ros::Time::now());addPedestrian(*msg,Eigen::Vector2d(0,0));
     SimOdomTestAccess::receive(manager_,msg);
     const auto blocked=SimOdomTestAccess::corridor(manager_);
-    EXPECT_FALSE(blocked.feasible);EXPECT_TRUE(blocked.segments.empty());
-    EXPECT_EQ(ConvexCorridor::FailureReason::DYNAMIC_REFERENCE_BLOCKED,blocked.failure_reason);
-    EXPECT_EQ("RECOVERY_UNAVAILABLE",SimOdomTestAccess::recoveryReason(manager_));
+    EXPECT_TRUE(blocked.feasible);EXPECT_FALSE(blocked.segments.empty());
     const auto state=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
     SimOdomTestAccess::step(manager_);waitForStops(1);
     EXPECT_EQ(state,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));

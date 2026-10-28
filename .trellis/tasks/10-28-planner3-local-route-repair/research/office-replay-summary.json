@@ -1,0 +1,52 @@
+{
+  "source": "owned private-master headless replay, 2026-10-28",
+  "branch": "mpc-lfpc-prototype",
+  "base_commit": "3066cf5",
+  "case": "reported",
+  "start": [
+    -6.393,
+    4.19,
+    0.089
+  ],
+  "goal": [
+    3.633,
+    -4.828
+  ],
+  "arrived": true,
+  "last_odom": [
+    3.4212829796884754,
+    -4.791309178233201
+  ],
+  "decisions": {
+    "OK": 41,
+    "NO_FEASIBLE_TRAJECTORY": 6
+  },
+  "no_progress": 0,
+  "recovery_states": {
+    "NOT_NEEDED": 47,
+    "NO_PATH": 6
+  },
+  "timings": {
+    "initial_firi": {
+      "count": 47,
+      "median_ms": 2.353404,
+      "max_ms": 4.357711
+    },
+    "local_astar": {
+      "count": 6,
+      "median_ms": 130.668814,
+      "max_ms": 132.667564
+    },
+    "proposal_and_mppi": {
+      "count": 47,
+      "median_ms": 4.740456,
+      "max_ms": 14.051196000000001
+    },
+    "critical_transaction": {
+      "count": 47,
+      "median_ms": 8.415771000000001,
+      "max_ms": 144.082062
+    }
+  },
+  "interpretation": "Arrival after six NO_PATH/STOP cycles; no accepted A* repair in this office replay. Persistent-blocker bypass is separately checked by manager regressions."
+}

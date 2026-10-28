@@ -76,6 +76,41 @@ void MpcController::resetWarmStart()
     warm_start_.clear();
 }
 
+bool MpcController::seedReference(const LFPC& base,const std::vector<Eigen::Vector2d>& reference)
+{
+    if(!warm_start_.empty())return true;
+    resetWarmStart();
+    if(reference.size()<2 || cfg_.horizon_steps<1 || cfg_.horizon_steps>32)return false;
+    for(const auto& p:reference)if(!p.allFinite())return false;
+    LFPC state;state.copyState(base);ControlSequence proposal;size_t index=0;
+    for(int i=0;i<cfg_.horizon_steps;++i) {
+        const Eigen::Vector2d position=state.getCOMPos().head<2>();
+        double nearest=std::numeric_limits<double>::infinity();
+        // Advance the copied model's projection too. Reusing segment zero after
+        // passing its endpoint would steer the remaining proposal backwards.
+        for(size_t j=index;j+1<reference.size();++j) {
+            const Eigen::Vector2d edge=reference[j+1]-reference[j];
+            if(edge.squaredNorm()<1e-18)continue;
+            const auto projection=(reference[j]+std::max(0.,std::min(1.,
+                (position-reference[j]).dot(edge)/edge.squaredNorm()))*edge).eval();
+            const double distance=(position-projection).squaredNorm();
+            if(distance<nearest) {nearest=distance;index=j;}
+        }
+        const auto ahead=ConvexCorridor::referencePath(reference,index,position,
+            std::max(.5,2.*cfg_.nominal_al));
+        if(ahead.empty())return false;
+        const Eigen::Vector2d d=ahead.back()-state.getCOMPos().head<2>();
+        const double error=std::atan2(d.y(),d.x())-state.getNextIterState()(2);
+        const double action=std::max(-cfg_.max_api,std::min(cfg_.max_api,std::atan2(std::sin(error),std::cos(error))));
+        if(!std::isfinite(action))return false;
+        proposal.push_back(action);
+        state.SetCtrlParams(Eigen::Vector3d(cfg_.nominal_al,cfg_.nominal_aw,action));
+        state.updateOneStep();state.prepareNextStep();
+        if(!state.getCOMPos().allFinite())return false;
+    }
+    warm_start_=std::move(proposal);return true;
+}
+
 void MpcController::publishSampleTrajectories(
     const std::vector<std::vector<Eigen::Vector3d>> &paths,
     const Eigen::VectorXd &costs)
@@ -304,8 +339,8 @@ std::vector<MpcController::ControlSequence> MpcController::sampleSequences(
     const ControlSequence& mean,const ControlSequence& incumbent)
 {
     std::vector<ControlSequence> samples(cfg_.num_samples,mean);
-    if(samples.size()>1 && incumbent.size()==mean.size()) samples[1]=incumbent;
-    // Two anchors (proposal and retained candidate), then antithetic Gaussian
+    if(samples.size()>1) samples[1]=incumbent.size()==mean.size()?incumbent:ControlSequence(mean.size(),0.);
+    // Proposal and retained candidate (or straight sequence), then antithetic Gaussian
     // pairs. Paired noise reduces sampling bias without quantizing steering.
     for(size_t k=2;k<samples.size();k+=2)for(size_t n=0;n<mean.size();++n) {
         const double noise=cfg_.sigma_api*normal_dist_(rng_);

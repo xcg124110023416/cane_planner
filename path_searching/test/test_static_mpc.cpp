@@ -352,6 +352,26 @@ TEST(StaticMpcRuntime, WarmStartShiftsAndRetainsCurrentCycleCandidate)
     c.resetWarmStart();EXPECT_TRUE(StaticMpcTestAccess::warm(c).empty());
 }
 
+TEST(StaticMpcRuntime, ReferenceSeedEnablesColdTurnWithoutBypassingChecksOrChangingModel)
+{
+    MpcController c;StaticMpcTestAccess::coldStartBudget(c);StaticMpcTestAccess::sampling(c,1,2);
+    c.setCollision(StaticMpcTestAccess::wideMap());c.setConvexCorridor({box(-.9,.9,-.5,6.)});
+    auto model=StaticMpcTestAccess::model();const auto state=model->getState();
+    const auto position=model->getCOMPos(),velocity=model->getNextIterState();
+    const auto phase=model->getPhaseTime();const auto leg=model->getSupportFeet();
+    c.plan(model,Eigen::Vector3d(0,3,0));ASSERT_FALSE(c.lastPlanValid()); // zero proposal leaves corridor
+    ASSERT_TRUE(c.seedReference(*model,{{0,0},{0,1},{0,3}}));
+    EXPECT_EQ(state,model->getState());EXPECT_EQ(position,model->getCOMPos());
+    EXPECT_EQ(velocity,model->getNextIterState());EXPECT_EQ(phase,model->getPhaseTime());EXPECT_EQ(leg,model->getSupportFeet());
+    const auto command=c.plan(model,Eigen::Vector3d(0,3,0));ASSERT_TRUE(c.lastPlanValid());
+    EXPECT_GT(command.z(),0.);EXPECT_TRUE(c.optimizationEvidence().reroll_valid);
+    const auto retained=StaticMpcTestAccess::warm(c);
+    ASSERT_TRUE(c.seedReference(*model,{{0,0},{0,-3}}));EXPECT_EQ(retained,StaticMpcTestAccess::warm(c));
+    ASSERT_TRUE(c.setTimedPedestrians({{{{-.1,-.1},{.1,-.1},{.1,.1},{-.1,.1}},Eigen::Vector2d::Zero()}},0.));
+    c.plan(model,Eigen::Vector3d(0,3,0));EXPECT_FALSE(c.lastPlanValid());
+    EXPECT_GT(c.getDebugMetrics().dynamic_reject_count,0);EXPECT_EQ(state,model->getState());EXPECT_EQ(position,model->getCOMPos());
+}
+
 TEST(StaticMpcRuntime, InvalidSamplingConfigFailsClosed)
 {
     for(int kind=0;kind<5;++kind) {

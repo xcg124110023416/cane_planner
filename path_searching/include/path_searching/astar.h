@@ -16,6 +16,7 @@
 #include <path_searching/matrix_hash.h>
 #include <plan_env/collision_detection.h>
 #include <plan_env/corridor_distance_field.h>
+#include <path_searching/human_cane_footprint.h>
 // #include <plan_env/edt_environment.h>
 
 using namespace std;
@@ -186,7 +187,14 @@ namespace cane_planner
       std::vector<Eigen::Vector2d> path;
       double seconds = 0.;
       SearchProfile profile;
+      size_t repair_begin = 0, repair_end = 0;
     };
+    // Spatial guidance only: the caller must check the resulting timed trajectory.
+    // reference starts at the actual CoM and retains the original final goal.
+    RecoveryResult repairLocalReference(const std::vector<Eigen::Vector2d>& reference,
+        const std::vector<Eigen::Vector2d>& predicted_obstacle,
+        const HumanCaneFootprint::Config& footprint, double root_yaw,
+        std::chrono::steady_clock::time_point deadline);
     RecoveryResult searchRecovery(const Eigen::Vector2d& start, const Eigen::Vector2d& goal,
         const std::vector<Eigen::Vector2d>& polygon, std::chrono::steady_clock::time_point deadline);
     static bool polygonEdgeFree(const Eigen::Vector2d& a, const Eigen::Vector2d& b,

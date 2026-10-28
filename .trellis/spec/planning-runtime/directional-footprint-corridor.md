@@ -9,7 +9,8 @@ hull. Pad the complete world AABB independently by body_margin=.03, then hull it
 with heading +/-110-degree Ds=.4 points and force point. Ds is not raised to body
 radius, and no full social-radius disk masks direction. Zero force uses moving
 heading; missing stationary heading uses symmetric padded body. Force computation
-and bounded observations remain unchanged. Both FIRI and CV/SAT use this exact hull.
+and bounded observations remain unchanged. CV/SAT and the optional current-frame
+FIRI ablation use this exact hull; default FIRI is static-only.
 
 HumanCaneFootprint supplies one rigid convex envelope shared by FIRI, controller
 and markers. Circumscribed disk polygons cover full body/front disks with margin,
@@ -46,11 +47,12 @@ are sampled <=5 degrees at the root of that step and stored at that same model t
 they are not a new continuous-time turn model or a swept collision guarantee.
 
 Planning reference length defaults 8 m, exact truncation includes root-projection
-connector; preview length defaults 20 m, zero selects remaining route. Preview is
+connector; preview length defaults 20 m, zero selects remaining route. Default FIRI uses static cells; pedestrians are checked at matching trajectory
+times (see time-triggered-local-repair.md). Preview is
 an independent bounded async value-copy job; no manager/controller access, route
 recovery or STOP authority. Current/receipt age, clock rollback, goal/route revision,
-reset/invalid cleanup and short marker lifetimes apply. Dynamic preview uses the
-already accepted hull, never reruns SFM with a larger cropped-grid boundary. Copying
+reset/invalid cleanup and short marker lifetimes apply. Timed-mode preview represents static space. Spatial ablation uses the already
+accepted hull; neither mode reruns SFM with a larger cropped-grid boundary. Copying
 the selected grid and CPU contention are still finite costs, not zero-cost parallelism.
 
 Required tests: both complete physical disks at rotated poses, heading and weak-force

@@ -4,7 +4,8 @@
 
 `TimedPedestrianCollision` in path_searching is pure domain geometry, independent
 of ROS. Bind the exact accepted social hull and world velocity already used for
-current-frame FIRI. No additional SFM solve, FIRI inflation, intent inference or
+the current accepted geometry transaction. Default FIRI is static-only; see
+[time-triggered-local-repair.md](time-triggered-local-repair.md). No additional SFM solve, FIRI inflation, intent inference or
 polygon rasterization. CV occupancy at future relative time tau is
 `P0 + velocity * (execution_epoch - source_stamp + tau)`.
 
@@ -36,11 +37,11 @@ check, revalidate the root and ALL selected samples using the actual execution
 epoch, before any LFPC control change or integration. Cost is bounded by selected
 path length, not the search tree. A collision invalidates the plan and publishes
 `TIMED_EXECUTION_COLLISION`; LFPC state remains frozen, existing STOP odometry
-continues. No retry, deadline widening, old-prediction fallback or moving output.
+continues. No retry after execution rejection, deadline widening, old-prediction fallback or moving output. A failed initial MPPI may perform one local repair/retry before this final execution check.
 One bounded collision witness retains COM, future offset and source age at check.
 
-Current-frame FIRI remains mandatory, so newly vacated space is not reclaimed and
-waiting/speed actions are not added. This certifies only sampled configured rigid-envelope poses
+Static full-footprint FIRI remains mandatory. Newly vacated pedestrian space can
+be used only when the matching-time checks pass. Waiting/speed actions are not added. This certifies only sampled configured rigid-envelope poses
 under CV; no continuous swept LIPM, acceleration/turning uncertainty or physical
 braking claim. Lightweight simulation still jumps whole LFPC steps at the FSM
 cadence rather than continuously executing model time. Do not claim wall-time

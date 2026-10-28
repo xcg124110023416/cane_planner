@@ -152,8 +152,9 @@ namespace cane_planner
         std::string dynamic_recovery_reason_ = "NOT_NEEDED";
         uint64_t dynamic_recovery_attempts_ = 0;
         double dynamic_recovery_seconds_ = 0.;
-        ConvexCorridor::Result recoverDynamicRouteLocked(const Eigen::Vector3d& pose,
-            const std::vector<ConvexCorridor::Polygon>& polygons, const ConvexCorridor::Result& blocked);
+        bool recoverDynamicRouteLocked(const Eigen::Vector3d& pose,
+            ConvexCorridor::Result& corridor, Eigen::Vector3d& control,
+            std::vector<Eigen::Vector2d>& pending_route);
 #ifdef CANE_MANAGER_INTERLEAVING_TEST
         // Compiled only into the manager regression target, absent from runtime.
         std::function<void()> after_mppi_test_hook_, geometry_locked_test_hook_;
