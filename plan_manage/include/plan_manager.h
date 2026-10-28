@@ -81,8 +81,8 @@ namespace cane_planner
         std::string corridor_failure_directory_;
         double corridor_planning_length_ = 8., corridor_preview_length_ = 20.;
         bool corridor_preview_enabled_ = false;
-        double corridor_preview_period_ = .5;
-        ros::Time corridor_preview_started_;
+        double corridor_preview_period_ = .2;
+        ros::Time corridor_preview_started_, corridor_preview_next_;
         uint64_t corridor_preview_revision_ = 0;
         struct CorridorPreview {
             ConvexCorridor::Result result;
@@ -92,7 +92,8 @@ namespace cane_planner
         };
         std::future<CorridorPreview> corridor_preview_job_;
         ros::Publisher corridor_preview_pub_,human_cane_pub_;
-        void updateCorridorPreviewLocked(const Eigen::Vector3d& pose,bool active_valid);
+        void updateCorridorPreviewLocked(const Eigen::Vector3d& pose,bool active_valid,
+            const ros::Time& schedule_epoch = ros::Time());
         void publishCorridorPreviewLocked(const CorridorPreview* preview);
         void publishHumanCaneLocked(const Eigen::Vector3d& pose,bool show_plan);
         BsplineOptimizer::Ptr bspline_optimizers_;
@@ -149,17 +150,29 @@ namespace cane_planner
         bool authorizePedestrianFrameLocked(const PedestrianFrameToken&, const ros::Time&);
         void clearPedestrianMarkersLocked();
         void resetCorridorForGoalLocked();
-        std::string dynamic_recovery_reason_ = "NOT_NEEDED";
-        uint64_t dynamic_recovery_attempts_ = 0;
-        double dynamic_recovery_seconds_ = 0.;
-        bool recoverDynamicRouteLocked(const Eigen::Vector3d& pose,
-            ConvexCorridor::Result& corridor, Eigen::Vector3d& control,
-            std::vector<Eigen::Vector2d>& pending_route);
+        std::string global_replan_reason_ = "NOT_NEEDED";
+        uint64_t global_replan_attempts_ = 0;
+        double global_replan_seconds_ = 0.;
+        double global_replan_period_ = .2;
+        ros::Time last_global_replan_, next_global_replan_;
+        struct GlobalRouteResult {
+            Astar::RecoveryResult search;
+            uint64_t revision=0;
+            bool dynamic=false;
+            ros::Time stamp, receipt, requested;
+        };
+        uint64_t global_route_revision_=0;
+        std::future<GlobalRouteResult> global_route_job_;
+        std::unique_ptr<GlobalRouteResult> global_route_ready_;
+        bool refreshGlobalRouteLocked(const Eigen::Vector3d& pose,
+            std::vector<Eigen::Vector2d>& pending_route, const ros::Time& schedule_epoch,
+            bool accept_result=true);
 #ifdef CANE_MANAGER_INTERLEAVING_TEST
         // Compiled only into the manager regression target, absent from runtime.
         std::function<void()> after_mppi_test_hook_, geometry_locked_test_hook_;
         std::function<void()> pedestrian_callback_entry_test_hook_;
-        std::function<void()> after_recovery_search_test_hook_;
+        std::function<void()> after_global_search_test_hook_;
+        std::function<void()> global_worker_test_hook_;
         std::function<void()> after_initial_search_test_hook_, goal_entry_test_hook_;
 #endif
 
@@ -264,6 +277,21 @@ namespace cane_planner
         static constexpr int STUCK_THRESHOLD = 30;
         bool mpc_reached_goal_;
 
+        // Enabled only by initialization of the lightweight planner-3 plant.
+        bool timed_sim_execution_=false, execution_active_=false;
+        LFPC execution_root_;
+        Eigen::Vector3d execution_control_=Eigen::Vector3d::Zero();
+        double execution_phase_=0.;
+        ros::Time execution_clock_;
+        ConvexCorridor::Result execution_corridor_;
+        MpcController::CollisionWitness execution_witness_;
+        std::mutex fsmMutex_;
+        ros::Timer execution_timer_;
+        ros::Publisher execution_diag_pub_;
+        void executionCallback(const ros::TimerEvent&);
+        bool advanceExecutionLocked(const ros::Time& now);
+        void publishExecutionDecisionLocked(const std::string& reason);
+
         Eigen::Vector3d mpc_sim_goal_;
 
         /*---------- Ros utils -----------*/
@@ -347,7 +375,9 @@ namespace cane_planner
         void publishWalkingCorridor(const DynamicWalkingCorridor::Result& result);
         ConvexCorridor::Result updateAndPublishConvexCorridorLocked(
                                              const Eigen::Vector3d& current_pose,
-                                             PedestrianFrameToken* used_frame = nullptr);
+                                             PedestrianFrameToken* used_frame = nullptr,
+                                             std::vector<Eigen::Vector2d>* pending_route = nullptr,
+                                             const ros::Time& schedule_epoch = ros::Time());
         void publishConvexCorridorLocked(const ConvexCorridor::Result& result);
         void publishTimedCollisionLocked(const ros::Time& epoch, bool show_plan);
         const char* interactionSceneName(InteractionScene scene) const;

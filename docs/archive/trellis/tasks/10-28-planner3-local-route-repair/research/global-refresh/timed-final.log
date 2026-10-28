@@ -1,0 +1,25 @@
+[==========] Running 7 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 6 tests from TimedPedestrianCollision
+[ RUN      ] TimedPedestrianCollision.FutureCrossingAndObservationAge
+[       OK ] TimedPedestrianCollision.FutureCrossingAndObservationAge (0 ms)
+[ RUN      ] TimedPedestrianCollision.ContactContainmentAndSeparation
+[       OK ] TimedPedestrianCollision.ContactContainmentAndSeparation (0 ms)
+[ RUN      ] TimedPedestrianCollision.RotatedSeparationAndClockwiseHull
+[       OK ] TimedPedestrianCollision.RotatedSeparationAndClockwiseHull (0 ms)
+[ RUN      ] TimedPedestrianCollision.InvalidGeometryAndTimeFailClosed
+[       OK ] TimedPedestrianCollision.InvalidGeometryAndTimeFailClosed (0 ms)
+[ RUN      ] TimedPedestrianCollision.CircumscribedRobotAndMultipleObstacles
+[       OK ] TimedPedestrianCollision.CircumscribedRobotAndMultipleObstacles (0 ms)
+[ RUN      ] TimedPedestrianCollision.CaneTipAndRotatingEnvelopeUseSameTime
+[       OK ] TimedPedestrianCollision.CaneTipAndRotatingEnvelopeUseSameTime (0 ms)
+[----------] 6 tests from TimedPedestrianCollision (0 ms total)
+
+[----------] 1 test from HumanCaneFootprint
+[ RUN      ] HumanCaneFootprint.BothCompleteDisksRemainCoveredWhenRotated
+[       OK ] HumanCaneFootprint.BothCompleteDisksRemainCoveredWhenRotated (1 ms)
+[----------] 1 test from HumanCaneFootprint (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 7 tests from 2 test suites ran. (1 ms total)
+[  PASSED  ] 7 tests.

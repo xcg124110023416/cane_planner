@@ -12,6 +12,7 @@ TOPICS = [
     "/pedsim_simulator/simulated_agents",
     "/pedsim_single_bridge/status",
     "/mpc/transaction_diagnostics",
+    "/mpc/execution_diagnostics",
     "/move_base_simple/goal",
     "/initialpose",
     "/rosout",

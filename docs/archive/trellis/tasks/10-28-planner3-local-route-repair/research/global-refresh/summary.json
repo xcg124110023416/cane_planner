@@ -1,0 +1,51 @@
+{
+  "office": {
+    "accepted_global_routes": 7,
+    "stop_reasons": {
+      "OK": 35,
+      "INVALID_STATIC_CORRIDOR": 3
+    },
+    "search_ms": [
+      100.576,
+      83.1495,
+      62.7959,
+      46.5104,
+      54.7568,
+      37.1235,
+      23.595499999999998
+    ],
+    "minimum_goal_distance": 0.029099008224416086,
+    "final_odom": [
+      7.586748887452525,
+      2.9658593243448363
+    ]
+  },
+  "pedestrian": {
+    "accepted_global_routes": 7,
+    "stop_reasons": {
+      "OK": 34,
+      "INVALID_STATIC_CORRIDOR": 3
+    },
+    "search_ms": [
+      87.7579,
+      65.4464,
+      55.8578,
+      41.488200000000006,
+      55.1004,
+      38.1381,
+      25.7723
+    ],
+    "minimum_goal_distance": 0.0777536709578641,
+    "final_odom": [
+      7.4908908442777955,
+      2.9337873544223507
+    ],
+    "nonempty_source_frames": 161,
+    "executed_timed_safe_frames": 34,
+    "unsafe_executable_frames": 0,
+    "com_near_blocker_x": [
+      -2.037120393956096,
+      3.7799932213486898
+    ]
+  }
+}

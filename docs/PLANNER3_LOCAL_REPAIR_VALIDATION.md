@@ -1,5 +1,7 @@
 # Planner 3 时间冲突与局部修路验证
 
+> 历史版本：当前默认流程已替换为 [周期全局 A* 刷新](PLANNER3_GLOBAL_REFRESH_VALIDATION.md)。
+
 2026-10-28，基于 `mpc-lfpc-prototype` / `3066cf5`，本次工作区实现。
 
 ## 验证范围
@@ -67,7 +69,7 @@
 局部搜索每次只提取一次地图。它比普通 MPPI 周期明显更贵，因此只在
 失败且有时间碰撞记录时调用；仍受最多 200 ms、原观测剩余时效一半的
 协作预算约束，不构成硬实时保证。持久摘要见
-[office-replay-summary.json](../.trellis/tasks/10-28-planner3-local-route-repair/research/office-replay-summary.json)。
+[office-replay-summary.json](archive/trellis/tasks/10-28-planner3-local-route-repair/research/office-replay-summary.json)。
 原始本机日志位于 `/tmp/cane-local-repair-final-*`；临时日志不属于持久证据。
 
 ## 实现期间发现的问题

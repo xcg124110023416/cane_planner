@@ -1,0 +1,36 @@
+----------------------------------------------------
+Profile:                     default
+Extending:          [cached] /opt/ros/noetic
+Workspace:                   /home/xcg/ws
+----------------------------------------------------
+Build Space:        [exists] /home/xcg/ws/build
+Devel Space:        [exists] /home/xcg/ws/devel
+Install Space:      [unused] /home/xcg/ws/install
+Log Space:          [exists] /home/xcg/ws/logs
+Source Space:       [exists] /home/xcg/ws/src
+DESTDIR:            [unused] None
+----------------------------------------------------
+Devel Space Layout:          linked
+Install Space Layout:        None
+----------------------------------------------------
+Additional CMake Args:       None
+Additional Make Args:        None
+Additional catkin Make Args: all, test_sim_odom_stop
+Internal Make Job Server:    True
+Cache Job Environments:      False
+----------------------------------------------------
+Buildlisted Packages:        None
+Skiplisted Packages:         uav_simulator
+----------------------------------------------------
+Workspace configuration appears valid.
+----------------------------------------------------
+[build] Found 20 packages in 0.0 seconds.
+[build] Package table is up to date.
+Starting >>> plan_manage
+Finished <<< plan_manage                [ 59.3 seconds ]
+[build] Summary: All 1 packages succeeded!
+[build] Ignored: 19 packages were skipped or are skiplisted.
+[build] Warnings: None.
+[build] Abandoned: No packages were abandoned.
+[build] Failed: No packages failed.
+[build] Runtime: 59.4 seconds total.

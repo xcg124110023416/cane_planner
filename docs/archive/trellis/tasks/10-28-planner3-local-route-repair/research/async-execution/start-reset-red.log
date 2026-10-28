@@ -1,0 +1,35 @@
+Note: Google Test filter = SimOdomTest.TimedPlantStartResetPublishesRequestedYawAndClearsPriorVelocity
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SimOdomTest
+[ RUN      ] SimOdomTest.TimedPlantStartResetPublishesRequestedYawAndClearsPriorVelocity
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+/home/xcg/ws/src/cane_planner/plan_manage/test/test_sim_odom_stop.cpp:868: Failure
+The difference between 1.2 and tf::getYaw(odom_.back().pose.pose.orientation) is 1.2, which exceeds 1e-12, where
+1.2 evaluates to 1.2,
+tf::getYaw(odom_.back().pose.pose.orientation) evaluates to 0, and
+1e-12 evaluates to 9.9999999999999998e-13.
+/home/xcg/ws/src/cane_planner/plan_manage/test/test_sim_odom_stop.cpp:872: Failure
+The difference between 1.2 and tf::getYaw(odom_.back().pose.pose.orientation) is 1.2, which exceeds 1e-12, where
+1.2 evaluates to 1.2,
+tf::getYaw(odom_.back().pose.pose.orientation) evaluates to 0, and
+1e-12 evaluates to 9.9999999999999998e-13.
+/home/xcg/ws/src/cane_planner/plan_manage/test/test_sim_odom_stop.cpp:873: Failure
+Expected equality of these values:
+  0.
+    Which is: 0
+  odom_.back().twist.twist.linear.x
+    Which is: 0.41930511184058145
+[  FAILED  ] SimOdomTest.TimedPlantStartResetPublishesRequestedYawAndClearsPriorVelocity (302 ms)
+[----------] 1 test from SimOdomTest (302 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (303 ms total)
+[  PASSED  ] 0 tests.
+[  FAILED  ] 1 test, listed below:
+[  FAILED  ] SimOdomTest.TimedPlantStartResetPublishesRequestedYawAndClearsPriorVelocity
+
+ 1 FAILED TEST

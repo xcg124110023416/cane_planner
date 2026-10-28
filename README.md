@@ -25,24 +25,25 @@ planner 3 通过 MPPI 加权迭代优化连续转向序列，步长与步宽固�
 
 ```mermaid
 flowchart LR
-    MAP["地图与碰撞查询"] --> ASTAR["A* 全局折线"]
+    MAP["最新地图与当前位置"] --> ASTAR["后台周期全局 A* 至最终目标"]
     ASTAR --> FIRI["FIRI 静态基础走廊"]
     MAP --> FIRI
     PED["当前帧行人观测"] --> HULL["行人凸多边形"]
+    HULL --> ASTAR
     HULL --> CV["匀速预测凸包 P(t)"]
     CV --> MPPI
     FIRI --> MPPI["LFPC/LIPM MPPI 加权迭代"]
     MAP --> MPPI
-    MPPI --> EXEC["复检加权序列，执行首步或 STOP"]
-    MPPI -->|无安全候选且有时间冲突| REPAIR["局部 A* 修路与走廊重建"]
-    REPAIR --> MPPI
+    MPPI --> EXEC["执行前复检与 STOP 判定"]
+    EXEC -->|全部验证通过| COMMIT["提交候选参考并接收首步"]
+    COMMIT --> PLANT["轻量仿真每 20 ms 复检并推进 LFPC"]
 ```
 
-1. **全局参考。** 保留 A* 输出的全部折线顶点，统一用于局部目标选择、投影跟踪、走廊生成和可视化；planner 3 不对它做稀疏航点抽取或圆角平滑。离墙软代价查询同一二维障碍栅格生成的欧氏距离场，在一次搜索内分块复用；每次新搜索读取最新地图。
-2. **空间走廊。** FIRI 默认根据当前区域对原始路径的连续覆盖范围推进，排除完整静态栅格，为整个人杖外形预留空间。行人通过后续时间同步检查约束，不再因其当前位置穿过参考路径就使整段走廊失效。规划长度默认 8 m，远处预览默认 20 m，两者独立。
+1. **周期全局参考。** 初次 A* 初始化参考；进入执行阶段后，默认每 0.2 s 调度后台搜索，从请求时的实际位置到最终目标搜索完整路径，读取选定静态地图副本，并将当前行人凸包临时叠加为障碍。最多一个搜索任务，忙时跳过调度，不阻塞局部执行。搜索范围覆盖整张地图，不再只修补某一局部路段，也不等待 MPPI 失败。保留全部折线顶点，用于目标选择、跟踪、走廊和显示。
+2. **空间走廊。** FIRI 默认根据当前区域对原始路径的连续覆盖范围推进，排除完整静态栅格，为整个人杖外形预留空间。行人通过后续时间同步检查约束，不再因其当前位置穿过参考路径就使整段走廊失效。规划长度默认 8 m，远处预览默认 20 m，两者独立；预览默认也按 0.2 s 的相位调度。
 3. **转向优化。** 默认预测 10 步，每轮采样 256 条连续转向序列、迭代 2 轮，逐步相对转角限于 `±30°`。有热启动时沿用上次解移位后的序列；冷启动时用参考路径生成初始转向提议，投影沿路径向前推进。在提议附近施加高斯扰动，按可行序列的代价做指数加权，更新整条序列，并保留直行候选。所有提议均重新检查，步长与步宽固定。
-4. **轨迹检查与执行。** 检查落脚点的静态可通行性，以及每个质心采样点的静态碰撞；每个检查姿态的完整人杖包络须包含在某一块凸区域中。启用行人时，另按每个采样点的未来时间，检查机器人包络与匀速预测行人凸包是否相交。选中序列从原始完整 LFPC 状态重新推演，执行前按最新时间原点复查，通过后只执行第一步。
-5. **动态路径恢复。** 先运行带时间检查的 MPPI；没有安全候选且存在时间碰撞记录时，才以冲突时刻的预测行人凸包作空间引导，局部 A* 修补受影响的参考路段，保留未受影响的路线后缀。搜索考虑完整人杖外形、直线平移及中间转角；新路线须通过静态走廊重建、重新 MPPI 优化、观测时效与执行时间复查，才会替换当前参考。每周期最多一次局部修路。
+4. **轨迹检查与执行。** 检查落脚点的静态可通行性，以及每个质心采样点的静态碰撞；每个检查姿态的完整人杖包络须包含在某一块凸区域中。启用行人时，另按每个采样点的未来时间，检查机器人包络与匀速预测行人凸包是否相交。选中序列从原始完整 LFPC 状态重新推演，执行前按最新时间原点复查。轻量仿真将首步排入执行，默认每 20 ms 按实际经过的时间推进 LIPM，并以最新有效行人观测、静态地图及剩余步态再次检查；在落脚步边界优化下一步。
+5. **候选参考提交。** 全局 A* 检查完整人杖外形的平移段和中间转角，用同一静态栅格距离场提供离墙偏好。后台结果先连接到接收时的实际位置，再通过活动静态走廊重建、MPPI、原观测时效与执行时间复查，才能替换当前参考；刷新不会重置实际 LFPC 状态。轻量仿真在落脚步边界接入新参考，实际发布间隔受步态与计算耗时影响。搜索失败时仅可继续使用本周期重新验证过的原参考。
 6. **失败处理。** 加权序列也必须重新通过完整约束检查。若加权结果不可行，保留本轮已验证的可行候选继续迭代；所有加权更新都失败时使用本轮最佳可行候选。无有效走廊、无可行序列或行人数据无效时，发布 STOP 建议；轻量仿真保持 LFPC 状态并发布静止里程计，Gazebo 输出零速度。
 
 加权更新可行时，从初始可行提议和各轮可行加权结果中选择代价最低者，避免相对已验证的热启动解退化。局部目标到达只影响距离代价，仍检查完整预测期；只有安全进入实际最终目标范围才允许提前结束。有限采样 MPPI 提供连续优化过程，**不保证严格局部最优或找到所有可行解**。
@@ -52,7 +53,7 @@ flowchart LR
 - `use_pedestrians:=false` 为静态模式；启用后要求持续收到有效观测。
 - 当前 planner 3 支持每帧 **零或一个行人**。新鲜空帧有效；超过一个行人、数组不匹配、非有限数值、无效时间戳或缺失 TF 均视为输入无效。
 - 规划坐标系为 `world`。外部观测按原始时间戳变换；默认最大观测与接收时效均为 **0.5 s**，计算结束、执行前仍需检查。
-- 行人约束使用 **LFPC 时间同步凸包碰撞检查**，静态基础走廊仍为必需约束。未来凸包按观测速度匀速平移；局部 A* 的预测凸包只用于搜索绕行方向，不能替代时间检查。历史时空走廊与多速度区间鲁棒设计没有接入。
+- 行人约束使用 **LFPC 时间同步凸包碰撞检查**，静态基础走廊仍为必需约束。未来凸包按观测速度匀速平移；全局 A* 的当前凸包只用于搜索绕行方向，不能替代时间检查。历史时空走廊与多速度区间鲁棒设计没有接入。
 - 默认使用随 LFPC 躯干朝向旋转的完整人杖刚性包络，保留离散姿态与中间转角检查；尚不覆盖采样间连续运动、手杖独立摆动、行人加速度或转向。有限 MPPI 采样没有找到可行序列，不等于证明不存在可行路径。
 
 ### LFPC 时间同步避障
@@ -68,11 +69,13 @@ Pᵢ = P₀ + v × [(执行时间原点 − 观测时间戳) + τᵢ]
 
 搜索、选中序列重演、执行前复查使用同一份观测。执行前复查会补偿规划耗时；复查失败发布 `TIMED_EXECUTION_COLLISION`，轻量仿真不推进 LFPC。原有 0.5 s 观测／接收时效限制不变。
 
-原启动命令会默认启用该功能；可追加 `mpc_timed_collision_enable:=false` 做消融，此时保留当前帧行人 FIRI 空间排除，不启用时间冲突触发的局部修路。完整人杖尺寸通过 `human_cane_*` 启动参数调整，`mpc_timed_robot_radius` 仅在关闭完整人杖模型的对照模式中生效。RViz **MPC_TimedCollision** 中同色机器人轮廓与行人凸包对应同一未来时刻，颜色由青到紫，文字标注 `+τ s`；STOP 时红色 `Rejected` 表示一个被拒绝的碰撞样本。最多显示十组安全预测，完整采样通过 `/mpc/timed_best_path` 输出，各 `PoseStamped.header.stamp` 为时间原点加 `τᵢ`。
+原启动命令会默认启用该功能；可追加 `mpc_timed_collision_enable:=false` 做消融，此时保留当前帧行人 FIRI 空间排除，周期全局刷新仍运行。完整人杖尺寸通过 `human_cane_*` 启动参数调整，`mpc_timed_robot_radius` 仅在关闭完整人杖模型的对照模式中生效。RViz **MPC_TimedCollision** 中同色机器人轮廓与行人凸包对应同一未来时刻，颜色由青到紫，文字标注 `+τ s`；STOP 时红色 `Rejected` 表示一个被拒绝的碰撞样本。最多显示十组安全预测，完整采样通过 `/mpc/timed_best_path` 输出，各 `PoseStamped.header.stamp` 为时间原点加 `τᵢ`。
 
-本次静态基础走廊与局部修路的结果见 [局部修路验证记录](docs/PLANNER3_LOCAL_REPAIR_VALIDATION.md)。此前 MPPI 的测试、性能与运行证据见 [MPPI 验证记录](docs/LFPC_MPPI_VALIDATION.md)；[时间碰撞检查初版记录](docs/LFPC_TIMED_COLLISION_VALIDATION.md) 保留原 beam 版本的历史结果。
+当前周期全局刷新的结果见 [全局刷新验证记录](docs/PLANNER3_GLOBAL_REFRESH_VALIDATION.md)；[局部修路验证记录](docs/PLANNER3_LOCAL_REPAIR_VALIDATION.md) 保留上一版本的历史结果。此前 MPPI 的测试、性能与运行证据见 [MPPI 验证记录](docs/LFPC_MPPI_VALIDATION.md)；[时间碰撞检查初版记录](docs/LFPC_TIMED_COLLISION_VALIDATION.md) 保留原 beam 版本的历史结果。
 
-默认模式可以评估“行人将来离开、机器人稍后再经过”的候选；基础走廊本身只表示静态自由空间，行人轮廓进入蓝色走廊不等于该时刻将发生碰撞。轻量仿真仍按 FSM 周期整步更新位置，**不连续播放 LFPC 支撑相**；上述时间是预测模型时间，不能据此声称已完成真实执行速度同步或连续运动验证。
+默认模式可以评估“行人将来离开、机器人稍后再经过”的候选；基础走廊本身只表示静态自由空间，行人轮廓进入蓝色走廊不等于该时刻将发生碰撞。轻量仿真现按模型时间逐段执行，保留原 LFPC 离散化决定的有效步时；延迟时单次最多推进 40 ms，不补跳整步。执行中受阻会冻结实际位置和步态阶段，后续有效观测复检通过才恢复。检查仍限于离散姿态，不代表连续扫掠安全或实机跟踪验证。
+
+轻量执行期间，`MPC_HumanCane` 显示实际姿态，`MPC_TimedCollision` 和 `/mpc/timed_best_path` 显示本次复检的首步剩余预测及对应行人凸包，时间原点随检查更新；`/mpc/best_traj` 保留最近一次 MPPI 的完整预测。新增 `/mpc/execution_diagnostics` 记录实际阶段、推进量与停车状态。
 
 具体显示颜色、范围与尺寸调整见 [走廊使用说明](docs/PLANNER3_CORRIDOR_USAGE.md)。
 
@@ -222,11 +225,13 @@ roslaunch plan_manage kin_replan.launch planner:=2
 | `mpc/w_goal` | `25.0` | 局部目标距离代价权重 |
 | `mpc/w_steer` | `0.5` | 转角幅度代价权重 |
 | `mpc/w_dapi` | `0.2` | 相邻步转角变化代价权重 |
+| `manager/global_replan_period` | `0.2 s` | planner 3 全局重搜周期，启动参数 `global_replan_period`，支持 `0.1..5 s` |
 | `manager/lookahead_dist` | `3.0 m` | 沿全局参考选择局部目标的前瞻距离 |
 | `convex_corridor/local_radius` | `3.0 m` | 走廊局部地图查询与扩展范围参数 |
 | `convex_corridor/max_segment_length` | `1.0 m` | 自适应模式的前向保护长度上限；旧模式的最大分段长度 |
 | `convex_corridor/adaptive_sampling` | `true` | 根据连续覆盖范围推进生成位置 |
 | `convex_corridor/planning_length` | `8.0 m` | 实际规划参考长度 |
+| `convex_corridor/preview_period` | `0.2 s` | 远处预览周期，支持 `0.1..5 s`，默认与全局刷新同相位 |
 | `convex_corridor/preview_length` | `20.0 m` | 远处预览长度，0 为剩余整条路线 |
 | `human_cane/enabled` | `true` | 完整人杖刚性包络 |
 | `human_cane/body_radius`、`cane_length`、`front_radius`、`margin` | `0.25/0.65/0.12/0.03 m` | 人体半径、前伸距离、前端半径和余量 |
@@ -256,6 +261,7 @@ planner 3 始终固定步长、步宽，只优化转角；`sigma_al`、`sigma_aw
 | `/mpc/optimization_evidence` | `std_msgs/Float64MultiArray` | 采样数、加权复检、有效样本量、逐轮代价及重演结果 |
 | `/mpc/debug_metrics` | `std_msgs/Float64MultiArray` | 规划耗时、拒绝计数和执行代价 |
 | `/mpc/transaction_diagnostics` | `std_msgs/Float64MultiArray` | 观测时效、事务耗时及是否执行 LFPC 积分 |
+| `/mpc/execution_diagnostics` | `std_msgs/Float64MultiArray` | 轻量仿真的实际步态阶段、推进量、停车状态及复检耗时 |
 | `/mpc/stop_advice`、`/mpc/stop_reason` | `std_msgs/Bool`、`std_msgs/String` | 停止建议及原因 |
 | `/sim_odom` | `nav_msgs/Odometry` | 轻量仿真的 LFPC 状态与静止心跳 |
 | `/cmd_vel_footprint` | `geometry_msgs/Twist` | Gazebo 模式下的速度输出 |
@@ -317,7 +323,9 @@ rosrun path_searching convex_corridor_replay /path/to/failure.snapshot
 | `bspline/`、`bspline_opt/` | B 样条表示与优化；当前 planner 2 已关闭拟合调用 |
 | `Utils/`、`LFPC/` | 地图与硬件工具、Python 步态参考原型 |
 
-当前运行约定见 [.trellis/spec/planning-runtime/](.trellis/spec/planning-runtime/index.md)，重点是 [静态 FIRI](.trellis/spec/planning-runtime/static-firi-corridor.md)、[时间冲突触发的局部修路](.trellis/spec/planning-runtime/time-triggered-local-repair.md) 和 [行人观测事务](.trellis/spec/planning-runtime/current-frame-pedestrian-corridor.md)。FIRI 改编代码的来源与许可见 [FIRI_NOTICE](path_searching/FIRI_NOTICE)。
+当前运行约定见 [docs/development/planning-runtime/](docs/development/planning-runtime/index.md)，重点是 [静态 FIRI](docs/development/planning-runtime/static-firi-corridor.md)、[周期全局参考刷新](docs/development/planning-runtime/periodic-global-reference.md) 和 [行人观测事务](docs/development/planning-runtime/current-frame-pedestrian-corridor.md)。FIRI 改编代码的来源与许可见 [FIRI_NOTICE](path_searching/FIRI_NOTICE)。
+
+项目已撤下 Trellis 工作流，直接使用 Codex 进行开发与验证。旧任务、研究记录和集成文件保留在 [历史归档](docs/archive/trellis/README.md)。
 
 `docs/archive/`、`docs/superpowers/` 和 [混合场景调试记录](docs/MIXED_CORRIDOR_DEBUG_NOTES.md) 保留历史方案与实验记录；其中的 DRF-MPPI、时空走廊、旧参数和验证结果不能直接作为当前 planner 3 的运行说明。
 

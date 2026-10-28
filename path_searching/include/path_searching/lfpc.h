@@ -66,6 +66,11 @@ namespace cane_planner
         void updateOneStepForOnce(double t);
         void prepareNextStep();
 
+        // Exact LIPM pose at elapsed time of one controlled support phase.
+        // Source must be at a phase boundary. Completion alone switches support.
+        double stepDuration() const;
+        bool sampleControlledStep(const Vector3d& control, double elapsed, LFPC& output) const;
+
         void SetCtrlParams(Vector3d input);
         void reset(Vector3d init_v_state, Vector3d COM_init_pos,
                    char cur_support_leg, int step_num);

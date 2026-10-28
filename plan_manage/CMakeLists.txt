@@ -67,6 +67,7 @@ include_directories(
 add_executable(kin_replan_node
   src/kin_replan_node.cpp
   src/planner_manager.cpp
+  src/lfpc_execution.cpp
 )
 
 # 依赖确保（消息生成顺序）
@@ -106,6 +107,7 @@ if(CATKIN_ENABLE_TESTING)
   catkin_add_gtest(test_sim_odom_stop
     test/test_sim_odom_stop.cpp
     src/planner_manager.cpp
+    src/lfpc_execution.cpp
   )
   if(TARGET test_sim_odom_stop)
     target_compile_definitions(test_sim_odom_stop PRIVATE CANE_MANAGER_INTERLEAVING_TEST)

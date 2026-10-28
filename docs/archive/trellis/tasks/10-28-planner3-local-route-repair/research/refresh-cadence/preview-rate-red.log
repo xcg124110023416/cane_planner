@@ -1,0 +1,5 @@
+Actual nonempty preview times: [2.654174649000197, 2.841825116000109, 3.037795354000991, 3.6406182380014798, 3.8400516050023725]
+Maximum visible preview gap: 0.6028228840004886
+Traceback (most recent call last):
+  File "<stdin>", line 7, in <module>
+AssertionError: Preview still loses scheduled updates despite a 0.2s period

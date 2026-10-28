@@ -1,0 +1,348 @@
+[==========] Running 26 tests from 5 test suites.
+[----------] Global test environment set-up.
+[----------] 5 tests from AstarEdges
+[ RUN      ] AstarEdges.ExactDiagonalAndClearance
+[       OK ] AstarEdges.ExactDiagonalAndClearance (287 ms)
+[ RUN      ] AstarEdges.SearchReroutesAndCorridorAccepts
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarEdges.SearchReroutesAndCorridorAccepts (302 ms)
+[ RUN      ] AstarEdges.LatestCapturedGridReroute
+reroute old_edges=80 new_edges=78 regions=4 search_ms=0.463668
+-2.93407  4.93327
+-2.93407  4.83327
+-2.93407  4.73327
+-2.93407  4.63327
+-2.93407  4.53327
+-2.93407  4.43327
+-2.93407  4.33327
+-2.93407  4.23327
+-2.93407  4.13327
+-2.93407  4.03327
+-2.93407  3.93327
+-2.93407  3.83327
+-2.93407  3.73327
+-2.93407  3.63327
+-2.93407  3.53327
+-2.93407  3.43327
+-2.93407  3.33327
+-2.93407  3.23327
+-2.93407  3.13327
+-2.93407  3.03327
+-2.93407  2.93327
+-2.93407  2.83327
+-2.93407  2.73327
+-2.93407  2.63327
+-2.93407  2.53327
+-2.93407  2.43327
+-2.93407  2.33327
+-2.93407  2.23327
+-2.93407  2.13327
+-2.93407  2.03327
+-2.93407  1.93327
+-2.93407  1.83327
+-2.93407  1.73327
+-2.93407  1.63327
+-2.93407  1.53327
+-2.93407  1.43327
+-2.93407  1.33327
+-2.93407  1.23327
+-2.93407  1.13327
+-2.93407  1.03327
+-2.93407 0.933269
+-2.93407 0.833269
+-2.93407 0.733269
+-2.93407 0.633269
+-2.93407 0.533269
+-2.93407 0.433269
+-2.93407 0.333269
+-2.93407 0.233269
+-2.93407 0.133269
+ -2.93407 0.0332685
+  -2.93407 -0.0667315
+ -2.83407 -0.166731
+ -2.73407 -0.266731
+ -2.63407 -0.366731
+ -2.63407 -0.466731
+ -2.63407 -0.566731
+ -2.53407 -0.666731
+ -2.53407 -0.766731
+ -2.53407 -0.866731
+ -2.53407 -0.966731
+-2.53407 -1.06673
+-2.53407 -1.16673
+-2.53407 -1.26673
+-2.53407 -1.36673
+-2.53407 -1.46673
+-2.53407 -1.56673
+-2.53407 -1.66673
+-2.53407 -1.76673
+-2.53407 -1.86673
+-2.53407 -1.96673
+-2.53407 -2.06673
+-2.53407 -2.16673
+-2.53407 -2.26673
+-2.53407 -2.36673
+-2.53407 -2.46673
+-2.53407 -2.56673
+-2.53407 -2.66673
+-2.53407 -2.76673
+-2.53407 -2.86673
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarEdges.LatestCapturedGridReroute (300 ms)
+[ RUN      ] AstarEdges.GlobalWorkerUsesOnlyItsFrozenGridAndConfiguration
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarEdges.GlobalWorkerUsesOnlyItsFrozenGridAndConfiguration (302 ms)
+[ RUN      ] AstarEdges.CachedSupportsNeverFreeAnOverlappingWholeCellOrPedestrian
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarEdges.CachedSupportsNeverFreeAnOverlappingWholeCellOrPedestrian (300 ms)
+[----------] 5 tests from AstarEdges (1491 ms total)
+
+[----------] 12 tests from AstarClearance
+[ RUN      ] AstarClearance.MetreCostHeuristicAndFullEdgeIntegral
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarClearance.MetreCostHeuristicAndFullEdgeIntegral (301 ms)
+[ RUN      ] AstarClearance.OpenSpaceLengthAndExactGoal
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarClearance.OpenSpaceLengthAndExactGoal (301 ms)
+[ RUN      ] AstarClearance.WidePassagePrefersInteriorAndNarrowRemainsOpen
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarClearance.WidePassagePrefersInteriorAndNarrowRemainsOpen (603 ms)
+[ RUN      ] AstarClearance.NativeAndSearchResolutionSensitivity
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarClearance.NativeAndSearchResolutionSensitivity (1207 ms)
+[ RUN      ] AstarClearance.SameSelectedBlockedLayerNotRawDistance
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarClearance.SameSelectedBlockedLayerNotRawDistance (301 ms)
+[ RUN      ] AstarClearance.GoalConnectorComparedWithDijkstraAndInvalidConfig
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarClearance.GoalConnectorComparedWithDijkstraAndInvalidConfig (303 ms)
+[ RUN      ] AstarClearance.RealLocalProducerCostMatchesSelectedBins
+hit: 0.847298, miss: -0.619039, min: -1.99243, max: 3.4761, thresh: 1.38629
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarClearance.RealLocalProducerCostMatchesSelectedBins (300 ms)
+[ RUN      ] AstarClearance.PreferenceGridBudgetRejectsBeforeExpansion
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarClearance.PreferenceGridBudgetRejectsBeforeExpansion (301 ms)
+[ RUN      ] AstarClearance.HorizonRetainsCertifiedOffLatticeGoalWithPenalty
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarClearance.HorizonRetainsCertifiedOffLatticeGoalWithPenalty (301 ms)
+[ RUN      ] AstarClearance.OmittedLegacySigmaFallback
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarClearance.OmittedLegacySigmaFallback (301 ms)
+[ RUN      ] AstarClearance.RefreshDistanceFieldOnSearchAndSourceReplacement
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarClearance.RefreshDistanceFieldOnSearchAndSourceReplacement (302 ms)
+[ RUN      ] AstarClearance.TileBoundaryDoesNotCreateArtificialWallPenalty
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarClearance.TileBoundaryDoesNotCreateArtificialWallPenalty (302 ms)
+[----------] 12 tests from AstarClearance (4823 ms total)
+
+[----------] 5 tests from AstarRecovery
+[ RUN      ] AstarRecovery.WholePolygonCrossingTangencyAndContainment
+[       OK ] AstarRecovery.WholePolygonCrossingTangencyAndContainment (0 ms)
+[ RUN      ] AstarRecovery.ExactGoalDetourAndEmptyOverlayEquivalence
+PROFILE hard_s=0.00199436 soft_s=0.000759241 grid_s=0.000784983 hard_calls=5167 soft_calls=973 grid_calls=5067 expanded=639
+RECOVERY grid=80x40 seconds=0.00327443 edges=52
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarRecovery.ExactGoalDetourAndEmptyOverlayEquivalence (302 ms)
+[ RUN      ] AstarRecovery.BlockedEndpointsImpossiblePassageDeadlineAndPartialReject
+open set empty, no path!
+use node num: 261
+iter num: 261
+NO_PATH seconds=0.00154808
+[Astar](horizon):---------------------- 15
+15,3,XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarRecovery.BlockedEndpointsImpossiblePassageDeadlineAndPartialReject (302 ms)
+[ RUN      ] AstarRecovery.SoftPruningFrozenInputsAndFloatTies
+PRUNING weight=0 seconds=0.0025866460000000002 expanded=643 hard=5199 soft=971 skipped=4073 cost=5.7276814239512568 route=0.13,1.5;0.23000000000000001,1.5;0.33000000000000002,1.5;0.43000000000000005,1.5;0.53000000000000003,1.5;0.63,1.5;0.73000000000000009,1.5;0.83000000000000007,1.5;0.93000000000000005,1.5;1.03,1.5;1.1299999999999999,1.5;1.23,1.3999999999999999;1.3300000000000001,1.3999999999999999;1.4300000000000002,1.3999999999999999;1.5300000000000002,1.3;1.6299999999999999,1.3;1.73,1.2;1.8300000000000001,1.1000000000000001;1.9300000000000002,1;2.0300000000000002,0.89999999999999991;2.1299999999999999,0.89999999999999991;2.23,0.89999999999999991;2.3300000000000001,0.89999999999999991;2.4300000000000002,0.89999999999999991;2.5300000000000002,0.89999999999999991;2.6299999999999999,0.89999999999999991;2.73,0.89999999999999991;2.8300000000000001,0.89999999999999991;2.9300000000000002,0.89999999999999991;3.0300000000000002,0.89999999999999991;3.1299999999999999,0.89999999999999991;3.23,0.89999999999999991;3.3300000000000001,0.89999999999999991;3.4300000000000002,0.89999999999999991;3.5300000000000002,0.89999999999999991;3.6299999999999999,0.89999999999999991;3.73,0.89999999999999991;3.8300000000000001,0.89999999999999991;3.9300000000000002,0.89999999999999991;4.0300000000000002,0.89999999999999991;4.1299999999999999,0.89999999999999991;4.2300000000000004,1;4.3300000000000001,1;4.4299999999999997,1.1000000000000001;4.5300000000000002,1.1000000000000001;4.6299999999999999,1.2;4.7300000000000004,1.2;4.8300000000000001,1.3;4.9300000000000006,1.3;5.0300000000000002,1.3;5.1299999999999999,1.3999999999999999;5.2300000000000004,1.3999999999999999;5.3700000000000001,1.5;
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+PRUNING weight=1 seconds=0.0036154149999999999 expanded=639 hard=5167 soft=973 skipped=4039 cost=5.7276814239512568 route=0.13,1.5;0.23000000000000001,1.5;0.33000000000000002,1.5;0.43000000000000005,1.5;0.53000000000000003,1.5;0.63,1.5;0.73000000000000009,1.5;0.83000000000000007,1.5;0.93000000000000005,1.5;1.03,1.5;1.1299999999999999,1.5;1.23,1.3999999999999999;1.3300000000000001,1.3999999999999999;1.4300000000000002,1.3999999999999999;1.5300000000000002,1.3;1.6299999999999999,1.3;1.73,1.2;1.8300000000000001,1.1000000000000001;1.9300000000000002,1;2.0300000000000002,0.89999999999999991;2.1299999999999999,0.89999999999999991;2.23,0.89999999999999991;2.3300000000000001,0.89999999999999991;2.4300000000000002,0.89999999999999991;2.5300000000000002,0.89999999999999991;2.6299999999999999,0.89999999999999991;2.73,0.89999999999999991;2.8300000000000001,0.89999999999999991;2.9300000000000002,0.89999999999999991;3.0300000000000002,0.89999999999999991;3.1299999999999999,0.89999999999999991;3.23,0.89999999999999991;3.3300000000000001,0.89999999999999991;3.4300000000000002,0.89999999999999991;3.5300000000000002,0.89999999999999991;3.6299999999999999,0.89999999999999991;3.73,0.89999999999999991;3.8300000000000001,0.89999999999999991;3.9300000000000002,0.89999999999999991;4.0300000000000002,0.89999999999999991;4.1299999999999999,0.89999999999999991;4.2300000000000004,1;4.3300000000000001,1;4.4299999999999997,1.1000000000000001;4.5300000000000002,1.1000000000000001;4.6299999999999999,1.2;4.7300000000000004,1.2;4.8300000000000001,1.3;4.9300000000000006,1.3;5.0300000000000002,1.3;5.1299999999999999,1.3999999999999999;5.2300000000000004,1.3999999999999999;5.3700000000000001,1.5;
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarRecovery.SoftPruningFrozenInputsAndFloatTies (602 ms)
+[ RUN      ] AstarRecovery.SoftDistanceQueriesReuseSelectedGrid
+DISTANCE_CACHE seconds=0.00043971899999999998 hard=463 soft=159 grids=464
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarRecovery.SoftDistanceQueriesReuseSelectedGrid (302 ms)
+[----------] 5 tests from AstarRecovery (1508 ms total)
+
+[----------] 3 tests from AstarGlobalReference
+[ RUN      ] AstarGlobalReference.FullFootprintGlobalDetourBuildsCorridor
+GLOBAL_REFERENCE seconds=0.01953558 expanded=4443
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarGlobalReference.FullFootprintGlobalDetourBuildsCorridor (301 ms)
+[ RUN      ] AstarGlobalReference.FullMapDetourHasExactNonLatticeGoalAndNoPersistentOverlay
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarGlobalReference.FullMapDetourHasExactNonLatticeGoalAndNoPersistentOverlay (302 ms)
+[ RUN      ] AstarGlobalReference.RootBodyBlockClosedPassageAndDeadlineFailClosed
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] AstarGlobalReference.RootBodyBlockClosedPassageAndDeadlineFailClosed (302 ms)
+[----------] 3 tests from AstarGlobalReference (905 ms total)
+
+[----------] 1 test from CorridorDistanceField
+[ RUN      ] CorridorDistanceField.WholeCellsBoundaryAndInterpolation
+[       OK ] CorridorDistanceField.WholeCellsBoundaryAndInterpolation (0 ms)
+[----------] 1 test from CorridorDistanceField (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 26 tests from 5 test suites ran. (8727 ms total)
+[  PASSED  ] 26 tests.
+[==========] Running 2 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 2 tests from LfpcExecution
+[ RUN      ] LfpcExecution.SamplingPreservesRootAndMatchesCanonicalStepEndpoint
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+[       OK ] LfpcExecution.SamplingPreservesRootAndMatchesCanonicalStepEndpoint (256 ms)
+[ RUN      ] LfpcExecution.BadTimeAndMidPhaseRootsCannotCreateAnExecutedState
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] LfpcExecution.BadTimeAndMidPhaseRootsCannotCreateAnExecutedState (301 ms)
+[----------] 2 tests from LfpcExecution (557 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 1 test suite ran. (557 ms total)
+[  PASSED  ] 2 tests.
+[==========] Running 24 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 2 tests from FootprintMpcRuntime
+[ RUN      ] FootprintMpcRuntime.CaneOutsideCorridorRejectsAlthoughCenterFits
+[       OK ] FootprintMpcRuntime.CaneOutsideCorridorRejectsAlthoughCenterFits (254 ms)
+[ RUN      ] FootprintMpcRuntime.CaneOnlyTimedCollisionAndExecutionAge
+[       OK ] FootprintMpcRuntime.CaneOnlyTimedCollisionAndExecutionAge (246 ms)
+[----------] 2 tests from FootprintMpcRuntime (501 ms total)
+
+[----------] 18 tests from StaticMpcRuntime
+[ RUN      ] StaticMpcRuntime.MissingInvalidAndClearedCorridorStop
+[       OK ] StaticMpcRuntime.MissingInvalidAndClearedCorridorStop (255 ms)
+[ RUN      ] StaticMpcRuntime.WeightedCommandMatchesExecutedAction
+[       OK ] StaticMpcRuntime.WeightedCommandMatchesExecutedAction (245 ms)
+[ RUN      ] StaticMpcRuntime.WeightedFootCollisionFallsBackToVerifiedSampleReproducibly
+[       OK ] StaticMpcRuntime.WeightedFootCollisionFallsBackToVerifiedSampleReproducibly (255 ms)
+[ RUN      ] StaticMpcRuntime.WeightedMeanAcrossNonconvexUnionIsRechecked
+[       OK ] StaticMpcRuntime.WeightedMeanAcrossNonconvexUnionIsRechecked (247 ms)
+[ RUN      ] StaticMpcRuntime.EverySampleOutsideUnionOrInStaticObstacleStops
+[       OK ] StaticMpcRuntime.EverySampleOutsideUnionOrInStaticObstacleStops (501 ms)
+[ RUN      ] StaticMpcRuntime.ContinuousOptimizationImprovesCostAndReplaysFullState
+[       OK ] StaticMpcRuntime.ContinuousOptimizationImprovesCostAndReplaysFullState (254 ms)
+[ RUN      ] StaticMpcRuntime.StableWeightsExcludeAllUnsafeInputs
+[       OK ] StaticMpcRuntime.StableWeightsExcludeAllUnsafeInputs (0 ms)
+[ RUN      ] StaticMpcRuntime.ColdStartRightAngleTurnFindsFullFeasibleRollout
+[       OK ] StaticMpcRuntime.ColdStartRightAngleTurnFindsFullFeasibleRollout (250 ms)
+[ RUN      ] StaticMpcRuntime.WarmStartShiftsAndRetainsCurrentCycleCandidate
+[       OK ] StaticMpcRuntime.WarmStartShiftsAndRetainsCurrentCycleCandidate (255 ms)
+[ RUN      ] StaticMpcRuntime.ReferenceSeedEnablesColdTurnWithoutBypassingChecksOrChangingModel
+[       OK ] StaticMpcRuntime.ReferenceSeedEnablesColdTurnWithoutBypassingChecksOrChangingModel (247 ms)
+[ RUN      ] StaticMpcRuntime.InvalidSamplingConfigFailsClosed
+[       OK ] StaticMpcRuntime.InvalidSamplingConfigFailsClosed (1256 ms)
+[ RUN      ] StaticMpcRuntime.ActionLimitsAndNoFullContinuation
+[       OK ] StaticMpcRuntime.ActionLimitsAndNoFullContinuation (248 ms)
+[ RUN      ] StaticMpcRuntime.FinalArrivalIsSafeTerminalButLocalGoalIsNot
+[       OK ] StaticMpcRuntime.FinalArrivalIsSafeTerminalButLocalGoalIsNot (255 ms)
+[ RUN      ] StaticMpcRuntime.LocalArrivalStillChargesEveryWalkingSuffixEdge
+[       OK ] StaticMpcRuntime.LocalArrivalStillChargesEveryWalkingSuffixEdge (247 ms)
+[ RUN      ] StaticMpcRuntime.QueryResolutionTracksSelectedStaticBackend
+[       OK ] StaticMpcRuntime.QueryResolutionTracksSelectedStaticBackend (256 ms)
+[ RUN      ] StaticMpcRuntime.LocalProducerMatchesDefaultHeightFilterAndModel
+hit: 0.847298, miss: -0.619039, min: -1.99243, max: 3.4761, thresh: 1.38629
+[       OK ] StaticMpcRuntime.LocalProducerMatchesDefaultHeightFilterAndModel (246 ms)
+[ RUN      ] StaticMpcRuntime.TriangularCorridorAccepted
+[       OK ] StaticMpcRuntime.TriangularCorridorAccepted (255 ms)
+[ RUN      ] StaticMpcRuntime.CorridorGridPreservesSelectedModelSemantics
+[       OK ] StaticMpcRuntime.CorridorGridPreservesSelectedModelSemantics (248 ms)
+[----------] 18 tests from StaticMpcRuntime (5521 ms total)
+
+[----------] 4 tests from TimedMpcRuntime
+[ RUN      ] TimedMpcRuntime.ActualSampleTimesAcrossStepsAndCopies
+[       OK ] TimedMpcRuntime.ActualSampleTimesAcrossStepsAndCopies (254 ms)
+[ RUN      ] TimedMpcRuntime.CrossingBeyondFirstStepRejectsFullContinuation
+[       OK ] TimedMpcRuntime.CrossingBeyondFirstStepRejectsFullContinuation (248 ms)
+[ RUN      ] TimedMpcRuntime.ExecutionEpochRecheckCatchesLatencyWithoutChangingModel
+[       OK ] TimedMpcRuntime.ExecutionEpochRecheckCatchesLatencyWithoutChangingModel (254 ms)
+[ RUN      ] TimedMpcRuntime.InvalidBindingFailsClosedAndExplicitAblationRestoresBaseline
+[       OK ] TimedMpcRuntime.InvalidBindingFailsClosedAndExplicitAblationRestoresBaseline (248 ms)
+[----------] 4 tests from TimedMpcRuntime (1004 ms total)
+
+[----------] Global test environment tear-down
+[==========] 24 tests from 3 test suites ran. (7026 ms total)
+[  PASSED  ] 24 tests.
+
+  YOU HAVE 2 DISABLED TESTS
+
+[==========] Running 17 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 13 tests from Firi
+[ RUN      ] Firi.DenseStraight
+straight raw=10/500 final=3/3 seconds=0.000515428/0.0204861
+[       OK ] Firi.DenseStraight (21 ms)
+[ RUN      ] Firi.Corners
+[       OK ] Firi.Corners (2 ms)
+[ RUN      ] Firi.WholeCellDetour
+detour seconds=0.00102414 regions=3
+[       OK ] Firi.WholeCellDetour (1 ms)
+[ RUN      ] Firi.NearWallNarrow
+[       OK ] Firi.NearWallNarrow (1 ms)
+[ RUN      ] Firi.GeometricOnlyThinPassage
+[       OK ] Firi.GeometricOnlyThinPassage (2 ms)
+[ RUN      ] Firi.CellCrossingNotCenter
+[       OK ] Firi.CellCrossingNotCenter (0 ms)
+[ RUN      ] Firi.UnknownAndMapEdge
+[       OK ] Firi.UnknownAndMapEdge (0 ms)
+[ RUN      ] Firi.InvalidAndBudgets
+[       OK ] Firi.InvalidAndBudgets (0 ms)
+[ RUN      ] Firi.NoCutCornerGap
+[       OK ] Firi.NoCutCornerGap (1 ms)
+[ RUN      ] Firi.TranslationAndAreaThreshold
+[       OK ] Firi.TranslationAndAreaThreshold (1 ms)
+[ RUN      ] Firi.ScaleEnvelope
+[       OK ] Firi.ScaleEnvelope (0 ms)
+[ RUN      ] Firi.OriginalEdgeEndpointCertificates
+[       OK ] Firi.OriginalEdgeEndpointCertificates (0 ms)
+[ RUN      ] Firi.DensePathBudgetRemainsBounded
+[       OK ] Firi.DensePathBudgetRemainsBounded (4 ms)
+[----------] 13 tests from Firi (33 ms total)
+
+[----------] 4 tests from FiriAdaptive
+[ RUN      ] FiriAdaptive.DenseAndSparseUseCoverageRatherThanEveryEdge
+adaptive sparse/dense generated=6/6 ms=0.260568/2.0062
+[       OK ] FiriAdaptive.DenseAndSparseUseCoverageRatherThanEveryEdge (2 ms)
+[ RUN      ] FiriAdaptive.CornersBodyAndCaneKeepWholeCellCertificates
+[       OK ] FiriAdaptive.CornersBodyAndCaneKeepWholeCellCertificates (1 ms)
+[ RUN      ] FiriAdaptive.ExactReferenceLengthAndProjectionConnector
+[       OK ] FiriAdaptive.ExactReferenceLengthAndProjectionConnector (0 ms)
+[ RUN      ] FiriAdaptive.ForwardFootprintCannotStallBetweenSideObstacles
+[       OK ] FiriAdaptive.ForwardFootprintCannotStallBetweenSideObstacles (1 ms)
+[----------] 4 tests from FiriAdaptive (4 ms total)
+
+[----------] Global test environment tear-down
+[==========] 17 tests from 2 test suites ran. (37 ms total)
+[  PASSED  ] 17 tests.
+[==========] Running 7 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 6 tests from TimedPedestrianCollision
+[ RUN      ] TimedPedestrianCollision.FutureCrossingAndObservationAge
+[       OK ] TimedPedestrianCollision.FutureCrossingAndObservationAge (0 ms)
+[ RUN      ] TimedPedestrianCollision.ContactContainmentAndSeparation
+[       OK ] TimedPedestrianCollision.ContactContainmentAndSeparation (0 ms)
+[ RUN      ] TimedPedestrianCollision.RotatedSeparationAndClockwiseHull
+[       OK ] TimedPedestrianCollision.RotatedSeparationAndClockwiseHull (0 ms)
+[ RUN      ] TimedPedestrianCollision.InvalidGeometryAndTimeFailClosed
+[       OK ] TimedPedestrianCollision.InvalidGeometryAndTimeFailClosed (0 ms)
+[ RUN      ] TimedPedestrianCollision.CircumscribedRobotAndMultipleObstacles
+[       OK ] TimedPedestrianCollision.CircumscribedRobotAndMultipleObstacles (0 ms)
+[ RUN      ] TimedPedestrianCollision.CaneTipAndRotatingEnvelopeUseSameTime
+[       OK ] TimedPedestrianCollision.CaneTipAndRotatingEnvelopeUseSameTime (0 ms)
+[----------] 6 tests from TimedPedestrianCollision (0 ms total)
+
+[----------] 1 test from HumanCaneFootprint
+[ RUN      ] HumanCaneFootprint.BothCompleteDisksRemainCoveredWhenRotated
+[       OK ] HumanCaneFootprint.BothCompleteDisksRemainCoveredWhenRotated (0 ms)
+[----------] 1 test from HumanCaneFootprint (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 7 tests from 2 test suites ran. (0 ms total)
+[  PASSED  ] 7 tests.

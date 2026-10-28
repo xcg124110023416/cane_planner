@@ -1,0 +1,73 @@
+{
+  "source_run": "b660ca22-d281-11f1-a81c-f92175a34ec4 / roslaunch-Lenovo-xcg-42755.log",
+  "source_snapshot_sha256": "b92fc8c1c1d8dba51ae92fcee2c84e2059415a7214a9da1f3728382eb67c3862",
+  "source_goal": [
+    7.558390140533447,
+    2.972381114959717
+  ],
+  "replay_start": [
+    -5.694647789001465,
+    4.478665351867676,
+    -0.026
+  ],
+  "source_reference_occupied_cell_intersections": 17,
+  "first_source_intersection": {
+    "edge": [
+      [
+        5.605352210998536,
+        3.578665351867676
+      ],
+      [
+        5.7053522109985355,
+        3.578665351867676
+      ]
+    ],
+    "cell_lower": [
+      5.7,
+      3.5
+    ],
+    "cell_upper": [
+      5.8,
+      3.6
+    ]
+  },
+  "private_reproduction": {
+    "pedestrians_enabled": false,
+    "astar_publications": 1,
+    "astar_vertices": 134,
+    "initial_inflated_target_voxels": 0,
+    "first_occupied_frame": {
+      "t": 4.441041555000993,
+      "target_count": 8,
+      "odom": [
+        [
+          1.5444935757712024,
+          3.9057871655070873
+        ]
+      ]
+    },
+    "first_reference_rejection": {
+      "t": 4.479524710000987,
+      "text": "generator=firi_2d cells=0 generated=2 domain=STATIC_BASE dynamic_validation=TIMED_SAT planning_length=8 preview_length=20 feasible=0 reason=REFERENCE_OCCUPIED failure_segment=2 failure_s=3.2944 position_valid=1 failure_x=4.648 failure_y=3.57867 min_overlap_area=0 min_overlap_depth=0 seconds=0.000915534 overlap_is_geometric_not_lfpc_guarantee pedestrians_enabled=0 pedestrian_data=DISABLED pedestrian_count=0 snapshot=STATIC recovery=NOT_NEEDED recovery_attempts=0 recovery_seconds=0 stage=OBSTACLE_SEPARATION_SOLVE outer_iteration=0 solver_status_valid=0 solver_status=0 solver_exception=\"\" min_slack_valid=0 min_slack=NA constraint_violation_valid=0 max_constraint_violation=NA",
+      "target_count": 8
+    },
+    "decision_counts": {
+      "OK": 19,
+      "INVALID_STATIC_CORRIDOR": 49
+    },
+    "final_com": [
+      1.5444935757712024,
+      3.9057871655070873
+    ]
+  },
+  "raw_pcd_near_inflated_target": {
+    "position": [
+      5.922465801239014,
+      3.59486985206604,
+      0.20000000298023224
+    ],
+    "distance_to_initial_center_m": 11.652399866783306,
+    "distance_to_replay_stop_center_m": 4.399239750554213
+  },
+  "interpretation": "The raw PCD point need not lie in the inflated target cell. The initial local map has not fused this distant obstacle; later fusion invalidates the retained global reference. Static STOP clears the stuck counter, preventing the existing replan threshold."
+}

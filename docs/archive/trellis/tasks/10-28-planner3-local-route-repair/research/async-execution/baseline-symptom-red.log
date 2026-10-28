@@ -1,0 +1,65 @@
+{
+  "baseline.json": {
+    "start": null,
+    "goal": null,
+    "movement_intervals_seconds": {
+      "count": 44,
+      "mean": 0.13323852361364433,
+      "p95": 0.24131360400133417,
+      "maximum": 0.24292523900294327
+    },
+    "between_moving_updates_seconds": {
+      "count": 43,
+      "mean": 0.1307147500930262,
+      "p95": 0.24040833599792677,
+      "maximum": 0.24292523900294327
+    },
+    "movement_gaps_over_150ms": 14,
+    "displacement_metres": {
+      "count": 44,
+      "mean": 0.39757732754188796,
+      "p95": 0.4010598014549754,
+      "maximum": 0.4010758609083904
+    },
+    "critical_transaction_seconds": {
+      "count": 46,
+      "mean": 0.08582946226086957,
+      "p95": 0.237561771,
+      "maximum": 0.239115772
+    },
+    "total_callback_seconds": {
+      "count": 46,
+      "mean": 0.0880388705,
+      "p95": 0.241414073,
+      "maximum": 0.242706734
+    },
+    "execution_validation_seconds": null,
+    "actual_advance_seconds": null,
+    "stops": {
+      "OK": 45
+    },
+    "astar_publications": 22,
+    "astar_intervals_seconds": {
+      "count": 21,
+      "mean": 0.29382532295234604,
+      "p95": 0.20291011299923412,
+      "maximum": 2.446456068999396
+    },
+    "preview_publications": 23,
+    "nonempty_pedestrian_frames": 0,
+    "minimum_goal_distance_metres": null,
+    "final_goal_distance_metres": null,
+    "final_pose": {
+      "t": 13.378363416999491,
+      "stamp": 1793179533.278737,
+      "x": 4.19343444769038,
+      "y": -4.686125024598185,
+      "yaw": -0.2460119628386802
+    },
+    "execution_frames": 0
+  }
+}
+Traceback (most recent call last):
+  File ".trellis/tasks/10-28-planner3-local-route-repair/research/async-execution/analyze.py", line 60, in <module>
+    assert result['movement_gaps_over_150ms'] == 0
+AssertionError

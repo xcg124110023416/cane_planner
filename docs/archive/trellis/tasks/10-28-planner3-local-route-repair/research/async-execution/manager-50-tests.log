@@ -1,0 +1,276 @@
+[==========] Running 50 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 50 tests from SimOdomTest
+[ RUN      ] SimOdomTest.PreviewCadenceStaysAlignedDespiteDifferentGlobalSearchDurations
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+[       OK ] SimOdomTest.PreviewCadenceStaysAlignedDespiteDifferentGlobalSearchDurations (402 ms)
+[ RUN      ] SimOdomTest.DistantPreviewFailureCannotStopOrReplaceActivePlan
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.DistantPreviewFailureCannotStopOrReplaceActivePlan (400 ms)
+[ RUN      ] SimOdomTest.RepeatedRealStopPublishesFrozenPoseAndZeroTwist
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.RepeatedRealStopPublishesFrozenPoseAndZeroTwist (404 ms)
+[ RUN      ] SimOdomTest.HardwareAndGazeboStopsDoNotPublishSimHeartbeat
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.HardwareAndGazeboStopsDoNotPublishSimHeartbeat (600 ms)
+[ RUN      ] SimOdomTest.TimedSnapshotUsesSourceAgeAndPublishesMatchedGeometry
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.TimedSnapshotUsesSourceAgeAndPublishesMatchedGeometry (299 ms)
+[ RUN      ] SimOdomTest.CrossingClearsBeforeArrivalWithoutSpatialStop
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.CrossingClearsBeforeArrivalWithoutSpatialStop (405 ms)
+[ RUN      ] SimOdomTest.TimedExecutionCollisionStopsBeforeAnyIntegration
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.TimedExecutionCollisionStopsBeforeAnyIntegration (198 ms)
+[ RUN      ] SimOdomTest.DynamicValidityTransitionsAndFrozenStop
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.DynamicValidityTransitionsAndFrozenStop (202 ms)
+[ RUN      ] SimOdomTest.DynamicRootCollisionStopsWithinUsableStaticCorridor
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.DynamicRootCollisionStopsWithinUsableStaticCorridor (200 ms)
+[ RUN      ] SimOdomTest.TimedAblationRetainsCurrentHullCorridorExclusion
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.TimedAblationRetainsCurrentHullCorridorExclusion (200 ms)
+[ RUN      ] SimOdomTest.FreshEmptyAfterDynamicBlockResumesActualIntegration
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.FreshEmptyAfterDynamicBlockResumesActualIntegration (304 ms)
+[ RUN      ] SimOdomTest.DynamicTransformsPositionVelocityAndCompleteBox
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.DynamicTransformsPositionVelocityAndCompleteBox (300 ms)
+[ RUN      ] SimOdomTest.DisabledSourceMessageAfterMppiDoesNotStopStaticIntegration
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.DisabledSourceMessageAfterMppiDoesNotStopStaticIntegration (300 ms)
+[ RUN      ] SimOdomTest.QueuedSameStampBlockerIsAcceptedAfterCommitThenStopsNextCycle
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.QueuedSameStampBlockerIsAcceptedAfterCommitThenStopsNextCycle (403 ms)
+[ RUN      ] SimOdomTest.QueuedFrameCannotMaskExpiryAndRetainsOriginalReceipt
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.QueuedFrameCannotMaskExpiryAndRetainsOriginalReceipt (299 ms)
+[ RUN      ] SimOdomTest.UnreplacedPlannedFrameMustStillBeFreshAtExecution
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.UnreplacedPlannedFrameMustStillBeFreshAtExecution (200 ms)
+[ RUN      ] SimOdomTest.AcceptedInvalidFrameAndEnableTransitionRequireFreshValidData
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.AcceptedInvalidFrameAndEnableTransitionRequireFreshValidData (302 ms)
+[ RUN      ] SimOdomTest.RepeatedTenHzEmptyUpdatesDoNotStarveExecution
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+TRAFFIC empty cycles=8 mean_ms=28.9701 max_ms=29.3032
+[       OK ] SimOdomTest.RepeatedTenHzEmptyUpdatesDoNotStarveExecution (502 ms)
+[ RUN      ] SimOdomTest.RepeatedTenHzMovingPedestrianUpdatesDoNotStarveExecution
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+TRAFFIC moving cycles=8 mean_ms=29.1416 max_ms=29.7501
+[       OK ] SimOdomTest.RepeatedTenHzMovingPedestrianUpdatesDoNotStarveExecution (502 ms)
+[ RUN      ] SimOdomTest.GoalResetSerializesWithProductionGeometryAndPublication
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.GoalResetSerializesWithProductionGeometryAndPublication (299 ms)
+[ RUN      ] SimOdomTest.TimedPlantQueuesWithoutTeleportAndSamplesActualLfpcPhase
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+[       OK ] SimOdomTest.TimedPlantQueuesWithoutTeleportAndSamplesActualLfpcPhase (301 ms)
+[ RUN      ] SimOdomTest.ExpiredExecutionFreezesTruePhaseAndFreshClearResumes
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.ExpiredExecutionFreezesTruePhaseAndFreshClearResumes (301 ms)
+[ RUN      ] SimOdomTest.NewStaticCellAndPedestrianStopAnAlreadyQueuedStep
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+[       OK ] SimOdomTest.NewStaticCellAndPedestrianStopAnAlreadyQueuedStep (301 ms)
+[ RUN      ] SimOdomTest.TimedPlantGoalResetAndModeGuardsPreventQueuedMotion
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.TimedPlantGoalResetAndModeGuardsPreventQueuedMotion (201 ms)
+[ RUN      ] SimOdomTest.TimedPlantReachesActualGoalOnlyAfterElapsedStepThenHolds
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.TimedPlantReachesActualGoalOnlyAfterElapsedStepThenHolds (303 ms)
+[ RUN      ] SimOdomTest.ExecutionDisplayUsesCurrentSourceAgeAndOnlyCheckedRemainingTimes
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.ExecutionDisplayUsesCurrentSourceAgeAndOnlyCheckedRemainingTimes (299 ms)
+[ RUN      ] SimOdomTest.TimedPlantExecutesAndChecksNewFramesWhileGlobalWorkerIsDelayed
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+[       OK ] SimOdomTest.TimedPlantExecutesAndChecksNewFramesWhileGlobalWorkerIsDelayed (301 ms)
+[ RUN      ] SimOdomTest.BackgroundGlobalSearchDoesNotBlockPlantOrAcceptedObservations
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.BackgroundGlobalSearchDoesNotBlockPlantOrAcceptedObservations (301 ms)
+[ RUN      ] SimOdomTest.BackgroundResultFromPreviousGoalIsDiscarded
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.BackgroundResultFromPreviousGoalIsDiscarded (201 ms)
+[ RUN      ] SimOdomTest.FreshObservationDoesNotRestampAnExpiredBackgroundRequest
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.FreshObservationDoesNotRestampAnExpiredBackgroundRequest (202 ms)
+[ RUN      ] SimOdomTest.GlobalRefreshRunsProactivelyAtHalfSecondCadence
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.GlobalRefreshRunsProactivelyAtHalfSecondCadence (402 ms)
+[ RUN      ] SimOdomTest.DefaultGlobalRefreshRunsAtFiveHertzWithoutCatchUpBurst
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.DefaultGlobalRefreshRunsAtFiveHertzWithoutCatchUpBurst (402 ms)
+[ RUN      ] SimOdomTest.FastGlobalRefreshKeepsPhaseWhenControlTicksHaveSmallJitter
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.FastGlobalRefreshKeepsPhaseWhenControlTicksHaveSmallJitter (299 ms)
+[ RUN      ] SimOdomTest.NewlyObservedStaticObstacleRefreshesWholeRoute
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.NewlyObservedStaticObstacleRefreshesWholeRoute (300 ms)
+[ RUN      ] SimOdomTest.PeriodicGlobalReferenceAvoidsStationaryBlocker
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.PeriodicGlobalReferenceAvoidsStationaryBlocker (704 ms)
+[ RUN      ] SimOdomTest.DynamicBlockedReferenceReroutesFinalGoalAndExecutes
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.DynamicBlockedReferenceReroutesFinalGoalAndExecutes (601 ms)
+[ RUN      ] SimOdomTest.FullyBlockedGlobalSearchStopsAndFreshClearResumes
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+MANAGER no_path_cycle_ms=15.2999
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.FullyBlockedGlobalSearchStopsAndFreshClearResumes (299 ms)
+[ RUN      ] SimOdomTest.GlobalCandidateExpiryCannotCommitOrExecute
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.GlobalCandidateExpiryCannotCommitOrExecute (301 ms)
+[ RUN      ] SimOdomTest.GlobalRebuildFailureCannotCommitOrExecute
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.GlobalRebuildFailureCannotCommitOrExecute (300 ms)
+[ RUN      ] SimOdomTest.RefreshedTrajectoryExpiryAtExecutionCannotCommitRoute
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.RefreshedTrajectoryExpiryAtExecutionCannotCommitRoute (301 ms)
+[ RUN      ] SimOdomTest.GeometricDetourCannotCommitWhenItsTimedMppiFails
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.GeometricDetourCannotCommitWhenItsTimedMppiFails (301 ms)
+[ RUN      ] SimOdomTest.InitialSearchActivationQueuesNewGoalAndRequiresItsOwnSearch
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+astar,1,0,XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+astar,2,0,[       OK ] SimOdomTest.InitialSearchActivationQueuesNewGoalAndRequiresItsOwnSearch (301 ms)
+[ RUN      ] SimOdomTest.TransactionDiagnosticIdentityClockAndSkippedStageReset
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.TransactionDiagnosticIdentityClockAndSkippedStageReset (402 ms)
+[ RUN      ] SimOdomTest.ActualArrivalIdleHeartbeatAndNewGoalKeepPlantState
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+astar,3,0,[       OK ] SimOdomTest.ActualArrivalIdleHeartbeatAndNewGoalKeepPlantState (402 ms)
+[ RUN      ] SimOdomTest.LastSafeFinalStepThenActualArrivalAndIdle
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.LastSafeFinalStepThenActualArrivalAndIdle (199 ms)
+[ RUN      ] SimOdomTest.AdvancedCornerReferenceCoversActualPreviousLegalStep
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.AdvancedCornerReferenceCoversActualPreviousLegalStep (201 ms)
+[ RUN      ] SimOdomTest.RecordedOffsetAndNearZeroConnectorsKeepExactRoot
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.RecordedOffsetAndNearZeroConnectorsKeepExactRoot (300 ms)
+[ RUN      ] SimOdomTest.StaticConnectorCannotCutBlockedCellOrAdvanceState
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.StaticConnectorCannotCutBlockedCellOrAdvanceState (200 ms)
+[ RUN      ] SimOdomTest.PedestrianRootBlocksExecutionWithoutInvalidatingStaticConnector
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.PedestrianRootBlocksExecutionWithoutInvalidatingStaticConnector (202 ms)
+[ RUN      ] SimOdomTest.IdleHeartbeatModeAndInitializationGuards
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+XmlRpcServer::acceptConnection: Could not accept connection (Resource temporarily unavailable).
+[       OK ] SimOdomTest.IdleHeartbeatModeAndInitializationGuards (401 ms)
+[----------] 50 tests from SimOdomTest (16251 ms total)
+
+[----------] Global test environment tear-down
+[==========] 50 tests from 1 test suite ran. (16251 ms total)
+[  PASSED  ] 50 tests.

@@ -1,21 +1,23 @@
-<!-- TRELLIS:START -->
-# Trellis Instructions
+# Cane Planner
 
-These instructions are for AI assistants working in this project.
+The current focus is planner 3 on `mpc-lfpc-prototype`. Read `README.md` for
+architecture, launch commands and supported modes.
 
-This project is managed by Trellis. The working knowledge you need lives under `.trellis/`:
+## Build and verification
 
-- `.trellis/workflow.md` — development phases, when to create tasks, skill routing
-- `.trellis/spec/` — package- and layer-scoped coding guidelines (read before writing code in a given layer)
-- `.trellis/workspace/` — per-developer journals and session traces
-- `.trellis/tasks/` — active and archived tasks (PRDs, research, jsonl context)
+- Use `catkin build`; never mix it with `catkin_make` in this workspace.
+- Run checks relevant to the change. Update documentation when behavior changes.
 
-If a Trellis command is available on your platform (e.g. `/trellis:finish-work`, `/trellis:continue`), prefer it over manual steps. Not every platform exposes every command.
+## ROS processes
 
-If you're using Codex or another agent-capable tool, additional project-scoped helpers may live in:
-- `.agents/skills/` — reusable Trellis skills
-- `.codex/agents/` — optional custom subagents
+- Preserve user-owned ROS masters and nodes unless the user requests a restart.
+- Unattended tests use an unused private master port, verify process ownership,
+  and clean up only their own processes.
 
-Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
+## Project references
 
-<!-- TRELLIS:END -->
+- Planning contracts: `docs/development/planning-runtime/index.md`.
+- RViz/operator guidance: `docs/development/operator-visualization/index.md`.
+- Trellis is retired in this project. `docs/archive/trellis/` contains historical
+  records, not active instructions. Work directly without its task, approval,
+  hook or journal workflow.

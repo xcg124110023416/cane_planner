@@ -50,7 +50,7 @@ target_link_libraries(convex_corridor
 
 add_library( path_searching
     src/astar.cpp
-    src/astar_local_recovery.cpp
+    src/astar_global_reference.cpp
     src/kinodynamic_astar.cpp
     src/lfpc.cpp
     src/dynamic_risk_field.cpp
@@ -70,6 +70,8 @@ add_executable(convex_corridor_replay src/convex_corridor_replay.cpp)
 target_link_libraries(convex_corridor_replay convex_corridor)
 
 if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(test_lfpc_execution test/test_lfpc_execution.cpp)
+  target_link_libraries(test_lfpc_execution path_searching ${catkin_LIBRARIES})
   catkin_add_gtest(test_pedestrian_polygon test/test_pedestrian_polygon.cpp)
   target_link_libraries(test_pedestrian_polygon convex_corridor)
   # White-box target includes convex_corridor.cpp; do not link a second copy.

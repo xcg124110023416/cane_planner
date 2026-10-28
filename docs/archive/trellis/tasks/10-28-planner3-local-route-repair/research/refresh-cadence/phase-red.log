@@ -1,0 +1,26 @@
+Note: Google Test filter = SimOdomTest.FastGlobalRefreshKeepsPhaseWhenControlTicksHaveSmallJitter
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SimOdomTest
+[ RUN      ] SimOdomTest.FastGlobalRefreshKeepsPhaseWhenControlTicksHaveSmallJitter
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+[INFO] [1793175788.797460585, 620.018000000]: [MPC global] Accepted periodic full A* route: 51 points, search 3.9 ms
+[INFO] [1793175788.806639598, 620.118000000]: [MPC] Reanchored wp_idx 0 -> 1, target (1.18, 0.00)
+[INFO] [1793175788.845378436, 620.217000000]: [MPC] Reanchored wp_idx 0 -> 2, target (1.45, 0.00)
+/home/xcg/ws/src/cane_planner/plan_manage/test/test_sim_odom_stop.cpp:783: Failure
+Expected equality of these values:
+  3u
+    Which is: 3
+  SimOdomTestAccess::attempts(manager_)
+    Which is: 2
+[  FAILED  ] SimOdomTest.FastGlobalRefreshKeepsPhaseWhenControlTicksHaveSmallJitter (1153 ms)
+[----------] 1 test from SimOdomTest (1153 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1153 ms total)
+[  PASSED  ] 0 tests.
+[  FAILED  ] 1 test, listed below:
+[  FAILED  ] SimOdomTest.FastGlobalRefreshKeepsPhaseWhenControlTicksHaveSmallJitter
+
+ 1 FAILED TEST

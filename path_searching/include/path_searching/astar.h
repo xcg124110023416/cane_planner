@@ -17,6 +17,7 @@
 #include <plan_env/collision_detection.h>
 #include <plan_env/corridor_distance_field.h>
 #include <path_searching/human_cane_footprint.h>
+#include <path_searching/convex_corridor.h>
 // #include <plan_env/edt_environment.h>
 
 using namespace std;
@@ -187,12 +188,24 @@ namespace cane_planner
       std::vector<Eigen::Vector2d> path;
       double seconds = 0.;
       SearchProfile profile;
-      size_t repair_begin = 0, repair_end = 0;
     };
+    // Complete value snapshot. Evaluation never reads an Astar or live map.
+    struct GlobalReferenceQuery {
+      ConvexCorridor::Grid grid;
+      Eigen::Vector2d lower, upper, start, goal;
+      std::vector<Eigen::Vector2d> obstacle;
+      HumanCaneFootprint::Config footprint;
+      double root_yaw=0., resolution=.1, clearance=.002, weight=0., sigma=.8;
+      int allocate_num=0;
+      double grid_seconds=0.;
+    };
+    bool snapshotGlobalReference(GlobalReferenceQuery&) const;
+    static RecoveryResult evaluateGlobalReference(const GlobalReferenceQuery&,
+        std::chrono::steady_clock::time_point deadline);
     // Spatial guidance only: the caller must check the resulting timed trajectory.
-    // reference starts at the actual CoM and retains the original final goal.
-    RecoveryResult repairLocalReference(const std::vector<Eigen::Vector2d>& reference,
-        const std::vector<Eigen::Vector2d>& predicted_obstacle,
+    // Full selected-map search from actual CoM to exact goal, with an optional current hull.
+    RecoveryResult searchGlobalReference(const Eigen::Vector2d& start, const Eigen::Vector2d& goal,
+        const std::vector<Eigen::Vector2d>& obstacle,
         const HumanCaneFootprint::Config& footprint, double root_yaw,
         std::chrono::steady_clock::time_point deadline);
     RecoveryResult searchRecovery(const Eigen::Vector2d& start, const Eigen::Vector2d& goal,

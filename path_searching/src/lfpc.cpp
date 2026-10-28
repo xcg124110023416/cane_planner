@@ -120,6 +120,30 @@ namespace cane_planner
         step_num_ += 1;
     }
 
+    double LFPC::stepDuration() const
+    {
+        if(!std::isfinite(t_sup_) || !std::isfinite(delta_t_) || delta_t_<=0. || t_sup_<=0. || t_sup_/delta_t_>10000.)return 0.;
+        return int(t_sup_/delta_t_)*delta_t_;
+    }
+
+    bool LFPC::sampleControlledStep(const Vector3d& control,double elapsed,LFPC& output) const
+    {
+        const double duration=stepDuration();
+        if(&output==this || !control.allFinite() || !std::isfinite(elapsed) ||
+           duration<=0. || elapsed<0. || elapsed>duration+1e-12 || std::abs(t_)>1e-12)return false;
+        output.copyState(*this);output.SetCtrlParams(control);
+        const auto placement=output.calculateLFPC(vx_0_,vy_0_);
+        output.support_leg_pos_.head<2>()=COM_pos_.head<2>()+placement;
+        output.support_leg_pos_.z()=0.;output.x_0_=-placement.x();output.y_0_=-placement.y();
+        output.step_path_.clear();output.step_times_.clear();
+        output.updateOneDtForOnce(std::min(elapsed,duration));
+        if(elapsed>=duration-1e-12) {
+            output.vx_0_=output.vx_t_;output.vy_0_=output.vy_t_;++output.step_num_;
+            output.prepareNextStep();
+        }
+        return output.COM_pos_.allFinite();
+    }
+
     void LFPC::updateOneStepForOnce(double t)
     {     
         auto state_f = calculateLFPC(vx_0_, vy_0_);

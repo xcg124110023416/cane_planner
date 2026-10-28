@@ -1,0 +1,21 @@
+Note: Google Test filter = SimOdomTest.PreviewCadenceStaysAlignedDespiteDifferentGlobalSearchDurations
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SimOdomTest
+[ RUN      ] SimOdomTest.PreviewCadenceStaysAlignedDespiteDifferentGlobalSearchDurations
+LFPC's first support leg is left leg
+LFPC's contorl b is: 0.393844
+/home/xcg/ws/src/cane_planner/plan_manage/test/test_sim_odom_stop.cpp:347: Failure
+Value of: SimOdomTestAccess::previewReady(manager_)
+  Actual: false
+Expected: true
+[  FAILED  ] SimOdomTest.PreviewCadenceStaysAlignedDespiteDifferentGlobalSearchDurations (364 ms)
+[----------] 1 test from SimOdomTest (364 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (364 ms total)
+[  PASSED  ] 0 tests.
+[  FAILED  ] 1 test, listed below:
+[  FAILED  ] SimOdomTest.PreviewCadenceStaysAlignedDespiteDifferentGlobalSearchDurations
+
+ 1 FAILED TEST

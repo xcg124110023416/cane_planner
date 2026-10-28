@@ -1,0 +1,3 @@
+[WARN] [1793193611.643976112]: [MPC] Reached final goal at (7.63, 2.93), 35 steps
+[INFO] [1793193595.625307]: PedestrianSim: scenario=dwcg_crossing config=/tmp/cane-global-refresh-pedestrian.yaml
+[INFO] [1793193595.650251]: PedestrianSim: 1 pedestrians, 10Hz

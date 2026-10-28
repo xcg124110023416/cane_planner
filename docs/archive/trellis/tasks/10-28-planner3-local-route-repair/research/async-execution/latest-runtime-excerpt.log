@@ -1,0 +1,3 @@
+[INFO] [WARN] [1793193544.601851289]: [MPC] Reached final goal at (4.28, -4.65), 45 steps
+[INFO] [1793193525.821347]: PedestrianSim: scenario=dwcg_crossing config=/tmp/cane-stutter-pedestrian.yaml
+[INFO] [1793193525.846037]: PedestrianSim: 1 pedestrians, 10Hz

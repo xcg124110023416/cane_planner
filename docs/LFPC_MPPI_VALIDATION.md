@@ -124,7 +124,7 @@ roslaunch plan_manage sim_kin_replan.launch \
 RViz 的采样轨迹显示最后一轮实际采样，选中轨迹与时间同步轮廓沿用原话题。
 新增 `/mpc/optimization_evidence`，可用 `rostopic echo` 查看迭代成本、采样可行数、
 有效样本量 ESS、加权拒绝数和最终重演状态。索引定义随消息 layout 发布，也记录于
-[MPPI 契约](../.trellis/spec/planning-runtime/lfpc-mppi.md)。
+[MPPI 契约](development/planning-runtime/lfpc-mppi.md)。
 最低已验证代价曲线因保留候选而非增；不能将其视为局部最优证明。
 该话题发布早于执行授权，最后是否推进仍看 STOP、时间复查与事务诊断。
 

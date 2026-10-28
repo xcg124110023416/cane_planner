@@ -1,0 +1,154 @@
+{
+  "timed-final-latest.json": {
+    "start": [
+      -6.846,
+      4.728,
+      -0.157
+    ],
+    "goal": [
+      4.139,
+      -4.681
+    ],
+    "movement_intervals_seconds": {
+      "count": 682,
+      "mean": 0.019254167645102294,
+      "p95": 0.020962774004146922,
+      "maximum": 0.035908364996430464
+    },
+    "between_moving_updates_seconds": {
+      "count": 681,
+      "mean": 0.020044125066077775,
+      "p95": 0.021121926001796965,
+      "maximum": 0.055697891002637334
+    },
+    "movement_gaps_over_150ms": 0,
+    "displacement_metres": {
+      "count": 682,
+      "mean": 0.025949904115335588,
+      "p95": 0.029936230315164368,
+      "maximum": 0.05148200654117216
+    },
+    "critical_transaction_seconds": {
+      "count": 183,
+      "mean": 0.010115760415300547,
+      "p95": 0.022576216,
+      "maximum": 0.045998796
+    },
+    "total_callback_seconds": {
+      "count": 183,
+      "mean": 0.010232592071038252,
+      "p95": 0.023186955,
+      "maximum": 0.048488863
+    },
+    "execution_validation_seconds": {
+      "count": 682,
+      "mean": 0.001007845431085044,
+      "p95": 0.00150363,
+      "maximum": 0.002298902
+    },
+    "actual_advance_seconds": {
+      "count": 682,
+      "mean": 0.018475073313782994,
+      "p95": 0.020826443,
+      "maximum": 0.03628719
+    },
+    "stops": {
+      "OK": 727
+    },
+    "astar_publications": 38,
+    "astar_intervals_seconds": {
+      "count": 37,
+      "mean": 0.36189578356759344,
+      "p95": 0.5966420840049977,
+      "maximum": 1.9062341210010345
+    },
+    "preview_publications": 52,
+    "nonempty_pedestrian_frames": 40,
+    "minimum_goal_distance_metres": 0.06842955206007098,
+    "final_goal_distance_metres": 0.13896869476898338,
+    "final_pose": {
+      "t": 25.2912382949944,
+      "stamp": 1793193553.6839194,
+      "x": 4.275073966452796,
+      "y": -4.652783448481462,
+      "yaw": -0.3486879362963006
+    },
+    "execution_frames": 682
+  },
+  "timed-final-persistent.json": {
+    "start": [
+      -5.694647789001465,
+      4.478665351867676,
+      -0.026
+    ],
+    "goal": [
+      7.558390140533447,
+      2.972381114959717
+    ],
+    "movement_intervals_seconds": {
+      "count": 546,
+      "mean": 0.018340785983504172,
+      "p95": 0.020558428994263522,
+      "maximum": 0.0399795620032819
+    },
+    "between_moving_updates_seconds": {
+      "count": 545,
+      "mean": 0.019969753456879256,
+      "p95": 0.021079864003695548,
+      "maximum": 0.04339492600411177
+    },
+    "movement_gaps_over_150ms": 0,
+    "displacement_metres": {
+      "count": 546,
+      "mean": 0.025122946130167873,
+      "p95": 0.029836538729215083,
+      "maximum": 0.055690509264102336
+    },
+    "critical_transaction_seconds": {
+      "count": 145,
+      "mean": 0.012187729206896552,
+      "p95": 0.034227987,
+      "maximum": 0.036963562
+    },
+    "total_callback_seconds": {
+      "count": 145,
+      "mean": 0.012326707372413793,
+      "p95": 0.035277343,
+      "maximum": 0.0380379
+    },
+    "execution_validation_seconds": {
+      "count": 546,
+      "mean": 0.0008819670842490843,
+      "p95": 0.001203068,
+      "maximum": 0.001585866
+    },
+    "actual_advance_seconds": {
+      "count": 546,
+      "mean": 0.01794871794871795,
+      "p95": 0.020168933000000028,
+      "maximum": 0.039999999999999994
+    },
+    "stops": {
+      "OK": 581
+    },
+    "astar_publications": 35,
+    "astar_intervals_seconds": {
+      "count": 34,
+      "mean": 0.31326398661771876,
+      "p95": 0.3344089130041539,
+      "maximum": 0.3509773879995919
+    },
+    "preview_publications": 40,
+    "nonempty_pedestrian_frames": 230,
+    "minimum_goal_distance_metres": 0.07209943743238949,
+    "final_goal_distance_metres": 0.08287071425107767,
+    "final_pose": {
+      "t": 25.310378121001122,
+      "stamp": 1793193623.503481,
+      "x": 7.629919290611793,
+      "y": 2.9305345384025694,
+      "yaw": 0.5174088976198037
+    },
+    "execution_frames": 546
+  }
+}

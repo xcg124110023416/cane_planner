@@ -1,0 +1,48 @@
+[==========] Running 17 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 13 tests from Firi
+[ RUN      ] Firi.DenseStraight
+straight raw=10/500 final=3/3 seconds=0.000515816/0.0201806
+[       OK ] Firi.DenseStraight (21 ms)
+[ RUN      ] Firi.Corners
+[       OK ] Firi.Corners (2 ms)
+[ RUN      ] Firi.WholeCellDetour
+detour seconds=0.000997613 regions=3
+[       OK ] Firi.WholeCellDetour (1 ms)
+[ RUN      ] Firi.NearWallNarrow
+[       OK ] Firi.NearWallNarrow (0 ms)
+[ RUN      ] Firi.GeometricOnlyThinPassage
+[       OK ] Firi.GeometricOnlyThinPassage (3 ms)
+[ RUN      ] Firi.CellCrossingNotCenter
+[       OK ] Firi.CellCrossingNotCenter (0 ms)
+[ RUN      ] Firi.UnknownAndMapEdge
+[       OK ] Firi.UnknownAndMapEdge (0 ms)
+[ RUN      ] Firi.InvalidAndBudgets
+[       OK ] Firi.InvalidAndBudgets (0 ms)
+[ RUN      ] Firi.NoCutCornerGap
+[       OK ] Firi.NoCutCornerGap (0 ms)
+[ RUN      ] Firi.TranslationAndAreaThreshold
+[       OK ] Firi.TranslationAndAreaThreshold (2 ms)
+[ RUN      ] Firi.ScaleEnvelope
+[       OK ] Firi.ScaleEnvelope (0 ms)
+[ RUN      ] Firi.OriginalEdgeEndpointCertificates
+[       OK ] Firi.OriginalEdgeEndpointCertificates (0 ms)
+[ RUN      ] Firi.DensePathBudgetRemainsBounded
+[       OK ] Firi.DensePathBudgetRemainsBounded (4 ms)
+[----------] 13 tests from Firi (33 ms total)
+
+[----------] 4 tests from FiriAdaptive
+[ RUN      ] FiriAdaptive.DenseAndSparseUseCoverageRatherThanEveryEdge
+adaptive sparse/dense generated=6/6 ms=0.23792/2.02074
+[       OK ] FiriAdaptive.DenseAndSparseUseCoverageRatherThanEveryEdge (2 ms)
+[ RUN      ] FiriAdaptive.CornersBodyAndCaneKeepWholeCellCertificates
+[       OK ] FiriAdaptive.CornersBodyAndCaneKeepWholeCellCertificates (0 ms)
+[ RUN      ] FiriAdaptive.ExactReferenceLengthAndProjectionConnector
+[       OK ] FiriAdaptive.ExactReferenceLengthAndProjectionConnector (0 ms)
+[ RUN      ] FiriAdaptive.ForwardFootprintCannotStallBetweenSideObstacles
+[       OK ] FiriAdaptive.ForwardFootprintCannotStallBetweenSideObstacles (1 ms)
+[----------] 4 tests from FiriAdaptive (3 ms total)
+
+[----------] Global test environment tear-down
+[==========] 17 tests from 2 test suites ran. (36 ms total)
+[  PASSED  ] 17 tests.

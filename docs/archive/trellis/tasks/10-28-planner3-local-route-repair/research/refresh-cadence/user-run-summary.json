@@ -1,0 +1,158 @@
+{
+  "source_log": "rosout.log, user run starting 2026-10-28 16:13",
+  "configured_period_seconds": 0.5,
+  "observations": [
+    {
+      "stamp": 1793175194.197956,
+      "message": "[MPC global] Accepted periodic full A* route: 120 points, search 160.5 ms"
+    },
+    {
+      "stamp": 1793175195.163099,
+      "message": "[MPC global] Accepted periodic full A* route: 77 points, search 44.7 ms"
+    },
+    {
+      "stamp": 1793175195.7657044,
+      "message": "[MPC global] Accepted periodic full A* route: 58 points, search 38.0 ms"
+    },
+    {
+      "stamp": 1793175196.3465912,
+      "message": "[MPC global] Accepted periodic full A* route: 35 points, search 29.4 ms"
+    },
+    {
+      "stamp": 1793175196.9362094,
+      "message": "[MPC global] Accepted periodic full A* route: 11 points, search 23.8 ms"
+    },
+    {
+      "stamp": 1793175197.1088567,
+      "message": "[MPC] Reached final goal at (4.03, -4.76), 43 steps"
+    },
+    {
+      "stamp": 1793175201.9479685,
+      "message": "[MPC global] Accepted periodic full A* route: 138 points, search 109.4 ms"
+    },
+    {
+      "stamp": 1793175202.516566,
+      "message": "[MPC global] Accepted periodic full A* route: 118 points, search 85.1 ms"
+    },
+    {
+      "stamp": 1793175203.5980017,
+      "message": "[MPC global] Accepted periodic full A* route: 76 points, search 64.2 ms"
+    },
+    {
+      "stamp": 1793175204.1628432,
+      "message": "[MPC global] Accepted periodic full A* route: 53 points, search 42.8 ms"
+    },
+    {
+      "stamp": 1793175204.7522693,
+      "message": "[MPC global] Accepted periodic full A* route: 29 points, search 34.2 ms"
+    },
+    {
+      "stamp": 1793175204.9254196,
+      "message": "[StaticCorridor] reason=REFERENCE_OCCUPIED segment=0 position_valid=1 x=4.763 y=3.781 s=0.000 stage=OBSTACLE_SEPARATION_SOLVE outer_iteration=0 solver_status_valid=0 solver_status=0 solver_exception=\"\" min_slack_valid=0 min_slack=NA constraint_violation_valid=0 max_constraint_violation=NA"
+    },
+    {
+      "stamp": 1793175204.9256272,
+      "message": "[MPC] STOP reason=INVALID_STATIC_CORRIDOR valid=0.00"
+    },
+    {
+      "stamp": 1793175205.3444042,
+      "message": "[MPC global] Accepted periodic full A* route: 25 points, search 28.9 ms"
+    },
+    {
+      "stamp": 1793175205.5095148,
+      "message": "[MPC] STOP reason=INVALID_STATIC_CORRIDOR valid=0.00"
+    },
+    {
+      "stamp": 1793175206.0091865,
+      "message": "[StaticCorridor] reason=REFERENCE_OCCUPIED segment=0 position_valid=1 x=5.287 y=3.231 s=0.000 stage=OBSTACLE_SEPARATION_SOLVE outer_iteration=0 solver_status_valid=0 solver_status=0 solver_exception=\"\" min_slack_valid=0 min_slack=NA constraint_violation_valid=0 max_constraint_violation=NA"
+    },
+    {
+      "stamp": 1793175206.109471,
+      "message": "[MPC] STOP reason=INVALID_STATIC_CORRIDOR valid=0.00"
+    },
+    {
+      "stamp": 1793175206.70943,
+      "message": "[MPC] STOP reason=INVALID_STATIC_CORRIDOR valid=0.00"
+    },
+    {
+      "stamp": 1793175207.0371797,
+      "message": "[StaticCorridor] reason=REFERENCE_OCCUPIED segment=0 position_valid=1 x=5.287 y=3.231 s=0.000 stage=OBSTACLE_SEPARATION_SOLVE outer_iteration=0 solver_status_valid=0 solver_status=0 solver_exception=\"\" min_slack_valid=0 min_slack=NA constraint_violation_valid=0 max_constraint_violation=NA"
+    },
+    {
+      "stamp": 1793175207.2095828,
+      "message": "[MPC] STOP reason=INVALID_STATIC_CORRIDOR valid=0.00"
+    },
+    {
+      "stamp": 1793175207.7095797,
+      "message": "[MPC] STOP reason=INVALID_STATIC_CORRIDOR valid=0.00"
+    },
+    {
+      "stamp": 1793175208.1094675,
+      "message": "[StaticCorridor] reason=REFERENCE_OCCUPIED segment=0 position_valid=1 x=5.287 y=3.231 s=0.000 stage=OBSTACLE_SEPARATION_SOLVE outer_iteration=0 solver_status_valid=0 solver_status=0 solver_exception=\"\" min_slack_valid=0 min_slack=NA constraint_violation_valid=0 max_constraint_violation=NA"
+    },
+    {
+      "stamp": 1793175208.23662,
+      "message": "[MPC] STOP reason=INVALID_STATIC_CORRIDOR valid=0.00"
+    },
+    {
+      "stamp": 1793175208.8364992,
+      "message": "[MPC] STOP reason=INVALID_STATIC_CORRIDOR valid=0.00"
+    },
+    {
+      "stamp": 1793175209.209355,
+      "message": "[StaticCorridor] reason=REFERENCE_OCCUPIED segment=0 position_valid=1 x=5.287 y=3.231 s=0.000 stage=OBSTACLE_SEPARATION_SOLVE outer_iteration=0 solver_status_valid=0 solver_status=0 solver_exception=\"\" min_slack_valid=0 min_slack=NA constraint_violation_valid=0 max_constraint_violation=NA"
+    },
+    {
+      "stamp": 1793175209.436392,
+      "message": "[MPC] STOP reason=INVALID_STATIC_CORRIDOR valid=0.00"
+    },
+    {
+      "stamp": 1793175210.0359282,
+      "message": "[MPC] STOP reason=INVALID_STATIC_CORRIDOR valid=0.00"
+    },
+    {
+      "stamp": 1793175210.2094111,
+      "message": "[StaticCorridor] reason=REFERENCE_OCCUPIED segment=0 position_valid=1 x=5.287 y=3.231 s=0.000 stage=OBSTACLE_SEPARATION_SOLVE outer_iteration=0 solver_status_valid=0 solver_status=0 solver_exception=\"\" min_slack_valid=0 min_slack=NA constraint_violation_valid=0 max_constraint_violation=NA"
+    },
+    {
+      "stamp": 1793175210.6375837,
+      "message": "[MPC] STOP reason=INVALID_STATIC_CORRIDOR valid=0.00"
+    },
+    {
+      "stamp": 1793175211.2364593,
+      "message": "[StaticCorridor] reason=REFERENCE_OCCUPIED segment=0 position_valid=1 x=5.287 y=3.231 s=0.000 stage=OBSTACLE_SEPARATION_SOLVE outer_iteration=0 solver_status_valid=0 solver_status=0 solver_exception=\"\" min_slack_valid=0 min_slack=NA constraint_violation_valid=0 max_constraint_violation=NA"
+    },
+    {
+      "stamp": 1793175211.2365918,
+      "message": "[MPC] STOP reason=INVALID_STATIC_CORRIDOR valid=0.00"
+    },
+    {
+      "stamp": 1793175211.642375,
+      "message": "[MPC global] Accepted periodic full A* route: 140 points, search 106.6 ms"
+    },
+    {
+      "stamp": 1793175212.624601,
+      "message": "[MPC global] Accepted periodic full A* route: 109 points, search 91.5 ms"
+    },
+    {
+      "stamp": 1793175213.2054725,
+      "message": "[MPC global] Accepted periodic full A* route: 86 points, search 71.3 ms"
+    },
+    {
+      "stamp": 1793175213.774539,
+      "message": "[MPC global] Accepted periodic full A* route: 63 points, search 52.3 ms"
+    },
+    {
+      "stamp": 1793175214.3530183,
+      "message": "[MPC global] Accepted periodic full A* route: 41 points, search 33.8 ms"
+    },
+    {
+      "stamp": 1793175214.9391177,
+      "message": "[MPC global] Accepted periodic full A* route: 19 points, search 24.5 ms"
+    },
+    {
+      "stamp": 1793175215.3088367,
+      "message": "[MPC] Reached final goal at (6.77, 2.50), 38 steps"
+    }
+  ]
+}
