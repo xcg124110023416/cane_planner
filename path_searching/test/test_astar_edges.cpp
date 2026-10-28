@@ -275,28 +275,18 @@ TEST(AstarRecovery, WholePolygonCrossingTangencyAndContainment) {
     EXPECT_TRUE(Astar::polygonEdgeFree({-.5,-.002},{1.5,-.002},p,.002));
     EXPECT_FALSE(Astar::validRecoveryPolygon({{0,0},{0,1},{1,0}}));
 }
-TEST(AstarGlobalReference, FullFootprintGlobalDetourBuildsCorridor) {
+TEST(AstarGlobalReference, PointGlobalDetourBuildsCorridorWithCurrentHull) {
     ConvexCorridor::Grid g;g.origin={-5,-5};g.resolution=.1;g.width=g.height=180;
     g.blocked.assign(g.width*g.height,0);Astar a;AstarEdgeTestAccess::init(a,g);
     HumanCaneFootprint::Config footprint;footprint.enabled=true;
     const std::vector<Eigen::Vector2d> route{{-2,0},{-1,0},{0,0},{1,0},{2,0},{3,0},{4,0},{5,0},{6,0},{7,.2},{8,.4}};
     const std::vector<Eigen::Vector2d> obstacle{{2.7,-.3},{3.3,-.3},{3.3,.3},{2.7,.3}};
-    const auto r=a.searchGlobalReference(route.front(),route.back(),obstacle,footprint,0.,
+    const auto r=a.searchGlobalReference(route.front(),route.back(),obstacle,
         std::chrono::steady_clock::now()+std::chrono::seconds(2));
     ASSERT_EQ(Astar::RecoveryStatus::FOUND,r.status)<<r.seconds;
     EXPECT_EQ(route.front(),r.path.front());EXPECT_EQ(route.back(),r.path.back());
-    TimedPedestrianCollision checker;
-    ASSERT_TRUE(checker.bind({{obstacle,Eigen::Vector2d::Zero()}},HumanCaneFootprint::relative(footprint,0.)));
-    double previous_yaw=0.;
-    for(size_t i=1;i<r.path.size();++i) {
-        const Eigen::Vector2d d=r.path[i]-r.path[i-1];const double yaw=std::atan2(d.y(),d.x());
-        const double turn=std::atan2(std::sin(yaw-previous_yaw),std::cos(yaw-previous_yaw));
-        const int rotations=std::max(1,int(std::ceil(std::abs(turn)/.05)));
-        for(int k=0;k<=rotations;++k)EXPECT_FALSE(checker.intersects(r.path[i-1],0.,previous_yaw+turn*k/rotations));
-        const int steps=std::max(1,int(std::ceil(d.norm()/.02)));
-        for(int k=0;k<=steps;++k)EXPECT_FALSE(checker.intersects(r.path[i-1]+d*double(k)/steps,0.,yaw));
-        previous_yaw=yaw;
-    }
+    for(size_t i=1;i<r.path.size();++i)
+        EXPECT_TRUE(Astar::polygonEdgeFree(r.path[i-1],r.path[i],obstacle,.002));
     ConvexCorridor generator;auto config=generator.getConfig();config.footprint=footprint;config.adaptive_sampling=true;
     generator.setConfig(config);const auto corridor=generator.buildStatic(r.path,g,{obstacle});
     EXPECT_TRUE(corridor.feasible)<<ConvexCorridor::failureReasonName(corridor.failure_reason);
@@ -305,32 +295,34 @@ TEST(AstarGlobalReference, FullFootprintGlobalDetourBuildsCorridor) {
 TEST(AstarGlobalReference, FullMapDetourHasExactNonLatticeGoalAndNoPersistentOverlay) {
     ConvexCorridor::Grid g;g.origin={-6,-6};g.resolution=.1;g.width=g.height=120;
     g.blocked.assign(g.width*g.height,0);Astar a;AstarEdgeTestAccess::init(a,g);
-    HumanCaneFootprint::Config footprint;footprint.enabled=true;
     const Eigen::Vector2d start(-3,0),goal(3.37,.07);
     const std::vector<Eigen::Vector2d> wall{{-.1,-2.6},{.1,-2.6},{.1,2.6},{-.1,2.6}};
     auto deadline=[] {return std::chrono::steady_clock::now()+std::chrono::seconds(2);};
-    const auto blocked=a.searchGlobalReference(start,goal,wall,footprint,0.,deadline());
+    const auto blocked=a.searchGlobalReference(start,goal,wall,deadline());
     ASSERT_EQ(Astar::RecoveryStatus::FOUND,blocked.status)<<blocked.seconds;
     EXPECT_EQ(start,blocked.path.front());EXPECT_EQ(goal,blocked.path.back());
     double deviation=0.;for(const auto& p:blocked.path)deviation=std::max(deviation,std::abs(p.y()));
     EXPECT_GT(deviation,2.6); // no former local repair rectangle can constrain the search
-    const auto clear=a.searchGlobalReference(start,goal,{},footprint,0.,deadline());
+    const auto clear=a.searchGlobalReference(start,goal,{},deadline());
     ASSERT_EQ(Astar::RecoveryStatus::FOUND,clear.status);
     for(const auto& p:clear.path)EXPECT_LT(std::abs(p.y()),.2);
     EXPECT_EQ(goal,clear.path.back());EXPECT_EQ(1u,clear.profile.grid_calls);
 }
-TEST(AstarGlobalReference, RootBodyBlockClosedPassageAndDeadlineFailClosed) {
+TEST(AstarGlobalReference, PointReferenceDetoursWithoutPredictedCaneRestriction) {
     auto g=passage(.1,1.);Astar a;AstarEdgeTestAccess::init(a,g);
-    HumanCaneFootprint::Config footprint;footprint.enabled=true;
     const std::vector<Eigen::Vector2d> route{{.5,.5},{1,.5},{2,.5},{3,.5},{4,.5},{5,.5}};
     const std::vector<Eigen::Vector2d> wall{{2.,-.1},{3.,-.1},{3.,1.1},{2.,1.1}};
     auto deadline=[] {return std::chrono::steady_clock::now()+std::chrono::milliseconds(200);};
-    auto r=a.searchGlobalReference(route.front(),route.back(),wall,footprint,0.,deadline());
+    auto r=a.searchGlobalReference(route.front(),route.back(),wall,deadline());
     EXPECT_NE(Astar::RecoveryStatus::FOUND,r.status);EXPECT_TRUE(r.path.empty());
     const std::vector<Eigen::Vector2d> tip{{1.1,.4},{1.2,.4},{1.2,.6},{1.1,.6}};
-    r=a.searchGlobalReference(route.front(),route.back(),tip,footprint,0.,deadline());
-    EXPECT_NE(Astar::RecoveryStatus::FOUND,r.status);EXPECT_TRUE(r.path.empty());
-    r=a.searchGlobalReference(route.front(),route.back(),wall,footprint,0.,std::chrono::steady_clock::now());
+    r=a.searchGlobalReference(route.front(),route.back(),tip,deadline());
+    ASSERT_EQ(Astar::RecoveryStatus::FOUND,r.status);
+    EXPECT_EQ(route.back(),r.path.back());
+    const std::vector<Eigen::Vector2d> root{{.4,.4},{.6,.4},{.6,.6},{.4,.6}};
+    r=a.searchGlobalReference(route.front(),route.back(),root,deadline());
+    EXPECT_EQ(Astar::RecoveryStatus::NO_PATH,r.status);EXPECT_TRUE(r.path.empty());
+    r=a.searchGlobalReference(route.front(),route.back(),wall,std::chrono::steady_clock::now());
     EXPECT_EQ(Astar::RecoveryStatus::TIMEOUT,r.status);EXPECT_TRUE(r.path.empty());
 }
 TEST(AstarRecovery, ExactGoalDetourAndEmptyOverlayEquivalence) {
@@ -457,7 +449,7 @@ int main(int argc,char** argv) { ros::init(argc,argv,"test_astar_edges",ros::ini
 TEST(AstarEdges, GlobalWorkerUsesOnlyItsFrozenGridAndConfiguration) {
     auto g=passage();Astar a;AstarEdgeTestAccess::init(a,g);
     Astar::GlobalReferenceQuery query;ASSERT_TRUE(a.snapshotGlobalReference(query));
-    query.start={0.,1.};query.goal={5.,1.};query.footprint.enabled=true;
+    query.start={0.,1.};query.goal={5.,1.};
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);
     const auto expected=Astar::evaluateGlobalReference(query,deadline);
     ASSERT_EQ(Astar::RecoveryStatus::FOUND,expected.status);
@@ -467,20 +459,18 @@ TEST(AstarEdges, GlobalWorkerUsesOnlyItsFrozenGridAndConfiguration) {
     EXPECT_EQ(query.start,frozen.path.front());EXPECT_EQ(query.goal,frozen.path.back());
 }
 
-TEST(AstarEdges, CachedSupportsNeverFreeAnOverlappingWholeCellOrPedestrian) {
+TEST(AstarEdges, PointReferenceNeverAdmitsOccupiedCellOrPedestrian) {
     ConvexCorridor::Grid g;g.origin={-3,-3};g.resolution=.1;g.width=g.height=60;g.blocked.assign(3600,0);
     Astar a;AstarEdgeTestAccess::init(a,g);Astar::GlobalReferenceQuery q;ASSERT_TRUE(a.snapshotGlobalReference(q));
-    q.footprint.enabled=true;
     const TimedPedestrianCollision::Polygon square{{0,0},{.1,0},{.1,.1},{0,.1}};
-    TimedPedestrianCollision oracle;ASSERT_TRUE(oracle.bind({{square,Eigen::Vector2d::Zero()}},HumanCaneFootprint::relative(q.footprint,0.)));
     for(bool dynamic:{false,true}) {
         q.grid.blocked.assign(3600,0);q.obstacle.clear();
         if(dynamic)q.obstacle=square;else q.grid.blocked[30*60+30]=1;
         int free_count=0,blocked_count=0;
-        for(int i=0;i<24;++i)for(double radius:{.2,.6,1.2}) {
-            const double angle=i*3.141592653589793/12.;q.start=Eigen::Vector2d(.05,.05)+radius*Eigen::Vector2d(std::cos(angle),std::sin(angle));q.goal=q.start;q.root_yaw=-angle*.7;
+        for(int i=0;i<24;++i)for(double radius:{.02,.2,1.2}) {
+            const double angle=i*3.141592653589793/12.;q.start=Eigen::Vector2d(.05,.05)+radius*Eigen::Vector2d(std::cos(angle),std::sin(angle));q.goal=q.start;
             const auto result=Astar::evaluateGlobalReference(q,std::chrono::steady_clock::now()+std::chrono::seconds(1));
-            if(result.status==Astar::RecoveryStatus::FOUND){++free_count;EXPECT_FALSE(oracle.intersects(q.start,0.,q.root_yaw));}
+            if(result.status==Astar::RecoveryStatus::FOUND){++free_count;EXPECT_FALSE((q.start.array()>=0.).all() && (q.start.array()<=.1).all());}
             else ++blocked_count;
         }
         EXPECT_GT(free_count,0);EXPECT_GT(blocked_count,0);

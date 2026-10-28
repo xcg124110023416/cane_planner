@@ -65,9 +65,11 @@ No penalty or safety guarantee is inferred from the Gaussian distribution.
 ## Feasibility, selection and execution
 
 One production rollout evaluator checks support-foot and every generated COM
-sample's static traversability. At each checked pose the complete configured
-human-cane envelope must fit in one common spatial region, with timed pedestrian
-SAT at its actual future time and torso yaw. Intermediate step-root turn poses
+sample's static traversability and point containment in the spatial corridor.
+Future human-cane envelopes need not fit a spatial region and are not checked
+against static cells. Their purpose in rollouts is timed pedestrian SAT at the
+actual future time and torso yaw. Current-pose hull containment and current pedestrian exclusion are certified by
+FIRI generation before MPPI, regardless of timed collision enable. Intermediate step-root turn poses
 are retained with their yaw/time for execution revalidation. Root spatial/static/
 timed checks remain mandatory. See [directional-footprint-corridor.md](./directional-footprint-corridor.md).
 A sequence must safely complete the horizon or reach the actual final goal
@@ -145,7 +147,8 @@ docs/PLANNER3_CORRIDOR_USAGE.md. The earlier center/circle benchmark remains in
 [lfpc-timed-collision.md](./lfpc-timed-collision.md); historical lightweight launch
 evidence is recorded in docs/LFPC_MPPI_VALIDATION.md.
 Finite sampling can miss feasible routes. Fixed gait does not add waiting/speed
-actions. Default static FIRI permits evaluation of future-vacated space under timed SAT.
+actions. Current-frame DWCG excludes currently occupied pedestrian space even if timed SAT
+predicts it will later be vacated; timed SAT remains an additional future check.
 Periodic full global A* supplies candidate references before MPPI; see
 [periodic-global-reference.md](periodic-global-reference.md). Sampled CV
 collision checks and time-driven lightweight execution retain the timed-checker limitations;

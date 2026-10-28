@@ -1221,6 +1221,19 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         }
     }
 
+    std::vector<ConvexCorridor::Polygon> PlannerManager::currentPedestrianPolygonsLocked(const ros::Time& epoch) const
+    {
+        std::vector<ConvexCorridor::Polygon> polygons;
+        if(!pedestrians_enabled_)return polygons;
+        const double age=(epoch-pedestrian_header_.stamp).toSec();
+        for(size_t i=0;i<pedestrian_geometry_.size() && i<pedestrian_observations_.size();++i) {
+            auto hull=pedestrian_geometry_[i].hull;
+            for(auto& p:hull)p+=pedestrian_observations_[i].velocity*age;
+            polygons.push_back(std::move(hull));
+        }
+        return polygons;
+    }
+
     ConvexCorridor::Result PlannerManager::updateAndPublishConvexCorridorLocked(
         const Eigen::Vector3d& current_pose, PedestrianFrameToken* used_frame,
         std::vector<Eigen::Vector2d>* pending_route, const ros::Time& schedule_epoch)
@@ -1234,6 +1247,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
 #endif
         global_replan_reason_="NOT_NEEDED";global_replan_seconds_=0.;
         pedestrian_geometry_.clear();
+        corridor_geometry_epoch_=ros::Time::now();
         if (pedestrians_enabled_ && !pedestrianDataValid(ros::Time::now())) {
             result.failure_reason = ConvexCorridor::FailureReason::DYNAMIC_DATA_INVALID;
             publishConvexCorridorLocked(result);
@@ -1276,7 +1290,6 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             ROS_WARN_THROTTLE(1.0, "[StaticCorridor] grid unavailable: %s", reason.c_str());
         } else {
             grid.width = size.x(); grid.height = size.y();
-            std::vector<ConvexCorridor::Polygon> polygons;
             if (pedestrians_enabled_) for (const auto& observation:pedestrian_observations_) {
                 const auto geometry=PedestrianPolygon::build(observation,current_pose,grid,pedestrian_config_);
                 if (!geometry.valid) {
@@ -1285,7 +1298,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
                     result.failure_reason=ConvexCorridor::FailureReason::DYNAMIC_DATA_INVALID;
                     publishConvexCorridorLocked(result); return result;
                 }
-                pedestrian_geometry_.push_back(geometry); polygons.push_back(geometry.hull);
+                pedestrian_geometry_.push_back(geometry);
             }
             if(pending_route && astar_finder_) {
                 if(!std::isfinite(global_replan_period_) || global_replan_period_<.1 || global_replan_period_>5.) {
@@ -1306,12 +1319,12 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
                 }
             }
             const auto firi_started=std::chrono::steady_clock::now();
-            // Moving pedestrians are checked at each LFPC sample's future time.
-            // Keep a static optimization domain even when they cross the route.
-            // Disabling timed checks retains current-frame spatial exclusion.
-            const bool spatial_only=mpc_controller_ && !mpc_controller_->timedCollisionEnabled();
+            // DWCG is current spatial free space: separate both static cells and
+            // the accepted pedestrian hulls at NOW, regardless of timed checking.
+            // Future prediction stays a separate trajectory feasibility check.
+            corridor_geometry_epoch_=ros::Time::now();
             result = convex_corridor_->buildStatic(reference_path, grid,
-                spatial_only?polygons:std::vector<ConvexCorridor::Polygon>{});
+                currentPedestrianPolygonsLocked(corridor_geometry_epoch_));
             transaction_diag_[13]=std::chrono::duration<double>(std::chrono::steady_clock::now()-firi_started).count();
             if(pending_route && !pending_route->empty())transaction_diag_[15]=transaction_diag_[13];
             // Recheck after cooperative numerical work; never execute a stale frame.
@@ -1404,13 +1417,9 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             if(!ready)global_replan_reason_="NO_PATH";
             return ready;
         }
-        query.start=pose.head<2>();query.goal=end_pt_;query.root_yaw=pose.z();
-        query.footprint=mpc_controller_->footprintConfig();
-        if(!pedestrian_geometry_.empty()) {
-            query.obstacle=pedestrian_geometry_.front().hull;
-            const auto displacement=(pedestrian_observations_.front().velocity*(now-pedestrian_header_.stamp).toSec()).eval();
-            for(auto& p:query.obstacle)p+=displacement;
-        }
+        query.start=pose.head<2>();query.goal=end_pt_;
+        const auto polygons=currentPedestrianPolygonsLocked(now);
+        if(!polygons.empty())query.obstacle=polygons.front();
         GlobalRouteResult metadata;metadata.revision=global_route_revision_;metadata.dynamic=pedestrians_enabled_;
         metadata.stamp=pedestrian_header_.stamp;metadata.receipt=pedestrian_receipt_;metadata.requested=now;
 #ifdef CANE_MANAGER_INTERLEAVING_TEST
@@ -1467,6 +1476,23 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             const double age=(now-preview->stamp).toSec(),receipt_age=(now-preview->receipt).toSec();
             const double remaining=preview->dynamic?pedestrian_max_age_-std::max(age,receipt_age):.6;
             if(age<0. || receipt_age<0. || remaining<=0.) {corridor_preview_pub_.publish(markers);return;}
+            if(preview->dynamic) {
+                if(!pedestrians_enabled_ || !pedestrianDataValid(now) ||
+                   pedestrian_geometry_.size()!=pedestrian_observations_.size()) {corridor_preview_pub_.publish(markers);return;}
+                const auto polygons=currentPedestrianPolygonsLocked(now);
+                if(preview->result.has_dynamic_input!=!polygons.empty()) {corridor_preview_pub_.publish(markers);return;}
+                // A completed async preview is still only a snapshot. Never draw
+                // it as free space if a newer/current pedestrian has entered it.
+                for(const auto& region:preview->result.segments)for(const auto& polygon:polygons) {
+                    bool separated=false;
+                    for(const auto& h:region.halfspaces) {
+                        double gap=std::numeric_limits<double>::infinity();
+                        for(const auto& p:polygon)gap=std::min(gap,h.normal.dot(p)-h.offset);
+                        separated=separated || gap>=convex_corridor_->getConfig().clearance-1e-7;
+                    }
+                    if(!separated) {corridor_preview_pub_.publish(markers);return;}
+                }
+            }
             marker.action=visualization_msgs::Marker::ADD;marker.pose.orientation.w=1.;
             marker.lifetime=ros::Duration(std::min(.6,remaining));marker.scale.x=.012;
             marker.color.r=.65;marker.color.g=.8;marker.color.b=1.;marker.color.a=.45;
@@ -1534,11 +1560,12 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             publishCorridorPreviewLocked(nullptr);return;
         }
         grid.width=size.x();grid.height=size.y();
-        std::vector<ConvexCorridor::Polygon> polygons;
-        if(mpc_controller_ && !mpc_controller_->timedCollisionEnabled())
-            for(const auto& p:pedestrian_geometry_)polygons.push_back(p.hull);
         const bool dynamic=pedestrians_enabled_;
         const ros::Time created=ros::Time::now();
+        if(dynamic && (!pedestrianDataValid(created) || pedestrian_geometry_.size()!=pedestrian_observations_.size())) {
+            publishCorridorPreviewLocked(nullptr);return;
+        }
+        auto polygons=currentPedestrianPolygonsLocked(created);
         const ros::Time stamp=dynamic?pedestrian_header_.stamp:created,receipt=dynamic?pedestrian_receipt_:created;
         const uint64_t revision=corridor_preview_revision_;
         // Worker owns only immutable value copies: no ROS callbacks, route recovery,
@@ -1583,6 +1610,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         }
         for (size_t i=0;i<pedestrian_geometry_.size();++i) {
             const auto& geometry=pedestrian_geometry_[i];
+            const Eigen::Vector2d displacement=pedestrian_observations_[i].velocity*(corridor_geometry_epoch_-pedestrian_header_.stamp).toSec();
             for (int social=0;social<3;++social) {
                 if(social==1 && geometry.social.size()<3)continue;
                 visualization_msgs::Marker marker;
@@ -1593,7 +1621,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
                 marker.color.r=1.; marker.color.g=social==2?.65:social==1?.15:.0;marker.color.b=social==1?.8:0.; marker.color.a=.9;
                 marker.lifetime=ros::Duration(.3);
                 for (const auto& p:(social==2?geometry.hull:social==1?geometry.social:geometry.body)) {
-                    geometry_msgs::Point q; q.x=p.x();q.y=p.y();q.z=social?.2:.22;marker.points.push_back(q);
+                    geometry_msgs::Point q; q.x=p.x()+displacement.x();q.y=p.y()+displacement.y();q.z=social?.2:.22;marker.points.push_back(q);
                 }
                 if (!marker.points.empty()) marker.points.push_back(marker.points.front());
                 markers.markers.push_back(marker);
@@ -1601,11 +1629,12 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         }
         for(size_t i=0;i<pedestrian_geometry_.size() && i<pedestrian_observations_.size();++i) {
             const auto& observation=pedestrian_observations_[i];const auto& geometry=pedestrian_geometry_[i];
+            const Eigen::Vector2d position=observation.position+observation.velocity*(corridor_geometry_epoch_-pedestrian_header_.stamp).toSec();
             visualization_msgs::Marker force;force.header=clear.header;force.ns="mpc_pedestrian_force";force.id=i;
             force.action=visualization_msgs::Marker::ADD;force.type=visualization_msgs::Marker::ARROW;
             force.pose.orientation.w=1.;force.scale.x=.035;force.scale.y=.08;force.scale.z=.12;
             force.color.r=1.;force.color.b=1.;force.color.a=.9;force.lifetime=ros::Duration(.3);
-            for(const Eigen::Vector2d point:{observation.position,Eigen::Vector2d(observation.position+.3*geometry.force)}) {
+            for(const Eigen::Vector2d point:{position,Eigen::Vector2d(position+.3*geometry.force)}) {
                 geometry_msgs::Point q;q.x=point.x();q.y=point.y();q.z=.3;force.points.push_back(q);
             }
             if(geometry.force.norm()>1e-9)markers.markers.push_back(force);
@@ -1613,13 +1642,13 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
                 force.ns="mpc_pedestrian_fov";force.type=visualization_msgs::Marker::LINE_STRIP;force.scale.x=.012;
                 force.points.clear();force.color.a=.45;
                 const double yaw=std::atan2(observation.velocity.y(),observation.velocity.x());
-                geometry_msgs::Point q;q.x=observation.position.x();q.y=observation.position.y();q.z=.18;force.points.push_back(q);
+                geometry_msgs::Point q;q.x=position.x();q.y=position.y();q.z=.18;force.points.push_back(q);
                 for(int j=0;j<=44;++j) {
                     const double angle=yaw+(-110.+5.*j)*3.14159265358979323846/180.;
-                    q.x=observation.position.x()+pedestrian_config_.safety_radius*std::cos(angle);
-                    q.y=observation.position.y()+pedestrian_config_.safety_radius*std::sin(angle);force.points.push_back(q);
+                    q.x=position.x()+pedestrian_config_.safety_radius*std::cos(angle);
+                    q.y=position.y()+pedestrian_config_.safety_radius*std::sin(angle);force.points.push_back(q);
                 }
-                q.x=observation.position.x();q.y=observation.position.y();force.points.push_back(q);markers.markers.push_back(force);
+                q.x=position.x();q.y=position.y();force.points.push_back(q);markers.markers.push_back(force);
             }
         }
         if(!result.feasible && result.failure_position_valid) {

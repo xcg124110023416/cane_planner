@@ -4,7 +4,8 @@
 
 `TimedPedestrianCollision` in path_searching is pure domain geometry, independent
 of ROS. Bind the exact accepted social hull and world velocity already used for
-the current accepted geometry transaction. Default FIRI is static-only; see
+the current accepted geometry transaction. FIRI always excludes the current pedestrian hull as spatial DWCG, independently
+of this future check; see
 [periodic-global-reference.md](periodic-global-reference.md). No additional SFM solve, FIRI inflation, intent inference or
 polygon rasterization. CV occupancy at future relative time tau is
 `P0 + velocity * (execution_epoch - source_stamp + tau)`.
@@ -15,7 +16,8 @@ pose; cache SAT normals/support intervals for that yaw. Same-yaw LFPC samples an
 execution queries reuse intervals. Contact is collision with 1e-9 m tolerance.
 Explicit human_cane/enabled=false retains the fixed circumscribed COM octagon for
 historical comparisons. Invalid geometry/time fails closed. The optional timed
-ablation does not bypass source freshness, spatial footprint checks or FIRI.
+ablation does not bypass source freshness, COM/foot static checks or current-frame
+pedestrian exclusion in FIRI.
 See [directional-footprint-corridor.md](directional-footprint-corridor.md).
 
 LFPC records actual integration phases alongside COM samples. Copy/reset/prepare
@@ -51,9 +53,11 @@ next plan immediately, avoiding an extra 100ms FSM idle wait. Global scheduling
 continues during the phase, but controls/reference adoption wait for its boundary.
 
 Before EACH advance, bind a fresh accepted observation and rebuild its geometry.
-Check the original admitted corridor, latest selected whole occupied cells and
-support foot. Check current/proposed poses, nominal LFPC samples, additional 20ms
-samples and root yaw sweep. Reauthorize that original current token immediately
+Check COM point containment in the original admitted corridor and current static
+traversability of COM/support foot. Do not apply future full-hull static SAT or
+full-hull containment in that spatial corridor. Dynamic checks retain the complete
+human-cane envelope at current/proposed poses, nominal LFPC samples, additional
+20ms samples and root yaw sweep. Reauthorize that original current token immediately
 before advance. Dynamic query time is source_age + max(0,sample_phase-target_phase).
 Thus current/proposed poses use the current epoch; remaining poses use their
 remaining phase offset. New blockers or stale input freeze actual pose/phase,
@@ -61,8 +65,10 @@ publish zero-twist heartbeat and STOP, and prevent clock catch-up. Fresh clear
 observations may resume the checked remainder; no midphase steering optimization
 or physical braking is claimed. Other plant adapters retain prior behavior.
 
-Static full-footprint FIRI remains mandatory. Newly vacated pedestrian space can
-be used only when the matching-time checks pass. Waiting/speed actions are not added. This certifies only sampled configured rigid-envelope poses
+Current-frame FIRI excluding static cells and current pedestrians, with the actual
+current human-cane hull protected, remains mandatory.
+Only the COM reference is covered ahead; no predicted human-cane sweep is protected. The current corridor is not a space-time corridor: do not borrow currently
+occupied pedestrian space merely because prediction says it will be vacated. Waiting/speed actions are not added. This certifies only sampled configured rigid-envelope poses
 under CV; no continuous swept LIPM, acceleration/turning uncertainty or physical
 braking claim. Lightweight motion now follows model time within callback jitter;
 stalls/STOP slow or freeze that motion rather than skipping unchecked phases.

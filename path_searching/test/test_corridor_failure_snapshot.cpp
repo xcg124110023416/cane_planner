@@ -20,12 +20,10 @@ TEST(HistoricalSnapshot, AdaptiveOfficeForwardProgress) {
         EXPECT_LE(result.generated_regions,16);EXPECT_GE(result.min_overlap_depth,1e-6);
         for(size_t e=0;e+1<s.path.size();++e) {
             const V d=s.path[e+1]-s.path[e];
-            const auto shape=cane_planner::HumanCaneFootprint::relative(s.config.footprint,
-                e==0?s.config.root_yaw:std::atan2(d.y(),d.x()));
             for(int i=0;i<=10;++i) {
                 const V p=s.path[e]+d*(i/10.);
                 EXPECT_TRUE(std::any_of(result.segments.begin(),result.segments.end(),
-                    [&](const C::Segment& r){return C::containsFootprint(r,p,shape);}))<<name<<" edge="<<e;
+                    [&](const C::Segment& r){return C::contains(r,p);}))<<name<<" edge="<<e;
             }
         }
         std::cout<<name<<" generated="<<result.generated_regions<<" seconds="<<result.elapsed_seconds<<std::endl;

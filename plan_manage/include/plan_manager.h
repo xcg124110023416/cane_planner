@@ -91,6 +91,8 @@ namespace cane_planner
             bool dynamic=false;
         };
         std::future<CorridorPreview> corridor_preview_job_;
+        ros::Time corridor_geometry_epoch_;
+        std::vector<ConvexCorridor::Polygon> currentPedestrianPolygonsLocked(const ros::Time& epoch) const;
         ros::Publisher corridor_preview_pub_,human_cane_pub_;
         void updateCorridorPreviewLocked(const Eigen::Vector3d& pose,bool active_valid,
             const ros::Time& schedule_epoch = ros::Time());

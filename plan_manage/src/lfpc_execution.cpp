@@ -82,31 +82,15 @@ bool PlannerManager::advanceExecutionLocked(const ros::Time& now) {
         if(!execution_root_.sampleControlledStep(execution_control_,t,state))return finish("EXECUTION_MODEL_INVALID");
         samples.push_back({state.getCOMPos(),state.getNextIterState().z(),t});
     }
-    V lo=current.head<2>(),hi=lo;
-    for(const auto& s:samples)for(const auto& p:mpc_controller_->robotFootprintAt(s.position.head<2>(),s.yaw)) {
-        lo=lo.cwiseMin(p);hi=hi.cwiseMax(p);
-    }
-    const auto foot=canonical.getFootPosition();lo=lo.cwiseMin(foot);hi=hi.cwiseMax(foot);
-    const double clearance=convex_corridor_->getConfig().clearance;
-    ConvexCorridor::Grid grid;Eigen::Vector2i size;std::string why;
-    if(!collision_->getStaticCorridorGrid(lo-V::Constant(clearance+.02),hi+V::Constant(clearance+.02),
-        grid.origin,grid.resolution,size,grid.blocked,why))return finish("INVALID_STATIC_CORRIDOR");
-    grid.width=size.x();grid.height=size.y();
-    std::vector<TimedPedestrianCollision::Obstacle> cells;
-    for(int y=0;y<grid.height;++y)for(int x=0;x<grid.width;++x)if(grid.blocked[y*grid.width+x]) {
-        const V a=grid.origin+grid.resolution*V(x,y)-V::Constant(clearance);
-        const V b=a+V::Constant(grid.resolution+2*clearance);
-        cells.push_back({{a,V(b.x(),a.y()),b,V(a.x(),b.y())},V::Zero()});
-    }
     const auto shape=mpc_controller_->robotFootprintAt(V::Zero(),0.);
-    TimedPedestrianCollision static_check,dynamic_check;
-    if(!static_check.bind(cells,shape))return finish("EXECUTION_MODEL_INVALID");
+    TimedPedestrianCollision dynamic_check;
     // Rebuild geometry from this accepted observation. The grid used for the
     // social force includes the same local planning domain as normal FIRI.
     std::vector<TimedPedestrianCollision::Obstacle> obstacles;
     pedestrian_geometry_.clear();
     if(pedestrians_enabled_) {
         ConvexCorridor::Grid social_grid;Eigen::Vector2i social_size;
+        std::string why;
         const auto reference=ConvexCorridor::referencePath(global_waypoints_,global_wp_idx_,current.head<2>(),corridor_planning_length_);
         V social_lo=current.head<2>(),social_hi=social_lo;
         for(const auto& p:reference){social_lo=social_lo.cwiseMin(p);social_hi=social_hi.cwiseMax(p);}
@@ -123,17 +107,16 @@ bool PlannerManager::advanceExecutionLocked(const ros::Time& now) {
         }
     }
     if(!dynamic_check.bind(obstacles,shape))return finish("DYNAMIC_DATA_INVALID");
-    const bool foot_free=collision_->hasStaticGlobalMap()?collision_->isStaticTraversable(foot.x(),foot.y()):collision_->isTraversable(foot.x(),foot.y());
-    if(!foot_free)return finish("INVALID_STATIC_CORRIDOR");
-    const V upper=grid.origin+grid.resolution*size.cast<double>();
+    auto static_free=[&](const V& p) {return p.allFinite() && (collision_->hasStaticGlobalMap()?
+        collision_->isStaticTraversable(p.x(),p.y()):collision_->isTraversable(p.x(),p.y()));};
+    if(!static_free(canonical.getFootPosition()))return finish("INVALID_STATIC_CORRIDOR");
     for(const auto& s:samples) {
-        const auto relative=HumanCaneFootprint::relative(mpc_controller_->footprintConfig(),s.yaw);
+        // The spatial corridor constrains the COM reference. Future human-cane
+        // envelopes are used only for time-matched pedestrian collision checks.
         if(!std::any_of(execution_corridor_.segments.begin(),execution_corridor_.segments.end(),
-            [&](const ConvexCorridor::Segment& region){return ConvexCorridor::containsFootprint(region,s.position.head<2>(),relative);}))
+            [&](const ConvexCorridor::Segment& region){return ConvexCorridor::contains(region,s.position.head<2>(),1e-6);}))
             return finish("INVALID_STATIC_CORRIDOR");
-        for(const auto& p:mpc_controller_->robotFootprintAt(s.position.head<2>(),s.yaw))
-            if((p.array()<grid.origin.array()).any() || (p.array()>=upper.array()).any())return finish("INVALID_STATIC_CORRIDOR");
-        if(static_check.intersects(s.position.head<2>(),0.,s.yaw))return finish("INVALID_STATIC_CORRIDOR");
+        if(!static_free(s.position.head<2>()))return finish("INVALID_STATIC_CORRIDOR");
     }
     const auto authorized=ros::Time::now();
     if(!authorizePedestrianFrameLocked(frame,authorized))return finish("DYNAMIC_DATA_INVALID");

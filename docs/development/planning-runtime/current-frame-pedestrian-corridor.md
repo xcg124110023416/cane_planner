@@ -2,7 +2,7 @@
 
 ## Scope
 
-Planner 3 with private `use_pedestrians=true`. Default static FIRI plus timed SAT and periodic full global reference refresh are described in [periodic-global-reference.md](periodic-global-reference.md). False preserves static planning. Planner 4 retains its legacy timed-corridor/obstacle flow. This is one ConvexCorridor/FIRI generator; the additive LFPC timed SAT checker is documented in [lfpc-timed-collision.md](./lfpc-timed-collision.md), independently of the legacy timed walking corridor. The robust-speed timed spec is not activated by this feature.
+Planner 3 with private `use_pedestrians=true`. Default current-frame dynamic spatial FIRI plus timed SAT and periodic full global reference refresh are described in [periodic-global-reference.md](periodic-global-reference.md). False preserves static planning. Planner 4 retains its legacy timed-corridor/obstacle flow. This is one ConvexCorridor/FIRI generator; the additive LFPC timed SAT checker is documented in [lfpc-timed-collision.md](./lfpc-timed-collision.md), independently of the legacy timed walking corridor. The robust-speed timed spec is not activated by this feature.
 
 ## Source validity and transforms
 
@@ -52,7 +52,7 @@ Default production wiring changed on 2026-10-28: see
 provides the base domain; timed SAT handles pedestrians. The optional dynamic
 polygon mode below remains available for geometry tests and spatial ablation.
 
-`buildStatic(path,grid,dynamic_polygons={})` shares the existing separator template with four-corner static arrays. Complete strictly convex CCW polygons (3–32 vertices, diameter <=20 m) use the same stationary/support-switch/endpoint-active directions, one common separating plane and unmodified metric/MVIE certificates. Empty dynamic input retains the selected static geometry/sampling mode. Precheck all original local reference edges before inflation, then use the configured coverage-driven or legacy edge sampling with the same original-edge coverage, joins and global budgets. Whole human-cane seed vertices participate when enabled. Any reference obstruction with clearance gives `DYNAMIC_REFERENCE_BLOCKED`. Default timed production does not use this obstruction as a prerequisite; see the periodic global reference contract for scheduling and transaction.
+`buildStatic(path,grid,dynamic_polygons={})` shares the existing separator template with four-corner static arrays. Complete strictly convex CCW polygons (3–32 vertices, diameter <=20 m) use the same stationary/support-switch/endpoint-active directions, one common separating plane and unmodified metric/MVIE certificates. Empty dynamic input retains the selected static geometry/sampling mode. Precheck all original local reference edges before inflation, then use the configured coverage-driven or legacy edge sampling with the same original-edge coverage, joins and global budgets. Whole human-cane seed vertices participate when enabled. Any reference obstruction with clearance gives `DYNAMIC_REFERENCE_BLOCKED`. Current-frame exclusion is mandatory even when timed SAT is enabled. Periodic full global A* provides detour candidates before local feasibility checks; a blocked retained reference fails until a new candidate passes. See the periodic global reference contract for scheduling and transaction.
 
 `Result::has_dynamic_input` prevents `CorridorFailureCapture::saveOnce` from saving a static-only file even for an otherwise eligible numeric failure. It returns SKIPPED with `DYNAMIC_INPUT_NOT_CAPTURED`, without consuming the static capture latch. Manager also suppresses such capture and logs the limitation. Existing v1/v2 snapshots replay point/edge mode; v3 also records footprint/sampling/root yaw; exact dynamic runtime replay is **not implemented**. Dynamic regressions preserve complete polygons as source fixtures instead.
 
@@ -82,7 +82,7 @@ after construction. Clear all fields at every search entry/reset, parameter relo
 clearance change and collision-source replacement. Cache lifetime is one search,
 not one pedestrian frame or one process; this avoids stale local-map/backend data
 without introducing a revision contract for every map producer. No dynamic polygon
-is rasterized into this field. Hard edge/polygon checks, full-footprint FIRI and
+is rasterized into this field. Hard edge/polygon checks, current-root-hull FIRI and
 source-age/execution authorization remain authoritative and unchanged.
 
 Regressions must exercise actual recovery call counters (map extractions scale
@@ -97,10 +97,10 @@ TIMEOUT and never weaken FIRI to make a benchmark pass.
 
 Default planner 3 now refreshes the full global reference periodically, before
 MPPI and independent of its success. The legacy searchRecovery API above remains
-covered for tests; production uses footprint-aware searchGlobalReference from
+covered for tests; production uses point-reference searchGlobalReference from
 actual CoM to exact final goal with a temporary current pedestrian overlay.
 See [periodic-global-reference.md](periodic-global-reference.md) for full-map
-heading search, scheduling, candidate validation and authorized commit. Accepted
+point search, scheduling, candidate validation and authorized commit. Accepted
 observation locking, generation/stamp/receipt checks, .5s freshness and frozen
 STOP remain. Preview never triggers search. Search failure may retain the old
 route only after all current-cycle FIRI/MPPI/execution checks pass.
@@ -112,7 +112,7 @@ Body/social outlines share `/mpc/convex_corridor` MarkerArray with stable namesp
 
 Metric positions 0–25 retain their indices. Field 5 now counts timed SAT rejects; field 19 indicates spatial-only mode (zero when timed SAT is active). Fields 23=source enabled, 24=active corridor feasible, 25=FailureReason enum. Timed fields 26–29 are documented in the timed checker contract. Legacy MPPI validity/cost fields describe the evaluated rollout; if data expires after MPPI, field 24 is false and STOP reason is authoritative. Stop/debug text distinguishes `DYNAMIC_REFERENCE_BLOCKED`, `DYNAMIC_DATA_INVALID`, static invalidity and no feasible rollout.
 
-The timed checker adds hard feasibility checks without changing motion costs, foot/CoM static collision or the LFPC STOP serializer. Spatial checking now requires the full configured human-cane envelope in one common region. Invalid or expired data withholds integration and preserves the lightweight STOP heartbeat. Default FIRI is static-only; timed SAT checks matching future poses. Current-frame exclusion remains an explicit spatial ablation and can conservatively stop on farther crossings within the default 8 m reference. Neither mode provides physical braking. Navigation evidence requires runtime checks beyond geometry/unit tests.
+The timed checker adds hard feasibility checks without changing motion costs, foot/CoM static collision or the LFPC STOP serializer. Spatial generation protects the actual current human-cane envelope in one region; predicted COM points need corridor containment, while predicted full envelopes are checked only against pedestrians at matching times. Invalid or expired data withholds integration and preserves the lightweight STOP heartbeat. FIRI always excludes current pedestrian hulls, even with timed SAT enabled. Translate accepted source hulls by velocity times source age to each generation epoch; keep the original source hull for future timed SAT. A* supplies spatial detours around current occupancy. A currently blocked retained reference remains infeasible while asynchronous search/validation is pending; never substitute a static-only corridor. Current-space exclusion can conservatively stop on farther crossings within the default 8 m reference. Neither mode provides physical braking. Navigation evidence requires runtime checks beyond geometry/unit tests.
 
 ## Initial planner-3 goal activation transaction
 
@@ -153,7 +153,7 @@ Index 15 is a candidate-specific view of 13, not additional FIRI time; geometry 
 
 Existing lightweight recorder includes raw DynamicObstacles, /clock even if absent in wall-time simulation, goals/initialpose, rosout, source/sim/hardware odoms, accepted A* path, corridor, trajectory/sample and debug/STOP topics. Command after reviewed integration: `rosrun plan_manage record_lightweight_mpc_eval.sh recovery_profile`. Recording is user-run; no recording was executed by implementation. A simultaneous all-topic two-second gap remains of unknown cause; ROS vs steady evidence helps investigate, not automatically attribute it to A*.
 
-The earlier profiling-only implementation was superseded by search-scoped comfort fields and global footprint geometry caches. Initial A* tiles have query lifetime; periodic global search copies one selected-grid snapshot then evaluates it in a pure background job, caching exact pose/sweep certificates only inside that job. No cache survives a search or assumes a producer revision contract. Search profiling describes completed periodic global jobs, not this local callback's blocking time; initial legacy static search does not start profiling clocks. Timer overhead is nonzero.
+The earlier profiling-only implementation was superseded by search-scoped comfort fields and global point/segment geometry caches. Initial A* tiles have query lifetime; periodic global search copies one selected-grid snapshot then evaluates it in a pure background job, caching exact pose/sweep certificates only inside that job. No cache survives a search or assumes a producer revision contract. Search profiling describes completed periodic global jobs, not this local callback's blocking time; initial legacy static search does not start profiling clocks. Timer overhead is nonzero.
 
 ## Optional pinned pedsim source
 
@@ -167,7 +167,7 @@ Ownership correction: start wrapper delegates to pedsim_round.py supervisor. Per
 
 ## Current-CoM local reference binding
 
-Each new planner-3 local corridor starts at actual current LFPC CoM and connects to the projection on the authoritative forward A* polyline. The configured planning_length includes this connector and truncates the final original edge exactly; it is independent of lookahead and preview length. Only a projection less than 1e-9 m from CoM is replaced by CoM to avoid a degenerate FIRI edge; no previously predicted trajectory supplies reference geometry. The connector participates in the same selected static-grid/full-footprint FIRI certificates as every other edge. Blockage fails closed with existing static/dynamic reasons; periodic full global A* refresh does not require MPPI failure or a collision witness. No old-cell fallback or clearance relaxation.
+Each new planner-3 local corridor starts at actual current LFPC CoM and connects to the projection on the authoritative forward A* polyline. The configured planning_length includes this connector and truncates the final original edge exactly; it is independent of lookahead and preview length. Only a projection less than 1e-9 m from CoM is replaced by CoM to avoid a degenerate FIRI edge; no previously predicted trajectory supplies reference geometry. The connector participates in the same selected static-grid point-reference FIRI certificates as every other edge, with the actual current hull additionally protected at the root. Blockage fails closed with existing static/dynamic reasons; periodic full global A* refresh does not require MPPI failure or a collision witness. No old-cell fallback or clearance relaxation.
 
 A feasible new result must contain the entire configured envelope at actual CoM/torso yaw in one region under the controller's 1e-6 containment tolerance before publication/controller replacement, and a recovered result before authoritative route replacement. A failed root postcondition clears partial geometry and reports OUTPUT_CERTIFICATE / OUTPUT_CERTIFICATE stage at the actual root, not optimizer NO_FEASIBLE. Accepted-observation locking, freshness, final rollout checks and STOP remain unchanged. Geometric root coverage alone does not certify support foot, full future LFPC motion, or physical braking.
 
@@ -176,7 +176,7 @@ A feasible new result must contain the entire configured envelope at actual CoM/
 The intermediate five-angle beam implementation (after 4fff814, through 80f8ab2)
 is superseded by continuous steering MPPI. Its beam_width and beam_evidence
 contracts are historical; use [lfpc-mppi.md](./lfpc-mppi.md) for current sampling,
-weighted-update validation, fallback, bounds and evidence. Static base FIRI,
+weighted-update validation, fallback, bounds and evidence. Current-frame DWCG/FIRI,
 accepted-observation transactions and timed SAT remain mandatory by default.
 
 Manager passes actual end_pt and global_wp_arrival_radius separately from the

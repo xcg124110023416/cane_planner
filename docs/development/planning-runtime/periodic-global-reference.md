@@ -33,16 +33,17 @@ use the original hull/velocity for timed MPPI and execution-age SAT. Empty fresh
 frames and disabled source perform static global searches; missing/invalid/stale
 input cannot trigger a search or execute.
 
-Search positions include eight incoming lattice headings plus exact root heading.
-Check full configured human-cane straight translation against whole occupied cells
-and the convex overlay via separating support intervals. Check turn endpoints and
-intervening global angles <=5 degrees. Goal has exact position with feasible
-arrival heading, no arbitrary goal-yaw constraint. Routing margin is existing
-clearance plus one search bin; physical shape is unchanged. Euclidean heuristic,
-finite allocations and cooperative deadline; no completeness/optimality claim.
+Search is over 2D lattice positions, from exact actual CoM to exact goal.
+The reference is a point polyline, not an oriented future human-cane sweep.
+Check its straight segments against whole occupied cells and the convex current
+pedestrian overlay via separating support intervals. Current hull containment is
+FIRI's root constraint; future pedestrian safety belongs to timed MPPI/execution.
+Routing margin remains existing clearance plus one search bin. Use the Euclidean
+heuristic, finite allocations and cooperative deadline; no completeness/optimality
+claim.
 
-One selected static-grid snapshot, one search-scoped comfort field, cached oriented
-footprint support intervals for cells/pedestrians, and exact-value pose/sweep caches.
+One selected static-grid snapshot, one search-scoped comfort field and cached
+point/segment certificates.
 Occupancy prefix sums may skip an AABB only when every covered
 cell is free. Preserve full SAT/cell checking otherwise. Comfort distance only
 changes cost. Deadline <=.2s and, when source enabled, half remaining original
@@ -58,11 +59,11 @@ future. Old-revision, wrong-enable-mode, clock-invalid and originally expired
 results cannot become candidates. A new observation generation alone does not
 invalidate spatial guidance: the result is never execution authorization. Reattach
 its full path to the nearest segment from the CURRENT actual CoM, then certify
-that connector using current static FIRI. The worker has no manager capture, so
+that connector using current current-frame FIRI. The worker has no manager capture, so
 its bounded shutdown completion cannot access destroyed runtime state.
 
 Under one nonrecursive accepted-observation lock: capture current frame, build
-geometry, poll/schedule global work, build static FIRI on candidate (or retained)
+geometry, poll/schedule global work, build current-frame FIRI on candidate (or retained)
 active-length reference, seed copied LFPC, timed MPPI, original-frame authorization,
 execution-epoch revalidation and route commit. Lightweight mode queues the first
 support phase without moving the plant; other adapters retain immediate integration.
@@ -71,9 +72,13 @@ and reference are temporary; only successful final execution authorization repla
 global_waypoints_/index/lookahead. Publish accepted A* afterward. Search failure
 may use the retained route only after fresh FIRI/MPPI/all execution checks. Candidate
 rebuild/MPPI/freshness/execution rejection cannot replace the authoritative route
-or advance LFPC. Keep STOP heartbeat, full envelope, static checks and exact goal.
+or advance LFPC. Keep STOP heartbeat, current-root containment, timed pedestrian envelopes, static COM/foot checks and exact goal.
 
-Default FIRI and preview remain STATIC_BASE. Preview defaults to .2s (.1..5s),
+FIRI and preview always separate static cells and accepted current pedestrian
+hulls. Timed collision enable does not remove spatial pedestrian exclusion.
+Nonempty frames report CURRENT_FRAME; empty/disabled frames remain STATIC_BASE.
+If the retained reference crosses current occupancy, reject it until a full global
+candidate passes the current-frame FIRI/MPPI transaction, without static fallback. Preview defaults to .2s (.1..5s),
 with fixed next deadlines initialized from the global search phase, not the
 variable completion time after MPPI. Both global and preview eligibility use one
 scheduling epoch captured after acquiring the accepted-observation mutex: using
@@ -112,10 +117,10 @@ configurable .5s boundary, default .2s timing, .1s jitter
 phase preservation, skipped-slot handling, newly acquired
 static occupancy, temporary current pedestrian overlay, exact nonlattice goal and
 full-map detour outside former local bounds. Keep no-path/fresh-clear resumption,
-source/search/rebuild/MPPI/execution failure with no commit, queued callbacks, full
-footprint/FIRI, actual arrival and STOP/idle heartbeat. Replay the real office
+source/search/rebuild/MPPI/execution failure with no commit, queued callbacks, current-root
+hull/FIRI, actual arrival and STOP/idle heartbeat. Replay the real office
 start/goal under an owned private master, plus a still-present pedestrian bypass.
 Record actual timings and intermittent STOP; do not infer continuous safety.
 Regress delayed search with continued plant/observation updates, immutable map
-snapshots, single in-flight work, revision/expiry rejection and exact cached SAT
+snapshots, single in-flight work, revision/expiry rejection and exact point/segment checks
 against an independent whole-cell/pedestrian oracle.

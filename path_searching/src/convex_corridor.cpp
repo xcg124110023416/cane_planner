@@ -205,13 +205,6 @@ C::Segment inflate(const C::Grid&grid,const V&begin,const V&finish,const C::Conf
     // Midpoint-local coordinates protect both endpoints of this original-edge seed.
     const V seed=(begin+finish)*.5, a_seed=begin-seed, b_seed=finish-seed;
     Poly protected_points;
-    if(cfg.footprint.enabled) {
-        const V delta=finish-begin;
-        const double yaw=delta.norm()>1e-9?std::atan2(delta.y(),delta.x()):cfg.root_yaw;
-        const auto shape=HumanCaneFootprint::relative(cfg.footprint,yaw);
-        require(!shape.empty(),C::FailureReason::INVALID_INPUT);
-        for(const auto& v:shape) {protected_points.push_back(a_seed+v);protected_points.push_back(b_seed+v);}
-    }
     for(const auto& p:extra_world)protected_points.push_back(p-seed);
     const V lo=(grid.origin-seed).cwiseMax(V::Constant(-cfg.local_radius));
     const V hi=(grid.origin+grid.resolution*V(grid.width,grid.height)-seed).cwiseMin(V::Constant(cfg.local_radius));
@@ -321,8 +314,7 @@ std::pair<double,double> overlap(const C::Segment&a,const C::Segment&b) {
 // certificate tolerance is used. s0/s1 bound the test, not evidence of coverage.
 bool coversPath(const Poly& path, const std::vector<double>& arc,
                 const std::vector<const C::Segment*>& regions,
-                double begin, double finish, Clock::time_point end,
-                const C::Config* geometry = nullptr) {
+                double begin, double finish, Clock::time_point end) {
     for(size_t e=0;e+1<path.size();++e) {
         deadline(end);
         if(arc[e+1]<begin || arc[e]>finish)continue;
@@ -334,9 +326,8 @@ bool coversPath(const Poly& path, const std::vector<double>& arc,
             deadline(end);
             double a=lo,b=hi;
             const V p=path[e]-r->center,d=path[e+1]-path[e];
-            const Poly shape=geometry?HumanCaneFootprint::relative(geometry->footprint,e==0?geometry->root_yaw:std::atan2(d.y(),d.x())):Poly{V::Zero()};
             for(const auto& h:r->halfspaces) {
-                const double room=(h.offset-h.normal.dot(r->center))-h.normal.dot(p)-HumanCaneFootprint::support(shape,h.normal)+1e-8;
+                const double room=(h.offset-h.normal.dot(r->center))-h.normal.dot(p)+1e-8;
                 const double slope=h.normal.dot(d);
                 if(slope>0.)b=std::min(b,room/slope);
                 else if(slope<0.)a=std::max(a,room/slope);
@@ -361,7 +352,7 @@ bool coversPath(const Poly& path, const std::vector<double>& arc,
 // Retain endpoint regions and their original protected-seed s0/s1 metadata.
 void pruneRegions(std::vector<C::Segment>& regions, const Poly& path,
                   const std::vector<double>& arc, Clock::time_point end,
-                  C::Diagnostics& diagnostics,const C::Config* geometry = nullptr) {
+                  C::Diagnostics& diagnostics) {
     deadline(end);
     std::vector<size_t> keep{regions.size()-1};
     for(size_t i=regions.size()-1;i>0;) {
@@ -372,7 +363,7 @@ void pruneRegions(std::vector<C::Segment>& regions, const Poly& path,
             try { overlap(regions[j],regions[i]); }
             catch(const Failure& f) {if(f.reason!=C::FailureReason::NO_OVERLAP)throw;continue;}
             stage(diagnostics,C::FailureStage::COVERAGE);
-            if(coversPath(path,arc,{&regions[j],&regions[i]},regions[j].s0,regions[i].s1,end,geometry)) {
+            if(coversPath(path,arc,{&regions[j],&regions[i]},regions[j].s0,regions[i].s1,end)) {
                 selected=j;break;
             }
         }
@@ -384,7 +375,7 @@ void pruneRegions(std::vector<C::Segment>& regions, const Poly& path,
     stage(diagnostics,C::FailureStage::COVERAGE);
     std::vector<const C::Segment*> refs;
     for(const auto& r:regions)refs.push_back(&r);
-    require(coversPath(path,arc,refs,0.,arc.back(),end,geometry),C::FailureReason::OUTPUT_CERTIFICATE);
+    require(coversPath(path,arc,refs,0.,arc.back(),end),C::FailureReason::OUTPUT_CERTIFICATE);
     deadline(end);
 }
 }
@@ -493,12 +484,8 @@ ConvexCorridor::Result ConvexCorridor::buildStatic(const Poly&path,const Grid&gr
             for(const auto& world:dynamic) {
                 Poly local;for(const auto& p:world)local.push_back(p-path[edge]);
                 Poly protected_points;
-                if(c.footprint.enabled) {
-                    const V delta=path[edge+1]-path[edge];
-                    const auto shape=HumanCaneFootprint::relative(c.footprint,edge==0?c.root_yaw:std::atan2(delta.y(),delta.x()));
-                    for(const auto& v:shape) {protected_points.push_back(v);protected_points.push_back(delta+v);}
-                    if(edge==0)for(const auto& v:HumanCaneFootprint::relative(c.footprint,c.root_yaw))protected_points.push_back(v);
-                }
+                if(edge==0 && c.footprint.enabled)
+                    protected_points=HumanCaneFootprint::relative(c.footprint,c.root_yaw);
                 try {separate(local,V::Zero(),path[edge+1]-path[edge],V::Zero(),M::Identity(),c,end,out.diagnostics,protected_points);}
                 catch(const Failure& f) {
                     if(f.reason==FailureReason::REFERENCE_OCCUPIED)throw Failure{FailureReason::DYNAMIC_REFERENCE_BLOCKED};
@@ -526,34 +513,32 @@ ConvexCorridor::Result ConvexCorridor::buildStatic(const Poly&path,const Grid&gr
                 size_t edge=std::min(path.size()-2,size_t(std::upper_bound(arc.begin(),arc.end(),position)-arc.begin()-1));
                 const V delta=path[edge+1]-path[edge];
                 const V point=path[edge]+delta*((position-arc[edge])/(arc[edge+1]-arc[edge]));
-                Config local=c;local.root_yaw=edge==0?c.root_yaw:std::atan2(delta.y(),delta.x());
                 // Protect a bounded forward portion of the ORIGINAL polyline,
-                // including each edge's footprint. A point-only seed permits a
-                // separating plane tangent to the current envelope, so repeated
-                // coverage-driven seeds can converge without advancing past it.
+                // using reference points, not predicted human-cane envelopes.
+                // Only the actual current pose belongs to this spatial corridor.
                 const double seed_finish=std::min(arc.back(),position+std::min(c.max_segment_length,.5*c.local_radius));
                 Poly protected_world;
                 for(size_t e=edge;e+1<path.size() && arc[e]<seed_finish;++e) {
                     deadline(end);
                     const V d=path[e+1]-path[e];const double length=arc[e+1]-arc[e];
-                    const auto shape=HumanCaneFootprint::relative(c.footprint,e==0?c.root_yaw:std::atan2(d.y(),d.x()));
                     for(double s:{std::max(position,arc[e]),std::min(seed_finish,arc[e+1])})
-                        for(const auto& v:shape)protected_world.push_back(path[e]+d*((s-arc[e])/length)+v);
+                        protected_world.push_back(path[e]+d*((s-arc[e])/length));
                 }
+                if(out.segments.empty() && c.footprint.enabled)
+                    for(const auto& p:HumanCaneFootprint::world(c.footprint,path.front(),c.root_yaw))protected_world.push_back(p);
                 // Only extreme vertices can activate a linear seed constraint.
                 if(protected_world.size()>2)protected_world=PedestrianPolygon::convexHull(std::move(protected_world));
                 out.failure_s=position;out.failure_position=point;out.failure_position_valid=true;
                 out.failure_segment_index=out.generated_regions;
-                Segment region=inflate(grid,point,point,local,end,out.diagnostics,dynamic,protected_world);
+                Segment region=inflate(grid,point,point,c,end,out.diagnostics,dynamic,protected_world);
                 stage(out.diagnostics,FailureStage::COVERAGE);
                 double covered=position;
                 for(size_t e=edge;e+1<path.size();++e) {
                     const V d=path[e+1]-path[e];const double length=arc[e+1]-arc[e];
-                    const Poly shape=HumanCaneFootprint::relative(c.footprint,e==0?c.root_yaw:std::atan2(d.y(),d.x()));
                     double a=std::max(0.,(covered-arc[e])/length),b=1.;
                     const double start=a;
                     for(const auto& h:region.halfspaces) {
-                        const double room=(h.offset-h.normal.dot(region.center))-h.normal.dot(path[e]-region.center)-HumanCaneFootprint::support(shape,h.normal)+1e-8;
+                        const double room=(h.offset-h.normal.dot(region.center))-h.normal.dot(path[e]-region.center)+1e-8;
                         const double slope=h.normal.dot(d);
                         if(slope>0)b=std::min(b,room/slope);
                         else if(slope<0)a=std::max(a,room/slope);
@@ -571,7 +556,7 @@ ConvexCorridor::Result ConvexCorridor::buildStatic(const Poly&path,const Grid&gr
             }
             stage(out.diagnostics,FailureStage::COVERAGE);
             std::vector<const Segment*> refs;for(const auto& r:out.segments)refs.push_back(&r);
-            require(coversPath(path,arc,refs,0.,arc.back(),end,&c),FailureReason::OUTPUT_CERTIFICATE);
+            require(coversPath(path,arc,refs,0.,arc.back(),end),FailureReason::OUTPUT_CERTIFICATE);
         } else for(size_t edge=0;edge+1<path.size();++edge) {
             const double length=arc[edge+1]-arc[edge];
             const double count=std::ceil(length/c.max_segment_length);
@@ -604,7 +589,7 @@ ConvexCorridor::Result ConvexCorridor::buildStatic(const Poly&path,const Grid&gr
             }
         }
         stage(out.diagnostics,FailureStage::COVERAGE);
-        if(!c.adaptive_sampling)pruneRegions(out.segments,path,arc,end,out.diagnostics,&c);
+        if(!c.adaptive_sampling)pruneRegions(out.segments,path,arc,end,out.diagnostics);
         out.min_overlap_area=out.min_overlap_depth=std::numeric_limits<double>::infinity();
         for(size_t i=1;i<out.segments.size();++i) {
             deadline(end);

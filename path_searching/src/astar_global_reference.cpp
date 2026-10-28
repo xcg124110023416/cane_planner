@@ -9,7 +9,6 @@ namespace cane_planner {
 namespace {
 using V = Eigen::Vector2d;
 using Poly = std::vector<V>;
-constexpr double pi = 3.14159265358979323846;
 
 class GlobalGeometry {
 public:
@@ -112,15 +111,7 @@ public:
         }
         return true;
     }
-    bool turn(const V& p,double from,double to) {
-        const double angle=std::atan2(std::sin(to-from),std::cos(to-from));
-        if(!edge(p,p,from) || !edge(p,p,to))return false;
-        const double step=pi/36.;
-        const double lo=std::min(from,from+angle),hi=std::max(from,from+angle);
-        for(int i=int(std::ceil(lo/step));i*step<hi;++i)
-            if(!edge(p,p,i*step))return false;
-        return true;
-    }
+
 };
 }
 
@@ -138,9 +129,8 @@ bool Astar::snapshotGlobalReference(GlobalReferenceQuery& q) const {
 }
 
 Astar::RecoveryResult Astar::searchGlobalReference(const V& start,const V& goal,const Poly& obstacle,
-    const HumanCaneFootprint::Config& footprint,double root_yaw,
     std::chrono::steady_clock::time_point deadline) {
-    GlobalReferenceQuery q;q.start=start;q.goal=goal;q.obstacle=obstacle;q.footprint=footprint;q.root_yaw=root_yaw;
+    GlobalReferenceQuery q;q.start=start;q.goal=goal;q.obstacle=obstacle;
     if(!snapshotGlobalReference(q))return RecoveryResult();
     auto result=evaluateGlobalReference(q,deadline);result.seconds+=q.grid_seconds;return result;
 }
@@ -149,7 +139,6 @@ Astar::RecoveryResult Astar::evaluateGlobalReference(const GlobalReferenceQuery&
     std::chrono::steady_clock::time_point deadline) {
     RecoveryResult result;const auto began=std::chrono::steady_clock::now();
     const auto& start=q.start;const auto& goal=q.goal;const auto& obstacle=q.obstacle;
-    const auto& footprint=q.footprint;double root_yaw=q.root_yaw;
     const double resolution_=q.resolution,corridor_edge_clearance_=q.clearance;
     const double w_clearance_=q.weight,clearance_sigma_=q.sigma;
     const int allocate_num_=q.allocate_num;
@@ -160,8 +149,7 @@ Astar::RecoveryResult Astar::evaluateGlobalReference(const GlobalReferenceQuery&
         return result;
     };
     if(!start.allFinite() || !goal.allFinite() ||
-       (!obstacle.empty() && !validRecoveryPolygon(obstacle)) || !HumanCaneFootprint::validConfig(footprint) ||
-       !std::isfinite(root_yaw) || allocate_num_<2 || !std::isfinite(resolution_) || resolution_<.01 ||
+       (!obstacle.empty() && !validRecoveryPolygon(obstacle)) || allocate_num_<2 || !std::isfinite(resolution_) || resolution_<.01 ||
        !origin_.allFinite() || !map_max_2d_.allFinite() || (map_max_2d_.array()<=origin_.array()).any() ||
        !std::isfinite(corridor_edge_clearance_) || corridor_edge_clearance_<0 ||
        !std::isfinite(w_clearance_) || w_clearance_<0 || !std::isfinite(clearance_sigma_) || clearance_sigma_<=0 ||
@@ -169,10 +157,11 @@ Astar::RecoveryResult Astar::evaluateGlobalReference(const GlobalReferenceQuery&
        q.grid.width<=0 || q.grid.height<=0 || int64_t(q.grid.width)*q.grid.height>1000000 ||
        q.grid.blocked.size()!=size_t(q.grid.width)*q.grid.height)
         return finish(RecoveryStatus::INVALID_INPUT);
-    root_yaw=std::atan2(std::sin(root_yaw),std::cos(root_yaw));
-    GlobalGeometry geometry;geometry.local=HumanCaneFootprint::relative(footprint,0.);
+    // A spatial point reference; the current human-cane hull belongs to FIRI's
+    // root constraint, and future hulls belong to timed pedestrian checks.
+    GlobalGeometry geometry;geometry.local={V::Zero()};
     geometry.obstacle=obstacle;geometry.deadline=deadline;
-    geometry.margin=corridor_edge_clearance_+resolution_; // routing room; physical shape unchanged
+    geometry.margin=corridor_edge_clearance_+resolution_; // routing room for the point reference
     // Search every selected-map bin, independent of any previous route/window.
     const V lower=origin_,upper=map_max_2d_;
     if((start.array()<lower.array()).any() || (start.array()>=upper.array()).any() ||
@@ -192,14 +181,14 @@ Astar::RecoveryResult Astar::evaluateGlobalReference(const GlobalReferenceQuery&
     }
     CorridorDistanceField field;
     if(w_clearance_>0 && !field.build(geometry.origin,geometry.resolution,geometry.size,geometry.blocked))return finish(RecoveryStatus::NO_PATH);
-    if(!geometry.edge(start,start,root_yaw))return finish(geometry.expired()?RecoveryStatus::TIMEOUT:RecoveryStatus::NO_PATH);
+    if(!geometry.edge(start,start,0.))return finish(geometry.expired()?RecoveryStatus::TIMEOUT:RecoveryStatus::NO_PATH);
 
-    struct State {Eigen::Vector3i key;V position;double yaw,g;int parent;};
+    struct State {Eigen::Vector2i key;V position;double g;int parent;};
     struct Open {double f,g;int state;bool operator<(const Open& b)const{return f>b.f;}};
     std::vector<State> states;states.reserve(std::min(allocate_num_,100000));
-    std::unordered_map<Eigen::Vector3i,int,matrix_hash<Eigen::Vector3i>> indices;
+    std::unordered_map<Eigen::Vector2i,int,matrix_hash<Eigen::Vector2i>> indices;
     std::priority_queue<Open> open;
-    states.push_back({{0,0,8},start,root_yaw,0.,-1});indices.emplace(states[0].key,0);
+    states.push_back({{0,0},start,0.,-1});indices.emplace(states[0].key,0);
     open.push({(goal-start).norm(),0.,0});
     auto edge_cost=[&](const V& a,const V& b) {
         ++result.profile.soft_calls;const auto start=std::chrono::steady_clock::now();
@@ -217,9 +206,9 @@ Astar::RecoveryResult Astar::evaluateGlobalReference(const GlobalReferenceQuery&
         result.profile.soft_seconds+=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();
         return length*(1.+w_clearance_*penalty);
     };
-    auto transition=[&](const State& s,const V& p,double heading) {
+    auto transition=[&](const State& s,const V& p) {
         ++result.profile.hard_calls;const auto start=std::chrono::steady_clock::now();
-        const bool free=geometry.turn(s.position,s.yaw,heading) && geometry.edge(s.position,p,heading);
+        const bool free=geometry.edge(s.position,p,0.);
         result.profile.hard_seconds+=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();return free;
     };
     int reached=-1;
@@ -229,24 +218,23 @@ Astar::RecoveryResult Astar::evaluateGlobalReference(const GlobalReferenceQuery&
         ++result.profile.expanded;
         const V connector=goal-current.position;
         if(connector.norm()<=1.5*resolution_) {
-            const double heading=connector.norm()>1e-9?std::atan2(connector.y(),connector.x()):current.yaw;
-            if(transition(current,goal,heading)) {reached=top.state;break;}
+            if(transition(current,goal)) {reached=top.state;break;}
         }
         for(int direction=0;direction<8;++direction) {
             static const std::array<Eigen::Vector2i,8> offsets{{{1,0},{1,1},{0,1},{-1,1},{-1,0},{-1,-1},{0,-1},{1,-1}}};
-            const Eigen::Vector2i cell=current.key.head<2>()+offsets[direction];
-            const V p=start+resolution_*cell.cast<double>();const double heading=direction*pi/4.;
+            const Eigen::Vector2i cell=current.key+offsets[direction];
+            const V p=start+resolution_*cell.cast<double>();
             if((p.array()<lower.array()).any() || (p.array()>upper.array()).any())continue;
-            const Eigen::Vector3i key(cell.x(),cell.y(),direction);auto known=indices.find(key);
+            const Eigen::Vector2i key=cell;auto known=indices.find(key);
             const double lower_cost=current.g+(p-current.position).norm();
             if(known!=indices.end() && lower_cost>=states[known->second].g)continue;
-            if(!transition(current,p,heading))continue;
+            if(!transition(current,p))continue;
             const double cost=current.g+edge_cost(current.position,p);
             if(!std::isfinite(cost) || (known!=indices.end() && cost>=states[known->second].g))continue;
             int index;
             if(known==indices.end()) {
                 if(states.size()>=size_t(std::max(0,allocate_num_)))return finish(RecoveryStatus::NO_PATH);
-                index=states.size();indices.emplace(key,index);states.push_back({key,p,heading,cost,top.state});
+                index=states.size();indices.emplace(key,index);states.push_back({key,p,cost,top.state});
             } else {index=known->second;states[index].g=cost;states[index].parent=top.state;}
             open.push({cost+(goal-p).norm(),cost,index});
         }

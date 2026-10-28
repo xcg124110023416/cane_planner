@@ -173,12 +173,18 @@ static ConvexCorridor::Segment box(double xmin = -1.0, double xmax = 1.0,
                     {Eigen::Vector2d(0, 1), ymax}, {Eigen::Vector2d(0, -1), -ymin}};
     return s;
 }
-TEST(FootprintMpcRuntime, CaneOutsideCorridorRejectsAlthoughCenterFits) {
+TEST(FootprintMpcRuntime, FutureCaneMayLeaveSpatialCorridorWhileComRemainsInside) {
     MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::footprint(c,true);
-    c.setCollision(StaticMpcTestAccess::map());c.setConvexCorridor({box(-1,.6)});
+    StaticMpcTestAccess::angleLimit(c,0.);
+    const auto region=box(-1,.85);
+    c.setCollision(StaticMpcTestAccess::map());c.setConvexCorridor({region});
     auto model=StaticMpcTestAccess::model();c.plan(model,Eigen::Vector3d(2,0,0));
-    EXPECT_FALSE(c.lastPlanValid());EXPECT_TRUE(c.getBestPath().empty());
-    c.setConvexCorridor({box()});c.plan(model,Eigen::Vector3d(2,0,0));EXPECT_TRUE(c.lastPlanValid());
+    ASSERT_TRUE(c.lastPlanValid());ASSERT_FALSE(c.getBestPath().empty());
+    const auto shape=HumanCaneFootprint::relative(c.footprintConfig(),0.);
+    EXPECT_TRUE(ConvexCorridor::containsFootprint(region,model->getCOMPos().head<2>(),shape));
+    const auto endpoint=c.getBestPath().back().head<2>().eval();
+    EXPECT_TRUE(ConvexCorridor::contains(region,endpoint));
+    EXPECT_FALSE(ConvexCorridor::containsFootprint(region,endpoint,shape));
     EXPECT_EQ(c.getBestPath().size(),c.getBestYaws().size());EXPECT_EQ(c.getBestTimes().size(),c.getBestYaws().size());
 }
 TEST(FootprintMpcRuntime, CaneOnlyTimedCollisionAndExecutionAge) {

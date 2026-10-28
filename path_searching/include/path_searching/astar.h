@@ -16,7 +16,6 @@
 #include <path_searching/matrix_hash.h>
 #include <plan_env/collision_detection.h>
 #include <plan_env/corridor_distance_field.h>
-#include <path_searching/human_cane_footprint.h>
 #include <path_searching/convex_corridor.h>
 // #include <plan_env/edt_environment.h>
 
@@ -194,8 +193,7 @@ namespace cane_planner
       ConvexCorridor::Grid grid;
       Eigen::Vector2d lower, upper, start, goal;
       std::vector<Eigen::Vector2d> obstacle;
-      HumanCaneFootprint::Config footprint;
-      double root_yaw=0., resolution=.1, clearance=.002, weight=0., sigma=.8;
+      double resolution=.1, clearance=.002, weight=0., sigma=.8;
       int allocate_num=0;
       double grid_seconds=0.;
     };
@@ -206,7 +204,6 @@ namespace cane_planner
     // Full selected-map search from actual CoM to exact goal, with an optional current hull.
     RecoveryResult searchGlobalReference(const Eigen::Vector2d& start, const Eigen::Vector2d& goal,
         const std::vector<Eigen::Vector2d>& obstacle,
-        const HumanCaneFootprint::Config& footprint, double root_yaw,
         std::chrono::steady_clock::time_point deadline);
     RecoveryResult searchRecovery(const Eigen::Vector2d& start, const Eigen::Vector2d& goal,
         const std::vector<Eigen::Vector2d>& polygon, std::chrono::steady_clock::time_point deadline);

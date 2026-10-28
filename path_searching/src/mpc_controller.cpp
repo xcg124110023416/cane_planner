@@ -277,13 +277,10 @@ HumanCaneFootprint::Polygon MpcController::relativeFootprint(double yaw) const {
     for(const auto& v:local)shape.push_back(rotation*v);
     return shape;
 }
-bool MpcController::spatialFree(const Eigen::Vector2d& p,double yaw) {
-    if(!p.allFinite() || !std::isfinite(yaw))return false;
-    if(!cfg_.footprint.enabled)return std::any_of(convex_corridor_segments_.begin(),convex_corridor_segments_.end(),
-        [&](const ConvexCorridor::Segment& region){return ConvexCorridor::contains(region,p,1e-6);});
-    const auto shape=relativeFootprint(yaw);
+bool MpcController::spatialFree(const Eigen::Vector2d& p) {
+    if(!p.allFinite())return false;
     return std::any_of(convex_corridor_segments_.begin(),convex_corridor_segments_.end(),
-        [&](const ConvexCorridor::Segment& region){return ConvexCorridor::containsFootprint(region,p,shape,1e-6);});
+        [&](const ConvexCorridor::Segment& region){return ConvexCorridor::contains(region,p,1e-6);});
 }
 bool MpcController::advance(LFPC& state,double action,std::vector<Eigen::Vector3d>& path,
                             double& elapsed,std::vector<double>* times,std::vector<double>* yaws)
@@ -298,7 +295,7 @@ bool MpcController::advance(LFPC& state,double action,std::vector<Eigen::Vector3
         const int rotations=std::max(1,int(std::ceil(std::abs(action)/.0872664625997165)));
         for(int i=1;i<=rotations;++i) {
             const double yaw=initial_yaw+action*double(i)/rotations;
-            if(!spatialFree(initial_com.head<2>(),yaw) || !timedFree(initial_com.head<2>(),elapsed,timed_observation_age_,yaw))return false;
+            if(!timedFree(initial_com.head<2>(),elapsed,timed_observation_age_,yaw))return false;
             path.push_back(initial_com);if(times)times->push_back(elapsed);if(yaws)yaws->push_back(yaw);
         }
     }
@@ -315,7 +312,7 @@ bool MpcController::advance(LFPC& state,double action,std::vector<Eigen::Vector3
     for(size_t i=previous_samples;i<points.size();++i) {
         const Eigen::Vector2d p=points[i].head<2>();
         last_debug_metrics_.corridor_evaluated=true;
-        const bool inside=spatialFree(p,state.getNextIterState()(2));
+        const bool inside=spatialFree(p);
         if(!inside) {
             double v=std::numeric_limits<double>::infinity();
             for(const auto& seg:convex_corridor_segments_)v=std::min(v,ConvexCorridor::violation(seg,p));
@@ -424,7 +421,7 @@ Eigen::Vector3d MpcController::plan(const LFPC::Ptr& base,const Eigen::Vector3d&
         cfg_.min_al>=0 && cfg_.nominal_al>=cfg_.min_al && cfg_.nominal_al<=cfg_.max_al &&
         cfg_.nominal_aw>=0 && cfg_.nominal_aw<=cfg_.max_aw && cfg_.max_api>=0 && cfg_.sigma_api>=0 &&
         cfg_.max_api<=3.14159265358979323846 && cfg_.temperature>0 && cfg_.w_steer>=0 && cfg_.w_dapi>=0 && cfg_.w_goal>=0 && cfg_.goal_arrival_threshold>=0;
-    const bool inside=base && spatialFree(base->getCOMPos().head<2>(),base->getNextIterState()(2));
+    const bool inside=base && std::isfinite(base->getNextIterState()(2)) && spatialFree(base->getCOMPos().head<2>());
     if(!config || !timed_input_valid_ || !collision_ || !goal.allFinite() || !has_convex_corridor_ || !inside ||
        !(collision_->hasStaticGlobalMap()?collision_->isStaticTraversable(base->getCOMPos().x(),base->getCOMPos().y()):
          collision_->isTraversable(base->getCOMPos().x(),base->getCOMPos().y()))) {

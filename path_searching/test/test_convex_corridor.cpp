@@ -48,21 +48,20 @@ TEST(FiriAdaptive, DenseAndSparseUseCoverageRatherThanEveryEdge) {
     const auto a=run({V(1,3),V(11,3)},grid(),c),b=run(dense,grid(),c);
     good(a);good(b);EXPECT_LE(a.generated_regions,6);EXPECT_LE(b.generated_regions,6);
     EXPECT_EQ(a.generated_regions,b.generated_regions);
-    const auto shape=cane_planner::HumanCaneFootprint::relative(c.footprint,0.);
     for(const auto& p:dense) {
-        EXPECT_TRUE(std::any_of(b.segments.begin(),b.segments.end(),[&](const C::Segment& r){return C::containsFootprint(r,p,shape);}));
+        EXPECT_TRUE(std::any_of(b.segments.begin(),b.segments.end(),[&](const C::Segment& r){return C::contains(r,p);}));
     }
     std::cout<<"adaptive sparse/dense generated="<<a.generated_regions<<"/"<<b.generated_regions<<" ms="<<1000*a.elapsed_seconds<<"/"<<1000*b.elapsed_seconds<<std::endl;
 }
-TEST(FiriAdaptive, CornersBodyAndCaneKeepWholeCellCertificates) {
+TEST(FiriAdaptive, CornersAndCurrentHullKeepWholeCellCertificates) {
     C::Config c;c.adaptive_sampling=true;c.footprint.enabled=true;
     const Path path{V(1,1),V(4,1),V(4,4),V(9,4)};
     const auto result=run(path,grid(),c);good(result);
     for(size_t e=0;e+1<path.size();++e) {
-        const V d=path[e+1]-path[e];const auto shape=cane_planner::HumanCaneFootprint::relative(c.footprint,e==0?c.root_yaw:std::atan2(d.y(),d.x()));
+        const V d=path[e+1]-path[e];
         for(int j=0;j<=100;++j) {
             const V p=path[e]+d*(j/100.);
-            EXPECT_TRUE(std::any_of(result.segments.begin(),result.segments.end(),[&](const C::Segment& r){return C::containsFootprint(r,p,shape);}));
+            EXPECT_TRUE(std::any_of(result.segments.begin(),result.segments.end(),[&](const C::Segment& r){return C::contains(r,p);}));
         }
     }
     auto blocked=grid();blocked.blocked[4*48+6]=1; // Ahead of root; center itself remains free.
@@ -76,7 +75,30 @@ TEST(FiriAdaptive, ExactReferenceLengthAndProjectionConnector) {
     EXPECT_EQ(route.back(),C::referencePath(route,0,V(1,1),0.).back());
     EXPECT_TRUE(C::referencePath(route,2,V::Zero(),3.).empty());
 }
-TEST(FiriAdaptive, ForwardFootprintCannotStallBetweenSideObstacles) {
+TEST(Firi, OnlyActualHullIsProtectedAgainstStaticCells) {
+    auto g=grid();g.blocked[4*48+20]=1; // [5,5.25] x [1,1.25]
+    for(bool adaptive:{false,true}) {
+        C::Config c;c.adaptive_sampling=adaptive;c.footprint.enabled=true;
+        const Path path{V(1,1.1),V(4.5,1.1)};
+        const auto result=run(path,g,c);good(result);
+        const auto shape=cane_planner::HumanCaneFootprint::relative(c.footprint,c.root_yaw);
+        EXPECT_TRUE(C::containsFootprint(result.segments.front(),path.front(),shape));
+        // The final COM is free, while its future cane reaches the occupied cell.
+        EXPECT_FALSE(std::any_of(result.segments.begin(),result.segments.end(),
+            [&](const C::Segment& r){return C::containsFootprint(r,path.back(),shape);}));
+        // Moving that same hull to the ACTUAL root must still prevent generation.
+        const auto blocked=run({path.back(),V(4.6,1.1)},g,c);
+        EXPECT_FALSE(blocked.feasible);EXPECT_EQ(C::FailureReason::REFERENCE_OCCUPIED,blocked.failure_reason);
+        auto near_root=grid();near_root.blocked[4*48+6]=1;
+        const Path short_reference{V(1,1.1),V(1.3,1.1)};
+        EXPECT_FALSE(run(short_reference,near_root,c).feasible);
+        c.root_yaw=1.5707963267948966; // actual cane points up, reference points right
+        const auto turned=run(short_reference,near_root,c);good(turned);
+        EXPECT_TRUE(C::containsFootprint(turned.segments.front(),short_reference.front(),
+            cane_planner::HumanCaneFootprint::relative(c.footprint,c.root_yaw)));
+    }
+}
+TEST(FiriAdaptive, ForwardReferenceCannotStallBetweenSideObstacles) {
     // Minimized from the office-map report: only one straight reference edge
     // and two side cells are needed for point-seeded inflation to stagnate.
     C::Grid g;g.origin=V(-5.8,-4.9);g.resolution=.1;g.width=69;g.height=138;
@@ -86,11 +108,10 @@ TEST(FiriAdaptive, ForwardFootprintCannotStallBetweenSideObstacles) {
     const auto result=run(path,g,c);
     ASSERT_TRUE(result.feasible)<<C::failureReasonName(result.failure_reason)<<" s="<<result.failure_s;
     EXPECT_LE(result.generated_regions,12);EXPECT_GE(result.min_overlap_depth,1e-6);
-    const auto shape=cane_planner::HumanCaneFootprint::relative(c.footprint,c.root_yaw);
     for(int i=0;i<=200;++i) {
         const V p=path.front()+(path.back()-path.front())*(i/200.);
         EXPECT_TRUE(std::any_of(result.segments.begin(),result.segments.end(),
-            [&](const C::Segment& r){return C::containsFootprint(r,p,shape);}));
+            [&](const C::Segment& r){return C::contains(r,p);}));
     }
 }
 int main(int argc,char**argv){testing::InitGoogleTest(&argc,argv);return RUN_ALL_TESTS();}

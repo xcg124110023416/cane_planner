@@ -176,7 +176,7 @@ private:
                             double final_radius);
     bool advance(LFPC& state, double action, std::vector<Eigen::Vector3d>& path,
                  double& elapsed, std::vector<double>* times = nullptr, std::vector<double>* yaws = nullptr);
-    bool spatialFree(const Eigen::Vector2d& com,double yaw);
+    bool spatialFree(const Eigen::Vector2d& com);
     HumanCaneFootprint::Polygon relativeFootprint(double yaw) const;
     HumanCaneFootprint::Polygon footprint_local_;
     bool timedFree(const Eigen::Vector2d& com, double future_time, double age,double yaw = 0.);
