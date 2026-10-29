@@ -16,13 +16,13 @@ public:
     struct Config {
         double safety_radius = .4;       // social keypoint radius, independent of body margin
         double body_margin = .03;        // independent hard physical padding, m
-        double wall_gain = 1., system_gain = 1.; // m/s^2
+        double wall_gain = 1., system_gain = 1., peer_gain = 1.; // m/s^2
         double decay_length = .5;        // m
         double fov_amplification = 2.;   // dimensionless, +/-110 degrees
         double alpha = .3;               // s^2, force-to-distance, NOT prediction time
         double max_force = 4.;           // m/s^2
         double max_extension = 1.5;      // m beyond safety radius
-        double influence_distance = 3.; // m; finite nearest-boundary query range
+        double influence_distance = 3.; // m; finite nearest occupied-cell query range
         double max_seconds = .02;        // cooperative per-observation bound
     };
     struct Result {
@@ -30,13 +30,19 @@ public:
         std::string reason;
         Polygon body, social, hull;
         Eigen::Vector2d force = Eigen::Vector2d::Zero();
+        // build() supplies components after the same common force saturation:
+        // map_force + system_force + peer_force == force. fromForce() has no attribution.
+        Eigen::Vector2d map_force = Eigen::Vector2d::Zero();
+        Eigen::Vector2d system_force = Eigen::Vector2d::Zero();
+        Eigen::Vector2d peer_force = Eigen::Vector2d::Zero();
     };
     static bool validConfig(const Config&);
     static bool validObservation(const Observation&);
     static Polygon convexHull(Polygon);
     static Result fromForce(const Observation&, const Eigen::Vector2d&, const Config&);
     static Result build(const Observation&, const Eigen::Vector3d& system_pose,
-                        const ConvexCorridor::Grid&, const Config&);
+                        const ConvexCorridor::Grid&, const Config&,
+                        const std::vector<Observation>& neighbors = {});
 };
 }
 #endif

@@ -106,8 +106,11 @@ bool PlannerManager::advanceExecutionLocked(const ros::Time& now) {
             social_size,social_grid.blocked,why))return finish("INVALID_STATIC_CORRIDOR");
         social_grid.width=social_size.x();social_grid.height=social_size.y();
         const Eigen::Vector3d pose(current.x(),current.y(),current_yaw);
-        for(const auto& o:pedestrian_observations_) {
-            const auto geometry=PedestrianPolygon::build(o,pose,social_grid,pedestrian_config_);
+        for(size_t i=0;i<pedestrian_observations_.size();++i) {
+            const auto& o=pedestrian_observations_[i];
+            std::vector<PedestrianPolygon::Observation> neighbors;
+            for(size_t j=0;j<pedestrian_observations_.size();++j)if(j!=i)neighbors.push_back(pedestrian_observations_[j]);
+            const auto geometry=PedestrianPolygon::build(o,pose,social_grid,pedestrian_config_,neighbors);
             if(!geometry.valid){pedestrian_geometry_.clear();return finish("DYNAMIC_DATA_INVALID");}
             pedestrian_geometry_.push_back(geometry);
             obstacles.push_back({geometry.hull,mpc_controller_->timedCollisionEnabled()?o.velocity:V::Zero()});
@@ -156,8 +159,12 @@ bool PlannerManager::advanceExecutionLocked(const ros::Time& now) {
                 auto polygon=mpc_controller_->robotFootprintAt(s.position.head<2>(),s.yaw);
                 for(size_t j=0;j<=polygon.size();++j){geometry_msgs::Point q;q.x=polygon[j%polygon.size()].x();q.y=polygon[j%polygon.size()].y();q.z=.25;marker.points.push_back(q);}markers.markers.push_back(marker);
                 marker.ns="timed_pedestrian";marker.color.r=1.;marker.color.g=.3;marker.points.clear();
-                const auto& obstacle=obstacles.front();
-                for(size_t j=0;j<=obstacle.hull.size();++j){const auto v=(obstacle.hull[j%obstacle.hull.size()]+obstacle.velocity*(age+future)).eval();geometry_msgs::Point q;q.x=v.x();q.y=v.y();q.z=.25;marker.points.push_back(q);}markers.markers.push_back(marker);
+                for(size_t i=0;i<obstacles.size();++i) {
+                    marker.id=display_count*32+i;
+                    marker.points.clear();const auto& obstacle=obstacles[i];
+                    for(size_t j=0;j<=obstacle.hull.size();++j){const auto v=(obstacle.hull[j%obstacle.hull.size()]+obstacle.velocity*(age+future)).eval();geometry_msgs::Point q;q.x=v.x();q.y=v.y();q.z=.25;marker.points.push_back(q);}markers.markers.push_back(marker);
+                }
+                marker.id=display_count;
                 marker.ns="timed_labels";marker.type=visualization_msgs::Marker::TEXT_VIEW_FACING;marker.scale.z=.16;
                 marker.points.clear();marker.pose.position.x=s.position.x();marker.pose.position.y=s.position.y();marker.pose.position.z=.6;
                 marker.text="+"+std::to_string(future).substr(0,4)+" s";markers.markers.push_back(marker);

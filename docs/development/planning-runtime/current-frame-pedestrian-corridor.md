@@ -6,7 +6,7 @@ Planner 3 with private `use_pedestrians=true`. Default current-frame dynamic spa
 
 ## Source validity and transforms
 
-- `/onboard_detector/dynamic_obstacles_info` uses its existing header and full position/velocity/size arrays. First version supports zero or one pedestrian; more than one is explicitly invalid, never silently truncated.
+- `/onboard_detector/dynamic_obstacles_info` uses its existing header and full position/velocity/size arrays. Supports zero through five pedestrians; more than five is explicitly invalid, never silently truncated. The cap is ConvexCorridor::kMaxPedestrians, matched by the optional Python bridge/exporter.
 - Enabled missing, mismatched arrays, unsupported/nonfinite values, zero/future/stale stamps, empty frame, or unavailable observation-time TF produces `DYNAMIC_DATA_INVALID`. Invalid input replaces previous validity. Fresh empty is valid; timeout is never synthesized as empty.
 - Default maximum source age is 0.5 s, configurable finite `(0,2]`. Check both observation and receipt age before geometry, after geometry, and after MPPI before integration. Future frames fail on receipt and cannot become valid merely by waiting. ROS clock rollback fails closed.
 - Geometry captures a per-plan immutable `PedestrianFrameToken` (generation, enabled state, original stamp and receipt) under `dynObsMutex_`. Each accepted enabled frame increments generation, including same-stamp/invalid messages; disabled messages do not change cache/generation. Goal reset and any future mutable enable transition use this mutex and advance generation. Final authorization retains generation/enable and captured-age checks as invariants; expired snapshot gives `DYNAMIC_DATA_INVALID` / `PLANNED_FRAME_EXPIRED`. No retry, empty-frame exception or widened timeout.
@@ -14,13 +14,15 @@ Planner 3 with private `use_pedestrians=true`. Default current-frame dynamic spa
 - Callback receipt is captured at callback entry BEFORE mutex wait, not when the cache is finally updated; header stamp is retained. Original receipt/header age validation prevents buffering from renewing old observations. Existing subscriber queue and cooperative FIRI/SFM limits remain; MPPI has finite configured sample/rollout counts, not a hard time bound. Long computation can yield stale STOP and callback delay; no unconditional latency/fairness or hard-real-time guarantee follows.
 - Geometry clear/iteration and snapshot reset retain the same mutex. Goal callbacks own the mutex across goal state updates and call `resetCorridorForGoalLocked`; already-held paths call only Locked helpers, avoiding recursive lock deadlock. Regression-only barriers cover actual MPPI and callback entry before lock acquisition. Queued callbacks are joined only after transaction completion; repeated traffic tests must show LFPC progress as well as freshness/invalidity STOP. No runtime test flags.
 - Planning frame is `world`, consistent with existing maps/LFPC/markers. Transform centres with full TF and velocity with rotation only, at the original header stamp. Conservatively enclose a rotated complete 3D source box using `abs(R)*full_size`; retain original header and source values separately. Unknown map/world identity is not allowed. The lightweight simulator explicitly emits configured world coordinates in planner-3 launches.
-- Source-enable propagates through algorithm, lightweight, hardware and Gazebo entrypoints. Gazebo enable is the OR of lightweight pedestrians, truth bridge and world pedestrians; world-only without observation source therefore fails closed. Truth source takes precedence over lightweight source to avoid two contradictory publishers. Gazebo `ModelStates` is world data; bridge rejects arbitrary frame relabeling and retains callback receipt stamp on timer republishes. A source stall expires rather than becoming perpetually fresh. More than one Gazebo pedestrian intentionally fails the first-version cap.
+- Source-enable propagates through algorithm, lightweight, hardware and Gazebo entrypoints. Gazebo enable is the OR of lightweight pedestrians, truth bridge and world pedestrians; world-only without observation source therefore fails closed. Truth source takes precedence over lightweight source to avoid two contradictory publishers. Gazebo `ModelStates` is world data; bridge rejects arbitrary frame relabeling and retains callback receipt stamp on timer republishes. A source stall expires rather than becoming perpetually fresh. More than five Gazebo pedestrians fail the same observation cap.
 
 ## Pure polygon module
 
-`PedestrianPolygon` uses observed velocity as desired velocity, hence zero initial drive. It omits target attraction, stochastic terms, other-pedestrian forces and intent inference. Force is an acceleration-like m/s^2 engineering approximation: bounded exponential nearest static-boundary repulsion plus LFPC centre-surrogate repulsion. System repulsion is amplified inside the pedestrian's +/-110-degree FOV. System heading is supplied/validated but the centre surrogate is isotropic; no full human/cane footprint is represented.
+`PedestrianPolygon` uses observed velocity as desired velocity, hence zero initial drive. It omits target attraction, stochastic terms and intent inference. Other observations in the same frame supply bounded exponential peer repulsion, with summed half-box-diagonal body radii and the same FOV amplification. Neighbors are selected by batch index, not position equality; coincident centers have no inferred force direction and their body hulls remain obstacles. Force is an acceleration-like m/s^2 engineering approximation: bounded exponential nearest static-boundary repulsion plus LFPC centre-surrogate repulsion. System repulsion is amplified inside the pedestrian's +/-110-degree FOV. System heading is supplied/validated but the centre surrogate is isotropic; no full human/cane footprint is represented.
 
-Nearest whole blocked-bin face/boundary and finite grid exterior come from the exact selected corridor grid; no raster-density force summation, raw-ESDF alternate classifier or pedestrian rasterization. Only nearest distance inside the finite influence range contributes. A cropped-domain boundary is conservatively treated as blocked, like FIRI, and may produce an artificial boundary force near its edge. Grid scan is bounded and has a cooperative per-observation budget.
+Nearest whole blocked-bin faces come from the exact selected corridor grid; no raster-density force summation, raw-ESDF alternate classifier or pedestrian rasterization. Only nearest distance inside the finite influence range contributes. Artificial crop edges and grid exterior do not generate force, including for a pedestrian outside the crop. Real walls contribute through occupied bins. FIRI separately retains conservative finite-domain constraints. The map term remains an estimate from the selected traversability classifier, including its unknown-region and inflation rules; it is not pedsim's physical-wall force. Obstacles outside the supplied crop are unavailable to this estimate. Grid scan is bounded and has a cooperative per-observation budget.
+
+`build()` exposes map, robot and peer components after the same common saturation as the total force, so `map_force + system_force + peer_force == force`. `fromForce()` accepts an externally supplied total and does not attribute components. The three estimates only shape the planning polygon; pedsim integrates its own SFM. Observed velocity is displayed separately and remains the source of CV prediction.
 
 Defaults and supported ranges (all finite):
 
@@ -28,7 +30,7 @@ Defaults and supported ranges (all finite):
 |---|---:|---|
 | safety_radius | 0.4 | [0.01,2] m; independent social radius |
 | body_margin | 0.03 | [0,0.5] m; hard rectangle padding |
-| wall_gain, system_gain | 1 | [0,20] m/s^2 |
+| wall_gain, system_gain, peer_gain | 1 | [0,20] m/s^2 |
 | decay_length | 0.5 | [0.01,5] m |
 | fov_amplification | 2 | [1,10] dimensionless |
 | alpha | 0.3 | [0,5] s^2; force-to-distance, not prediction duration |
@@ -46,6 +48,15 @@ stationary observations lack heading and retain padded symmetric body. See the
 the earlier full pedestrian octagon and COM-only corridor conventions.
 
 ## FIRI and failure evidence
+
+Each observation produces its own body/social hull. All hulls independently
+participate in global A* edge separation, every current-space FIRI region, MPPI
+timed SAT and execution revalidation. Do not merge people into one convex crowd
+hull: gaps between separate people must remain available. Global worker queries
+carry a complete value copy of the polygon list. Both timed displays iterate
+every person; ids use sample_index*32+person_index within the pedestrian namespace.
+The optional pedsim adapter sorts by upstream id before constructing the batch;
+the planner itself does not assume persistent identity or infer hidden targets.
 
 Default production wiring changed on 2026-10-28: see
 [periodic-global-reference.md](periodic-global-reference.md). FIRI separates static cells and current pedestrian hulls; timed SAT handles
@@ -108,7 +119,7 @@ route only after all current-cycle FIRI/MPPI/execution checks pass.
 
 ## Output and safety limits
 
-Body/social outlines share `/mpc/convex_corridor` MarkerArray with stable namespaces `mpc_pedestrian_body` and `mpc_pedestrian_social_hull`, id 0, world frame and 0.3 s lifetime. DELETE on invalid/empty/reset and expired FSM data prevents persistent ghosts; corridor publication DELETEALL precedes current geometry. No tracking-ID persistence is assumed. Existing corridor/A*/MPPI visuals remain.
+Body/social outlines share `/mpc/convex_corridor` MarkerArray with stable namespaces `mpc_pedestrian_body` and `mpc_pedestrian_social_hull`, per-frame ids 0..N-1, world frame and 0.3 s lifetime. Force diagnostics on the same topic use `mpc_pedestrian_map_force` (cyan), `mpc_pedestrian_robot_force` (orange), `mpc_pedestrian_peer_force` (blue), `mpc_pedestrian_force` (magenta total), `mpc_pedestrian_velocity` (green observed velocity) and `mpc_pedestrian_force_label` (explicit planner-estimate legend). Zero vectors omit arrows. Force arrows use 0.3 s² and velocity uses 0.8 s to convert vectors to drawn lengths, not prediction horizons. DELETE on invalid/empty/reset and expired FSM data includes all five possible ids in these namespaces; corridor publication DELETEALL precedes current geometry. No tracking-ID persistence is assumed. Existing corridor/A*/MPPI visuals remain.
 
 Metric positions 0–25 retain their indices. Field 5 now counts timed SAT rejects; field 19 indicates spatial-only mode (zero when timed SAT is active). Fields 23=source enabled, 24=active corridor feasible, 25=FailureReason enum. Timed fields 26–29 are documented in the timed checker contract. Legacy MPPI validity/cost fields describe the evaluated rollout; if data expires after MPPI, field 24 is false and STOP reason is authoritative. Stop/debug text distinguishes `DYNAMIC_REFERENCE_BLOCKED`, `DYNAMIC_DATA_INVALID`, static invalidity and no feasible rollout.
 

@@ -1,0 +1,13 @@
+std_msgs/Header header
+uint64 revision
+plan_manage/SocialPedestrian[] pedestrians
+int64[] agent_ids
+geometry_msgs/Pose2D[] poses
+string[] phases
+uint32 selected_id
+bool start_on_goal
+bool running
+bool ready
+bool remember_last
+string message
+string persistence_error

@@ -192,7 +192,7 @@ namespace cane_planner
     struct GlobalReferenceQuery {
       ConvexCorridor::Grid grid;
       Eigen::Vector2d lower, upper, start, goal;
-      std::vector<Eigen::Vector2d> obstacle;
+      std::vector<std::vector<Eigen::Vector2d>> obstacles;
       double resolution=.1, clearance=.002, weight=0., sigma=.8;
       int allocate_num=0;
       double grid_seconds=0.;

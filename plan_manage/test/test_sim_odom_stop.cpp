@@ -145,6 +145,7 @@ public:
     }
     static Eigen::Vector2d V2(const Eigen::Vector3d& v) {return v.head<2>();}
     static auto executionHull(PlannerManager& m) {return m.pedestrian_geometry_.front().hull;}
+    static auto allGeometry(PlannerManager& m) {return m.pedestrian_geometry_;}
     static bool reached(PlannerManager& m) {return m.mpc_reached_goal_;}
     static bool executing(PlannerManager& m) {return m.execution_active_;}
     static double phase(PlannerManager& m) {return m.execution_phase_;}
@@ -528,7 +529,7 @@ onboard_detector::DynamicObstacles::Ptr frame(const ros::Time& stamp, const std:
 void addPedestrian(onboard_detector::DynamicObstacles& msg,const Eigen::Vector2d& p)
 {
     geometry_msgs::Vector3 pos,vel,size;pos.x=p.x();pos.y=p.y();vel.x=1.;size.x=.4;size.y=.6;size.z=1.7;
-    msg.position.push_back(pos);msg.velocity.push_back(vel);msg.size.push_back(size);msg.num=1;
+    msg.position.push_back(pos);msg.velocity.push_back(vel);msg.size.push_back(size);msg.num=msg.position.size();
 }
 static void expectPedestrianExcluded(const ConvexCorridor::Result& corridor,
                                     const ConvexCorridor::Polygon& hull)
@@ -544,6 +545,56 @@ static void expectPedestrianExcluded(const ConvexCorridor::Result& corridor,
         }
         EXPECT_TRUE(separated)<<"A displayed/active region includes the current pedestrian hull";
     }
+}
+TEST_F(SimOdomTest, FivePeopleParticipateAndInvalidOrEmptyFramesClearAllMarkers)
+{
+    ros::Time::setNow(ros::Time(740));SimOdomTestAccess::fullGeometrySetup(manager_,nh_);
+    SimOdomTestAccess::enabled(manager_,true);
+    std::vector<visualization_msgs::MarkerArray> markers;
+    auto sub=nh_.subscribe<visualization_msgs::MarkerArray>("corridor",20,
+        [&](const visualization_msgs::MarkerArray::ConstPtr& m){markers.push_back(*m);});
+    const auto end=ros::WallTime::now()+ros::WallDuration(2.);
+    while(sub.getNumPublishers()==0 && ros::WallTime::now()<end){ros::spinOnce();ros::WallDuration(.005).sleep();}
+    ASSERT_EQ(1u,sub.getNumPublishers());
+    auto msg=frame(ros::Time::now());
+    for(int i=0;i<5;++i){addPedestrian(*msg,Eigen::Vector2d(.3+.7*i,2.));msg->velocity.back().x=0.;}
+    SimOdomTestAccess::receive(manager_,msg);
+    ASSERT_EQ(5u,SimOdomTestAccess::observations(manager_).size());
+    const auto corridor=SimOdomTestAccess::corridor(manager_);
+    const auto geometry=SimOdomTestAccess::allGeometry(manager_);ASSERT_EQ(5u,geometry.size());
+    for(const auto& g:geometry)expectPedestrianExcluded(corridor,g.hull);
+    // The fifth person is independently capable of blocking the reference.
+    msg->position.back().x=1.5;msg->position.back().y=0.;SimOdomTestAccess::receive(manager_,msg);
+    const auto blocked=SimOdomTestAccess::corridor(manager_);
+    EXPECT_TRUE(blocked.failure_reason==ConvexCorridor::FailureReason::DYNAMIC_REFERENCE_BLOCKED ||
+                blocked.truncation_reason==ConvexCorridor::FailureReason::DYNAMIC_REFERENCE_BLOCKED);
+    addPedestrian(*msg,Eigen::Vector2d(4,2));SimOdomTestAccess::receive(manager_,msg);
+    EXPECT_EQ(ConvexCorridor::FailureReason::DYNAMIC_DATA_INVALID,SimOdomTestAccess::corridor(manager_).failure_reason);
+    SimOdomTestAccess::receive(manager_,frame(ros::Time::now()));
+    EXPECT_TRUE(SimOdomTestAccess::corridor(manager_).feasible);EXPECT_TRUE(SimOdomTestAccess::geometryEmpty(manager_));
+    ros::WallDuration(.03).sleep();ros::spinOnce();
+    bool fifth_deleted=false;
+    for(const auto& batch:markers)for(const auto& m:batch.markers)
+        fifth_deleted=fifth_deleted || (m.ns=="mpc_pedestrian_peer_force" && m.id==4 && m.action==visualization_msgs::Marker::DELETE);
+    EXPECT_TRUE(fifth_deleted);
+}
+
+TEST_F(SimOdomTest, FifthNewPedestrianStopsQueuedStepAndFreshEmptyResumes)
+{
+    ros::Time::setNow(ros::Time(741));SimOdomTestAccess::timedSetup(manager_,nh_);
+    SimOdomTestAccess::enabled(manager_,true);SimOdomTestAccess::receive(manager_,frame(ros::Time::now()));
+    SimOdomTestAccess::step(manager_);ASSERT_TRUE(SimOdomTestAccess::executing(manager_));
+    const auto initial=SimOdomTestAccess::model(manager_).getCOMPos();
+    auto msg=frame(ros::Time::now());
+    for(int i=0;i<4;++i)addPedestrian(*msg,Eigen::Vector2d(4+i,4));
+    addPedestrian(*msg,Eigen::Vector2d(.5,0));
+    for(auto& v:msg->velocity)v=geometry_msgs::Vector3();
+    SimOdomTestAccess::receive(manager_,msg);ros::Time::setNow(ros::Time(741.02));
+    EXPECT_FALSE(SimOdomTestAccess::execute(manager_));
+    EXPECT_EQ(initial,SimOdomTestAccess::model(manager_).getCOMPos());EXPECT_DOUBLE_EQ(0.,SimOdomTestAccess::phase(manager_));
+    SimOdomTestAccess::receive(manager_,frame(ros::Time::now()));ros::Time::setNow(ros::Time(741.04));
+    EXPECT_TRUE(SimOdomTestAccess::execute(manager_));EXPECT_NE(initial,SimOdomTestAccess::model(manager_).getCOMPos());
+    nh_.deleteParam("lfpc/delta_t"); // timedSetup's slower model must not leak into other fixtures
 }
 TEST_F(SimOdomTest, TimedChecksStillExcludeCurrentPedestrianFromActiveAndPreviewCorridors)
 {
@@ -1618,6 +1669,26 @@ TEST_F(SimOdomTest, IdleHeartbeatModeAndInitializationGuards)
         SimOdomTestAccess::fsm(manager_);
     }
     ros::WallDuration(.1).sleep();ros::spinOnce();EXPECT_TRUE(odom_.empty());
+}
+
+TEST_F(SimOdomTest, PoseResetWhileWaitingForNextGoalKeepsStationaryHeartbeat)
+{
+    ros::Time::setNow(ros::Time(760));SimOdomTestAccess::timedSetup(manager_,nh_);
+    SimOdomTestAccess::idleSetup(manager_,true); // previous goal has completed
+    SimOdomTestAccess::startAt(manager_,.65);waitForOdom(1);
+    EXPECT_FALSE(SimOdomTestAccess::reached(manager_));
+    const auto state=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
+    const auto pose=odom_.back().pose.pose;
+    for(int i=0;i<8;++i) {
+        ros::Time::setNow(ros::Time(760.1+.1*i));
+        SimOdomTestAccess::timer(manager_);SimOdomTestAccess::fsm(manager_);
+        waitForOdom(i+2);ASSERT_EQ(size_t(i+2),odom_.size());
+        EXPECT_EQ(ros::Time::now(),odom_.back().header.stamp);
+        EXPECT_EQ(pose,odom_.back().pose.pose);
+        EXPECT_EQ(geometry_msgs::Twist(),odom_.back().twist.twist);
+        EXPECT_EQ(state,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
+        EXPECT_FALSE(SimOdomTestAccess::active(manager_));
+    }
 }
 }  // namespace cane_planner
 

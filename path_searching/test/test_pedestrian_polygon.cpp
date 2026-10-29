@@ -30,6 +30,39 @@ TEST(PedestrianPolygon, ReverseAndZeroForceAlwaysContainPaddedBody) {
         if(f.x()<0) { EXPECT_TRUE(inside(r.hull,o.position+V(-1.6,0))); }
     }
 }
+
+TEST(PedestrianPolygon, NeighborsRepelAndShareForceSaturation) {
+    auto o=observation(V(0,0));o.velocity=V::Zero();
+    auto peer=o;peer.position=V(.6,0);
+    P::Config c;c.wall_gain=c.system_gain=0.;c.peer_gain=3.;c.max_force=.1;
+    const auto a=P::build(o,Eigen::Vector3d(-4,-4,0),grid(),c,{peer});
+    ASSERT_TRUE(a.valid);EXPECT_LT(a.peer_force.x(),0.);EXPECT_NEAR(0.,a.peer_force.y(),1e-12);
+    EXPECT_NEAR(.1,a.force.norm(),1e-12);
+    EXPECT_TRUE(a.force.isApprox(a.map_force+a.system_force+a.peer_force,1e-12));
+    const auto b=P::build(peer,Eigen::Vector3d(-4,-4,0),grid(),c,{o});
+    ASSERT_TRUE(b.valid);EXPECT_TRUE(a.peer_force.isApprox(-b.peer_force,1e-12));
+    auto overlap=peer;overlap.position=o.position;
+    EXPECT_TRUE(P::build(o,Eigen::Vector3d(-4,-4,0),grid(),c,{overlap}).valid);
+    peer.position.x()=NAN;
+    EXPECT_FALSE(P::build(o,Eigen::Vector3d(-4,-4,0),grid(),c,{peer}).valid);
+}
+
+TEST(DynamicConvexCorridor, AllFiveHullsExcludedAndLastBlockerRejects) {
+    C c;auto config=c.getConfig();config.max_seconds=1.;c.setConfig(config);
+    const std::vector<V> path{V(-2,0),V(-1,0),V(0,0),V(1,0),V(2,0)};
+    std::vector<P::Polygon> hulls;
+    for(int i=0;i<5;++i) {
+        auto o=observation(V(-2+i,1.5));o.velocity=V::Zero();
+        hulls.push_back(P::fromForce(o,V::Zero(),P::Config()).hull);
+    }
+    const auto result=c.buildStatic(path,grid(),hulls);
+    for(const auto& hull:hulls)excluded(result,hull,config.clearance);
+    auto o=observation(V(1.5,0));o.velocity=V::Zero();
+    hulls.back()=P::fromForce(o,V::Zero(),P::Config()).hull;
+    EXPECT_EQ(C::FailureReason::DYNAMIC_REFERENCE_BLOCKED,c.buildStatic(path,grid(),hulls).failure_reason);
+    hulls.push_back(hulls.front());
+    EXPECT_EQ(C::FailureReason::DYNAMIC_DATA_INVALID,c.buildStatic(path,grid(),hulls).failure_reason);
+}
 TEST(PedestrianPolygon, HeadingAndWeakForceRemainVisible) {
     auto o=observation(V::Zero());o.full_size=V(.5,.5);P::Config c;
     const auto east=P::fromForce(o,V(.05,0),c);
@@ -63,6 +96,42 @@ TEST(PedestrianPolygon, WallAndSystemRepulsionHaveCorrectDirectionAndFov) {
     ASSERT_TRUE(front.valid);ASSERT_TRUE(rear.valid);
     EXPECT_LT(front.force.x(),0);EXPECT_GT(rear.force.x(),0);
     EXPECT_NEAR(front.force.norm(),2*rear.force.norm(),1e-9);
+}
+TEST(PedestrianPolygon, EmptyCropNeverCreatesAForceInsideOrOutside) {
+    P::Config c;c.system_gain=0;
+    const auto o=observation(V(0,-1.2));
+    for(double extent:{1.,5.,10.}) {
+        auto g=grid();g.origin=V::Constant(-extent);
+        g.width=g.height=int(std::lround(2*extent/g.resolution));
+        g.blocked.assign(size_t(g.width)*g.height,0);
+        const auto r=P::build(o,Eigen::Vector3d::Zero(),g,c);
+        ASSERT_TRUE(r.valid);EXPECT_DOUBLE_EQ(0.,r.force.norm());
+        EXPECT_DOUBLE_EQ(0.,r.map_force.norm());
+    }
+}
+TEST(PedestrianPolygon, MapAndSystemComponentsSumAfterSaturation) {
+    auto g=grid();const auto o=observation(V::Zero());P::Config c;
+    // A wall east of the person and robot north of it give independent west
+    // and south repulsions; neither component can be mistaken for attraction.
+    for(int y=0;y<g.height;++y)g.blocked[y*g.width+55]=1;
+    for(double limit:{4.,.1}) {
+        c.max_force=limit;
+        const auto r=P::build(o,Eigen::Vector3d(0,.5,0),g,c);
+        ASSERT_TRUE(r.valid);EXPECT_LT(r.map_force.x(),0.);
+        EXPECT_NEAR(0.,r.map_force.y(),1e-9);
+        EXPECT_LT(r.system_force.y(),0.);EXPECT_NEAR(0.,r.system_force.x(),1e-9);
+        EXPECT_LT((r.force-r.map_force-r.system_force).norm(),1e-12);
+        EXPECT_LE(r.force.norm(),limit+1e-12);
+    }
+}
+TEST(PedestrianPolygon, OccupiedCellsStillRepelOutsideTheCrop) {
+    auto g=grid();g.origin=V(-1,-1);g.width=g.height=20;g.blocked.assign(400,0);
+    // Person is left of the crop, and an actual occupied cell is to its right.
+    // Repulsion must point left, away from that cell, rather than into the crop.
+    g.blocked[10*g.width]=1;
+    P::Config c;c.system_gain=0;
+    const auto r=P::build(observation(V(-1.2,.05)),Eigen::Vector3d::Zero(),g,c);
+    ASSERT_TRUE(r.valid);EXPECT_LT(r.force.x(),0.);EXPECT_NEAR(0.,r.force.y(),1e-9);
 }
 TEST(DynamicConvexCorridor, EmptyInputIsExactlyStatic) {
     C c;const std::vector<V> path{V(-2,0),V(0,0),V(2,0)};auto g=grid();

@@ -18,6 +18,8 @@
     <arg name="mpc_timed_collision_enable" default="true"/>
     <arg name="mpc_timed_robot_radius" default="0.25"/>
     <arg name="planner" default="2"/>  <!-- A*:1, kinodynamic:2, LFPC-MPPI:3, kinematic MPPI:4 -->
+    <arg name="visualize" default="true"/>
+    <arg name="rviz_config" default="$(find plan_manage)/config/replan.rviz"/>
     <!-- MPC ablation switches for lightweight simulation. -->
     <arg name="mpc_w_risk" default="0.0"/>
     <arg name="mpc_enable_cpa" default="false"/>
@@ -55,6 +57,7 @@
     <arg name="use_static_global_map" default="false"/>
     <arg name="use_static_global_esdf" default="false"/>
     <arg name="static_map_pcd" default="$(find map_generator)/resource/office2_modify.pcd"/>
+    <arg name="simulation_map_pcd" default="$(arg static_map_pcd)"/>
     <arg name="static_map_min_height" default="0.60"/>
     <arg name="static_map_max_height" default="2.0"/>
     <arg name="static_map_inflation" default="0.08"/>
@@ -71,7 +74,9 @@
     <arg name="astar_clearance_sigma" default="0.8"/>
     <arg name="publish_static_map_debug" default="true"/>
     <!-- simulation -->
-    <include file="$(find plan_manage)/launch/include/simulation.launch"/>
+    <include file="$(find plan_manage)/launch/include/simulation.launch">
+        <arg name="map_pcd" value="$(arg simulation_map_pcd)"/>
+    </include>
     <!-- unified planner (A*/kinodynamic/MPC all via kin_replan_node FSM) -->
     <include file="$(find plan_manage)/launch/include/algorithm.launch">
         <arg name="planner" value="$(arg planner)"/>
@@ -181,5 +186,7 @@
     </group>
 
     <!-- visualisation -->
-    <include file="$(find plan_manage)/launch/rviz.launch"/>
+    <include if="$(arg visualize)" file="$(find plan_manage)/launch/rviz.launch">
+      <arg name="config" value="$(arg rviz_config)"/>
+    </include>
 </launch>

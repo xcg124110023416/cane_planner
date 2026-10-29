@@ -70,3 +70,13 @@ with an explicit Preview only / Preview blocked label and observation age. Its
 async result must pass source/receipt freshness and route/goal revision before
 publication; TTL never outlives the bound source. No motion authority. RViz names
 are MPC_ActiveCorridor, MPC_HumanCane and MPC_CorridorPreview.
+
+Planner force diagnostics share `/mpc/convex_corridor`: cyan map repulsion,
+orange robot repulsion, blue peer repulsion, magenta total and green observed velocity. Their
+namespaces are `mpc_pedestrian_map_force`, `mpc_pedestrian_robot_force`,
+`mpc_pedestrian_peer_force`, `mpc_pedestrian_force`, and `mpc_pedestrian_velocity`. Per-frame person ids 0..N-1 keep all people visible; empty/invalid/reset clears ids 0..4. The per-person text marks
+these forces as planner estimates; pedsim uses its own motion model. Force
+arrows scale by 0.3 s² and velocity by 0.8 s. Zero vectors omit arrows. All
+components and the text use the existing 0.3 s lifetime and are deleted with
+pedestrian geometry on invalid/empty/reset inputs. Artificial map crop edges
+no longer generate planner social force; occupied map bins still contribute.

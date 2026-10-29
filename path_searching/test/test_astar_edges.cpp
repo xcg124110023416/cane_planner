@@ -464,8 +464,8 @@ TEST(AstarEdges, PointReferenceNeverAdmitsOccupiedCellOrPedestrian) {
     Astar a;AstarEdgeTestAccess::init(a,g);Astar::GlobalReferenceQuery q;ASSERT_TRUE(a.snapshotGlobalReference(q));
     const TimedPedestrianCollision::Polygon square{{0,0},{.1,0},{.1,.1},{0,.1}};
     for(bool dynamic:{false,true}) {
-        q.grid.blocked.assign(3600,0);q.obstacle.clear();
-        if(dynamic)q.obstacle=square;else q.grid.blocked[30*60+30]=1;
+        q.grid.blocked.assign(3600,0);q.obstacles.clear();
+        if(dynamic)q.obstacles={square};else q.grid.blocked[30*60+30]=1;
         int free_count=0,blocked_count=0;
         for(int i=0;i<24;++i)for(double radius:{.02,.2,1.2}) {
             const double angle=i*3.141592653589793/12.;q.start=Eigen::Vector2d(.05,.05)+radius*Eigen::Vector2d(std::cos(angle),std::sin(angle));q.goal=q.start;
@@ -475,4 +475,26 @@ TEST(AstarEdges, PointReferenceNeverAdmitsOccupiedCellOrPedestrian) {
         }
         EXPECT_GT(free_count,0);EXPECT_GT(blocked_count,0);
     }
+}
+
+TEST(AstarEdges, GlobalReferenceAvoidsEveryHullAndPreservesGapBetweenPeople) {
+    ConvexCorridor::Grid g;g.origin={-5,-5};g.resolution=.1;g.width=g.height=100;g.blocked.assign(10000,0);
+    Astar a;AstarEdgeTestAccess::init(a,g);Astar::GlobalReferenceQuery q;ASSERT_TRUE(a.snapshotGlobalReference(q));
+    q.start={-3,0};q.goal={3,0};
+    auto square=[](double x,double y) {return std::vector<Eigen::Vector2d>{{x-.2,y-.2},{x+.2,y-.2},{x+.2,y+.2},{x-.2,y+.2}};};
+    q.obstacles={square(-2,2),square(0,1),square(2,2),square(-2,-2),square(0,-1)};
+    auto evaluate=[&] {return Astar::evaluateGlobalReference(q,std::chrono::steady_clock::now()+std::chrono::seconds(2));};
+    auto result=evaluate();ASSERT_EQ(Astar::RecoveryStatus::FOUND,result.status);
+    for(const auto& p:result.path)EXPECT_NEAR(0.,p.y(),1e-10); // gap stays free, no merged crowd hull
+    for(size_t blocking:{size_t(1),size_t(4)}) {
+        const auto saved=q.obstacles[blocking];q.obstacles[blocking]=square(0,0);
+        result=evaluate();ASSERT_EQ(Astar::RecoveryStatus::FOUND,result.status);
+        bool detoured=false;
+        for(size_t i=1;i<result.path.size();++i) {
+            detoured=detoured || std::abs(result.path[i].y())>.3;
+            for(const auto& hull:q.obstacles)EXPECT_TRUE(Astar::polygonEdgeFree(result.path[i-1],result.path[i],hull,q.clearance));
+        }
+        EXPECT_TRUE(detoured);q.obstacles[blocking]=saved;
+    }
+    q.obstacles.push_back(square(4,4));EXPECT_EQ(Astar::RecoveryStatus::INVALID_INPUT,evaluate().status);
 }

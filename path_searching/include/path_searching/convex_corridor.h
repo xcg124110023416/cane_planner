@@ -9,6 +9,8 @@
 namespace cane_planner {
 class ConvexCorridor {
 public:
+    // Bounded observation batch shared by planner-3 geometry and routing.
+    static constexpr size_t kMaxPedestrians = 5;
     struct Halfspace { Eigen::Vector2d normal = Eigen::Vector2d::Zero(); double offset = 0.; };
     struct Segment {
         // Sampling metadata: protected seed interval in legacy mode, or seed to

@@ -2,6 +2,7 @@
 """Own one private master; never attach navigation/recording to an unowned master."""
 import argparse
 from export_pedsim_office import load_scene
+from export_pedsim_blank import export_world, load_blank_scene
 import fcntl
 import hashlib
 import json
@@ -154,7 +155,11 @@ def run_owned(port, prepare, launch_command):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', nargs='?', default='start', choices=['start', 'record'])
-    parser.add_argument('--scenario',choices=['headon','overtake','crossing'],default='headon')
+    parser.add_argument('--scenario',default='headon', help='YAML scene name; blank also supports crowd_2 and crowd_5')
+    parser.add_argument('--world', choices=['blank', 'office'], default='blank')
+    parser.add_argument('--no-rviz', action='store_true', help='Headless navigation; no goals are sent automatically')
+    parser.add_argument('--fresh-scene', action='store_true', help='Use the YAML preset without reading or writing remembered edits')
+    parser.add_argument('--editor-state-file', help='Explicit scene memory file (blank arena only)')
     parser.add_argument('--port', type=int, default=11551)
     parser.add_argument('--label', default='pedsim_round')
     args = parser.parse_args()
@@ -190,7 +195,8 @@ def main():
             finally:
                 for sig, handler in old_handlers.items():
                     signal.signal(sig, handler)
-    scene_config=load_scene(args.scenario) # fail before master creation
+    scene_config=load_blank_scene(args.scenario) if args.world == 'blank' else load_scene(args.scenario)
+    speeds = [p['desired_max_speed'] for p in scene_config['pedestrians']] if args.world == 'blank' else [scene_config['desired_max_speed']]
     def prepare():
         dependency = Path.home()/'cane-pedsim-ws'/'upstream'
         manifest = json.loads((package/'config/pedsim/upstream-manifest.json').read_text())
@@ -198,10 +204,27 @@ def main():
             if hashlib.sha256((dependency/name).read_bytes()).hexdigest() != entry['patched_sha256']:
                 raise RuntimeError('Pinned dependency mismatch: '+name)
         directory = Path(tempfile.mkdtemp(prefix='cane-pedsim-round.'))
-        map_package = Path(subprocess.check_output(['rospack', 'find', 'map_generator'], text=True).strip())
-        subprocess.run(['/usr/bin/python3', str(package/'scripts/export_pedsim_office.py'), str(map_package/'resource/office2_modify.pcd'), str(directory/'world.xml'),'--scenario',args.scenario], check=True)
-        return directory/'world.xml'
-    return run_owned(args.port, prepare, lambda scene: ['roslaunch', '--wait', 'plan_manage', 'pedsim_navigation.launch', 'scene_file:='+str(scene),'pedestrian_speed:='+str(scene_config['desired_max_speed'])])
+        if args.world == 'blank':
+            metadata = export_world(dependency/'pedsim_simulator/scenarios/blank_world.xml', directory, args.scenario)
+            map_pcd = directory/'world.pcd'
+            print(json.dumps(metadata, indent=2), flush=True)
+            print('RViz robot start: %s; goal: %s (not sent automatically)' %
+                  (scene_config['robot_start'], scene_config['robot_goal']), flush=True)
+        else:
+            map_package = Path(subprocess.check_output(['rospack', 'find', 'map_generator'], text=True).strip())
+            map_pcd = map_package/'resource/office2_modify.pcd'
+            subprocess.run(['/usr/bin/python3', str(package/'scripts/export_pedsim_office.py'), str(map_pcd), str(directory/'world.xml'),'--scenario',args.scenario], check=True)
+        print('Round geometry: %s' % directory, flush=True)
+        return directory/'world.xml', map_pcd
+    return run_owned(args.port, prepare, lambda world: ['roslaunch', '--wait', 'plan_manage', 'pedsim_navigation.launch',
+                     'scene_file:='+str(world[0]), 'map_pcd:='+str(world[1]),
+                     'enable_scene_editor:='+str(args.world == 'blank').lower(),
+                     'scene_description:='+str(world[0].with_suffix('.json')),
+                     'remember_last:='+str(not args.fresh_scene).lower(),
+                     'editor_state_file:='+(str(Path(args.editor_state_file).expanduser().resolve()) if args.editor_state_file else ''),
+                     'use_static_global_map:='+str(args.world == 'blank').lower(),
+                     'visualize:='+str(not args.no_rviz).lower(),
+                     'pedestrian_speeds:='+json.dumps(speeds)])
 
 
 if __name__ == '__main__':

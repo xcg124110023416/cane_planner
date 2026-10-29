@@ -1,14 +1,36 @@
 <launch>
   <arg name="scene_file"/>
   <arg name="pedestrian_speed" default="-1"/>
+  <arg name="pedestrian_speeds" default="[]"/>
+  <arg name="map_pcd" default="$(find map_generator)/resource/office2_modify.pcd"/>
+  <arg name="use_static_global_map" default="false"/>
+  <arg name="visualize" default="true"/>
+  <arg name="enable_scene_editor" default="false"/>
+  <arg name="scene_description" default=""/>
+  <arg name="scene_context" default="$(find plan_manage)/config/pedsim/blank_scenarios.yaml"/>
+  <arg name="remember_last" default="true"/>
+  <arg name="editor_state_file" default=""/>
   <include file="$(find plan_manage)/launch/sim_kin_replan.launch">
     <arg name="planner" value="3"/>
     <arg name="use_pedestrians" value="true"/>
     <arg name="pedestrian_source" value="pedsim"/>
+    <arg name="static_map_pcd" value="$(arg map_pcd)"/>
+    <arg name="simulation_map_pcd" value="$(arg map_pcd)"/>
+    <arg name="use_static_global_map" value="$(arg use_static_global_map)"/>
+    <arg name="visualize" value="$(arg visualize)"/>
+    <arg name="rviz_config" value="$(eval find('plan_manage') + ('/config/pedsim.rviz' if arg('enable_scene_editor') else '/config/replan.rviz'))"/>
   </include>
   <include file="$(find plan_manage)/launch/pedsim_single_source.launch">
     <arg name="scene_file" value="$(arg scene_file)"/>
     <arg name="auto_start" value="true"/>
     <arg name="pedestrian_speed" value="$(arg pedestrian_speed)"/>
+    <arg name="pedestrian_speeds" value="$(arg pedestrian_speeds)"/>
+    <arg name="enable_scene_editor" value="$(arg enable_scene_editor)"/>
   </include>
+  <node if="$(arg enable_scene_editor)" pkg="plan_manage" type="pedsim_scene_editor.py" name="pedsim_scene" output="screen" required="true">
+    <param name="scene_description" value="$(arg scene_description)"/>
+    <param name="scene_context" value="$(arg scene_context)"/>
+    <param name="remember_last" value="$(arg remember_last)"/>
+    <param unless="$(eval arg('editor_state_file') == '')" name="editor_state_file" value="$(arg editor_state_file)"/>
+  </node>
 </launch>

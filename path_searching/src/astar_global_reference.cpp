@@ -12,7 +12,8 @@ using Poly = std::vector<V>;
 
 class GlobalGeometry {
 public:
-    Poly local,obstacle;
+    Poly local;
+    std::vector<Poly> obstacles;
     Eigen::Vector2d origin;
     double resolution=0.,margin=0.;
     Eigen::Vector2i size;
@@ -20,7 +21,7 @@ public:
     std::vector<int> occupancy_prefix;
     std::chrono::steady_clock::time_point deadline;
     struct Support {V axis;double lo,hi;};
-    struct Shape {Poly vertices;std::vector<Support> axes,obstacle_axes;};
+    struct Shape {Poly vertices;std::vector<Support> axes;std::vector<std::vector<Support>> obstacle_axes;};
     std::map<double,Shape> shapes;
     using SweepKey=Eigen::Matrix<double,5,1>;
     std::unordered_map<SweepKey,bool,matrix_hash<SweepKey>> certificates;
@@ -39,13 +40,14 @@ public:
         for(size_t i=0;i<prepared.vertices.size();++i) {
             const V e=prepared.vertices[(i+1)%prepared.vertices.size()]-prepared.vertices[i];add(V(-e.y(),e.x()));
         }
-        if(!obstacle.empty()) {
+        for(const auto& obstacle:obstacles) {
+            prepared.obstacle_axes.emplace_back();
             auto add_obstacle_axis=[&](V axis) {
                 const double n=axis.norm();if(n<1e-10)return;axis/=n;
                 double rlo=std::numeric_limits<double>::infinity(),rhi=-rlo,olo=rlo,ohi=rhi;
                 for(const auto& v:prepared.vertices){const double x=axis.dot(v);rlo=std::min(rlo,x);rhi=std::max(rhi,x);}
                 for(const auto& v:obstacle){const double x=axis.dot(v);olo=std::min(olo,x);ohi=std::max(ohi,x);}
-                prepared.obstacle_axes.push_back({axis,olo-rhi,ohi-rlo});
+                prepared.obstacle_axes.back().push_back({axis,olo-rhi,ohi-rlo});
             };
             for(const auto& s:prepared.axes)add_obstacle_axis(s.axis);
             for(size_t i=0;i<obstacle.size();++i){const V e=obstacle[(i+1)%obstacle.size()]-obstacle[i];add_obstacle_axis(V(-e.y(),e.x()));}
@@ -53,8 +55,12 @@ public:
         return shapes.emplace(yaw,std::move(prepared)).first->second;
     }
     bool obstacleFree(const Shape& shape,const V& a,const V& b) const {
-        if(obstacle.empty())return true;
-        for(const auto& s:shape.obstacle_axes) {
+        for(size_t i=0;i<obstacles.size();++i)
+            if(!obstacleFree(shape,shape.obstacle_axes[i],obstacles[i],a,b))return false;
+        return true;
+    }
+    bool obstacleFree(const Shape& shape,const std::vector<Support>& axes,const Poly& obstacle,const V& a,const V& b) const {
+        for(const auto& s:axes) {
             const double da=s.axis.dot(a),db=s.axis.dot(b);
             if(s.lo-std::max(da,db)>margin+1e-9 || std::min(da,db)-s.hi>margin+1e-9)return true;
         }
@@ -130,7 +136,8 @@ bool Astar::snapshotGlobalReference(GlobalReferenceQuery& q) const {
 
 Astar::RecoveryResult Astar::searchGlobalReference(const V& start,const V& goal,const Poly& obstacle,
     std::chrono::steady_clock::time_point deadline) {
-    GlobalReferenceQuery q;q.start=start;q.goal=goal;q.obstacle=obstacle;
+    GlobalReferenceQuery q;q.start=start;q.goal=goal;
+    if(!obstacle.empty())q.obstacles.push_back(obstacle);
     if(!snapshotGlobalReference(q))return RecoveryResult();
     auto result=evaluateGlobalReference(q,deadline);result.seconds+=q.grid_seconds;return result;
 }
@@ -138,7 +145,7 @@ Astar::RecoveryResult Astar::searchGlobalReference(const V& start,const V& goal,
 Astar::RecoveryResult Astar::evaluateGlobalReference(const GlobalReferenceQuery& q,
     std::chrono::steady_clock::time_point deadline) {
     RecoveryResult result;const auto began=std::chrono::steady_clock::now();
-    const auto& start=q.start;const auto& goal=q.goal;const auto& obstacle=q.obstacle;
+    const auto& start=q.start;const auto& goal=q.goal;
     const double resolution_=q.resolution,corridor_edge_clearance_=q.clearance;
     const double w_clearance_=q.weight,clearance_sigma_=q.sigma;
     const int allocate_num_=q.allocate_num;
@@ -149,7 +156,9 @@ Astar::RecoveryResult Astar::evaluateGlobalReference(const GlobalReferenceQuery&
         return result;
     };
     if(!start.allFinite() || !goal.allFinite() ||
-       (!obstacle.empty() && !validRecoveryPolygon(obstacle)) || allocate_num_<2 || !std::isfinite(resolution_) || resolution_<.01 ||
+       q.obstacles.size()>ConvexCorridor::kMaxPedestrians ||
+       std::any_of(q.obstacles.begin(),q.obstacles.end(),[](const Poly& p){return !validRecoveryPolygon(p);}) ||
+       allocate_num_<2 || !std::isfinite(resolution_) || resolution_<.01 ||
        !origin_.allFinite() || !map_max_2d_.allFinite() || (map_max_2d_.array()<=origin_.array()).any() ||
        !std::isfinite(corridor_edge_clearance_) || corridor_edge_clearance_<0 ||
        !std::isfinite(w_clearance_) || w_clearance_<0 || !std::isfinite(clearance_sigma_) || clearance_sigma_<=0 ||
@@ -160,7 +169,7 @@ Astar::RecoveryResult Astar::evaluateGlobalReference(const GlobalReferenceQuery&
     // A spatial point reference; the current human-cane hull belongs to FIRI's
     // root constraint, and future hulls belong to timed pedestrian checks.
     GlobalGeometry geometry;geometry.local={V::Zero()};
-    geometry.obstacle=obstacle;geometry.deadline=deadline;
+    geometry.obstacles=q.obstacles;geometry.deadline=deadline;
     geometry.margin=corridor_edge_clearance_+resolution_; // routing room for the point reference
     // Search every selected-map bin, independent of any previous route/window.
     const V lower=origin_,upper=map_max_2d_;

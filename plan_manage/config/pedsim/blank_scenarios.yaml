@@ -1,0 +1,40 @@
+# Coordinates in the centered blank_world arena: walls at x/y = +/-15 m.
+# Robot poses are suggestions for RViz; the launcher never sends a hidden goal.
+headon:
+  start: [4.0, 0.0]
+  goal: [-6.0, 0.0]
+  initial_speed: 0.0
+  desired_max_speed: 0.5
+  robot_start: [-5.0, 0.0]
+  robot_goal: [5.0, 0.0]
+crossing:
+  start: [0.0, -3.0]
+  goal: [0.0, 6.0]
+  initial_speed: 0.0
+  desired_max_speed: 0.5
+  robot_start: [-5.0, 0.0]
+  robot_goal: [5.0, 0.0]
+overtake:
+  start: [-2.5, 0.0]
+  goal: [7.0, 0.0]
+  initial_speed: 0.0
+  desired_max_speed: 0.3
+  robot_start: [-5.0, 0.0]
+  robot_goal: [6.0, 0.0]
+
+# Independent goals and desired/max speeds; actual motion is social-force driven.
+crowd_2:
+  robot_start: [-5.0, 0.0]
+  robot_goal: [5.0, 0.0]
+  pedestrians:
+    - {start: [4.0, 0.0], goal: [-7.0, 0.0], desired_max_speed: 0.5}
+    - {start: [0.0, -3.0], goal: [0.0, 6.0], desired_max_speed: 0.45}
+crowd_5:
+  robot_start: [-5.0, 0.0]
+  robot_goal: [5.0, 0.0]
+  pedestrians:
+    - {start: [4.0, 0.0], goal: [-7.0, 0.0], desired_max_speed: 0.5}
+    - {start: [0.0, -3.0], goal: [0.0, 7.0], desired_max_speed: 0.45}
+    - {start: [2.0, 3.0], goal: [2.0, -7.0], desired_max_speed: 0.4}
+    - {start: [-1.0, -2.5], goal: [7.0, -2.5], desired_max_speed: 0.35}
+    - {start: [5.0, -2.0], goal: [-7.0, -2.0], desired_max_speed: 0.55}

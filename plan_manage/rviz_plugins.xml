@@ -5,4 +5,16 @@
   <class name="plan_manage/PlacePedestrian" type="cane_planner::PedestrianTool" base_class_type="rviz::Tool">
     <description>Click and drag to set the pedestrian start and heading (shortcut P).</description>
   </class>
+  <class name="plan_manage/SocialPedestrianPanel" type="cane_planner::SocialPedestrianPanel" base_class_type="rviz::Panel">
+    <description>Edit and persist up to five real pedsim social-force pedestrians.</description>
+  </class>
+  <class name="plan_manage/SocialStart" type="cane_planner::SocialStartTool" base_class_type="rviz::Tool">
+    <description>Place selected/new pedestrian start and heading (P).</description>
+  </class>
+  <class name="plan_manage/SocialGoal" type="cane_planner::SocialGoalTool" base_class_type="rviz::Tool">
+    <description>Place selected pedestrian target (K).</description>
+  </class>
+  <class name="plan_manage/SocialSelect" type="cane_planner::SocialSelectTool" base_class_type="rviz::Tool">
+    <description>Select a pedestrian on the map (U).</description>
+  </class>
 </library>

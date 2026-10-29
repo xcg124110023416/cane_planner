@@ -62,6 +62,14 @@ TEST(TimedPedestrianCollision, CircumscribedRobotAndMultipleObstacles) {
         EXPECT_NEAR(.25,std::abs(n.dot(robot[i])),1e-12);
     }
 }
+TEST(TimedPedestrianCollision, FifthPedestrianFutureContactCannotBeIgnored) {
+    Checker c;std::vector<Checker::Obstacle> people;
+    for(int i=0;i<4;++i)people.push_back({square(5+i,5),Eigen::Vector2d::Zero()});
+    people.push_back({square(0,2),Eigen::Vector2d(0,-1)});
+    ASSERT_TRUE(c.bind(people,.25));EXPECT_FALSE(c.intersects(Eigen::Vector2d::Zero(),0.));
+    EXPECT_TRUE(c.intersects(Eigen::Vector2d::Zero(),2.));
+    people.pop_back();ASSERT_TRUE(c.bind(people,.25));EXPECT_FALSE(c.intersects(Eigen::Vector2d::Zero(),2.));
+}
 TEST(TimedPedestrianCollision, CaneTipAndRotatingEnvelopeUseSameTime) {
     HumanCaneFootprint::Config config;config.enabled=true;Checker c;
     const auto footprint=HumanCaneFootprint::relative(config,0.);

@@ -1,0 +1,12 @@
+# select (id=0 to place a new person) | apply | delete | clear | reset | start | pause | load | export
+string command
+uint64 expected_revision
+uint32 selected_id
+plan_manage/SocialPedestrian pedestrian
+bool start_on_goal
+string scenario_yaml
+---
+bool success
+string message
+string scenario_yaml
+uint64 revision

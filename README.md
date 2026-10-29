@@ -50,7 +50,7 @@ flowchart LR
 ### 行人输入与适用范围
 
 - `use_pedestrians:=false` 为静态模式；启用后要求持续收到有效观测。
-- 当前 planner 3 支持每帧 **零或一个行人**。新鲜空帧有效；超过一个行人、数组不匹配、非有限数值、无效时间戳或缺失 TF 均视为输入无效。
+- 当前 planner 3 支持每帧 **零至五个行人**。新鲜空帧有效；超过五个行人、数组不匹配、非有限数值、无效时间戳或缺失 TF 均视为输入无效。
 - 规划坐标系为 `world`。外部观测按原始时间戳变换；默认最大观测与接收时效均为 **0.5 s**，计算结束、执行前仍需检查。
 - 行人约束使用 **LFPC 时间同步凸包碰撞检查**，当前帧动态空间走廊仍为必需约束。未来凸包按观测速度匀速平移；全局 A* 的当前凸包只用于搜索绕行方向，不能替代时间检查。历史时空走廊与多速度区间鲁棒设计没有接入。
 - 与行人的预测碰撞默认使用随 LFPC 躯干朝向旋转的完整人杖刚性包络，保留离散姿态与中间转角检查；尚不覆盖采样间连续运动、手杖独立摆动、行人加速度或转向。有限 MPPI 采样没有找到可行序列，不等于证明不存在可行路径。
@@ -150,22 +150,32 @@ roslaunch plan_manage sim_kin_replan.launch \
 
 中文面板依赖中文字体，包中已声明 `fonts-wqy-microhei` 运行依赖。若源码构建环境显示方框，安装该字体（`sudo apt install fonts-wqy-microhei`）后重启 RViz。
 
-`mixed` 等多行人场景保留给其他模式和历史实验，超出当前 planner 3 的单行人输入范围。确定性行人源、pedsim 桥接、Gazebo 真值桥接与实机检测器应按场景选择一个，避免向同一观测话题发布相互冲突的数据。
+`mixed` 等确定性多人配置保留作历史实验，planner 3 现在接受最多五人，但现有确定性面板仍只编辑单人。确定性行人源、pedsim 桥接、Gazebo 真值桥接与实机检测器应按场景选择一个，避免向同一观测话题发布相互冲突的数据。
 
 ### 可选 pedsim 场景
 
-pedsim 用于观察社会力模型下的单行人响应。需先在独立工作空间部署与 [upstream-manifest.json](plan_manage/config/pedsim/upstream-manifest.json) 匹配的补丁版本；普通上游安装或旧补丁版本不能直接替代。
+pedsim 用于观察社会力模型下的单人及多人响应（当前最多五人）。需先在独立工作空间部署与 [upstream-manifest.json](plan_manage/config/pedsim/upstream-manifest.json) 匹配的补丁版本；普通上游安装或旧补丁版本不能直接替代。
 
 部署说明见 [DEPLOYMENT.txt](plan_manage/config/pedsim/DEPLOYMENT.txt)，场景与整轮操作见 [USAGE.txt](plan_manage/config/pedsim/USAGE.txt)。入口脚本目前含本机工作空间路径，换环境时需先对齐脚本中的路径与依赖。
 
 ```bash
 bash "$(rospack find plan_manage)/scripts/start_pedsim_navigation.sh" \
-  start --scenario crossing
+  start --world blank --scenario crossing
 ```
 
-支持 `headon`、`overtake`、`crossing`。脚本生成场景并启动 planner 3、pedsim 和桥接，使用独立 ROS master，默认端口 `11551`。人的起点、目标和相遇时机仍由 RViz 操作决定。
+默认 `--world blank` 使用 pedsim 官方 `blank_world.xml` 的 30×30 m 场地，整体平移为 `[-15,15]²`，同一墙体生成行人场景和规划 PCD。规划器读取完整静态地图，仿真点云也使用同一份 PCD。`--world office` 保留办公室场景。普通 `sim_kin_replan.launch` 的默认地图仍为办公室。
 
-桥接等待导航目标和新鲜 LFPC 里程计后自动启动行人。`FAULT_RESTART_ROUND` 表示当前轮次已锁定故障，需在该入口终端用 Ctrl+C 结束整轮再重新启动；恢复输入或手动 unpause 不会清除故障。状态话题为 `/pedsim_single_bridge/status` 和 `/pedsim_simulator/guard_status`，在该轮次的 master 上查看。
+两种地图均支持 `headon`、`overtake`、`crossing`；空场地另有 `crowd_2`、`crowd_5` 多人场景。脚本生成场景并启动 planner 3、pedsim 和桥接，使用独立 ROS master，默认端口 `11551`。空场地的默认配置见 [blank_scenarios.yaml](plan_manage/config/pedsim/blank_scenarios.yaml)，办公室配置见 [scenarios.yaml](plan_manage/config/pedsim/scenarios.yaml)。新场地建议在 RViz 将机器人放在 `(-5,0)`，朝向 `+X`，终点设置为 `(5,0)`（超越场景为 `(6,0)`）；启动器只打印建议，不自动设置起终点。无人测试可加 `--no-rviz`。
+
+空场地使用专用“社会力行人”面板，可编辑零至五人。点“新增”，再用“行人起点”（P）在地图点击并拖拽设置起点/朝向，“行人终点”（K）设置目标，“选择行人”（U）或下拉框切换行人。面板设置期望速度和终点停止、返回起点后停止或持续往返；参考单程时间用于按朝向计算终点，实际到达时间由社会力运动决定。
+
+修改起终点、应用、增删或加载会把全部行人复位等待，机器人保持当前状态。“暂停行人”冻结行人并持续发布真实静止观测。“保存场景／加载场景”操作已应用的多人 YAML 配置；默认按预设场景分别记忆，下次启动恢复配置并复位等待。加 `--fresh-scene` 可忽略且不写自动记忆，回到 YAML 预设；`--editor-state-file PATH` 可指定独立记忆文件。办公室入口暂不支持交互编辑。详见 [社会力场景编辑说明](docs/development/operator-visualization/social-scene-editor.md) 与 [实施记录](docs/PEDSIM_IMPLEMENTATION_PROGRESS.md)。
+
+RViz 的 `MPC_ActiveCorridor` 同时显示规划端力估计：地图斥力为青色、机器人斥力为橙色、其他行人斥力为蓝色、合力为紫红色，观测速度为绿色；文字标记 `Planner force estimate`。这些力用于塑造规划凸包，pedsim 运动由其自身社会力驱动。人工计算范围的裁剪边缘不产生力，零向量不画箭头。
+
+桥接等待编辑器就绪、导航目标和新鲜 LFPC 里程计后释放仿真。空场地默认勾选“新机器人目标时复位并启动全部行人”；取消后应用，可手动开始／暂停行人。`FAULT_RESTART_ROUND` 表示当前轮次已锁定故障，需在该入口终端用 Ctrl+C 结束整轮再重新启动；恢复输入、编辑场景或手动 unpause 不会清除故障。状态话题为 `/pedsim_single_bridge/status` 和 `/pedsim_simulator/guard_status`，在该轮次的 master 上查看。
+
+同一轮可连续测试：到达后直接发送新目标，或重新用 `2D Pose Estimate` 放置机器人后再选目标。已放置的 LFPC 机器人在等待目标时持续发布当前位置和零速度，重新设置起点不会中断位姿心跳；未设置初始位姿时不生成机器人观测。
 
 ## Gazebo 与重定位仿真
 
@@ -186,7 +196,7 @@ roslaunch fast_lio_localization_qn sim_corridor_175_fastlio.launch rviz:=false
 
 `gazebo_localization_mpc.launch` 默认加载保存的 PCD 作为全局静态地图，局部 SDF 接收定位后的点云。地图路径可用 `static_map_pcd` 覆盖；默认文件依赖配套 FAST-LIO 工作空间。
 
-planner 3 下两个 Gazebo 入口默认关闭行人。仓库自带动态世界含多个行人，超出当前单行人范围；启用行人时还需提供匹配的有效观测源，单独打开动态世界不能代替观测输入。
+planner 3 下两个 Gazebo 入口默认关闭行人。仓库自带动态世界含多个行人，planner 3 每帧上限为五人；启用行人时还需提供匹配的有效观测源，单独打开动态世界不能代替观测输入。
 
 ## 实机接口现状
 

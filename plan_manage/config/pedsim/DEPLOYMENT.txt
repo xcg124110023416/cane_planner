@@ -2,6 +2,40 @@ For the normal single-entry workflow and owned-round reset, use USAGE.txt.
 The manual source/unpause commands below are low-level deployment/debug steps,
 not needed by start_pedsim_navigation.sh.
 
+CURRENT MULTI-PERSON AND SCENE EDITOR EXTENSION (2026-10-29)
+The current manifest includes pedestrian_speeds and guarded EditScene.srv.
+Reapply the complete patch to pristine pinned sources, not on top of an older
+patch; verify baseline and patched SHA256. The locally deployed workspace has
+been rebuilt for this version; no existing user nodes were restarted.
+pedestrian_speeds accepts one desired/max speed per ordinary pedestrian in XML
+agent order, up to five people, each finite and in (0,3] m/s. All values and the
+exact count are validated before any speed is applied. Initial velocity remains
+zero. Legacy single_pedestrian_speed remains available for one person; a nonempty
+array and a legacy override together are rejected. Explicit [] retains upstream
+speed initialization unless the legacy override is supplied. The normal launcher
+always supplies the scene's speed array. Guarded mode and the original robot
+freshness/paired-observation contract remain required for configured speeds.
+Planner 3 and the bridge now accept fresh zero-to-five-person batches; all people
+participate in A*, current-space corridors and CV timed SAT. The old node/launch
+names containing 'single' are retained for compatibility. Older validation notes
+below describe the original single-person deployment and historical candidates;
+current stage evidence is in docs/PEDSIM_IMPLEMENTATION_PROGRESS.md.
+
+Blank navigation enables enable_scene_editor. The patch now spans six files,
+including pedsim_srvs CMakeLists.txt/package.xml and new srv/EditScene.srv.
+baseline_sha256=null means the file must not exist in pristine pinned sources.
+Rebuild pedsim_srvs and pedsim_simulator together with catkin build. The main
+planner package remains buildable without this optional overlay; the editor
+Python node imports EditScene only when launched by the blank entry.
+The scene service supports state/replace/start/pause with expected_revision.
+Replace validates all people before changing anything and preserves the robot,
+walls and freshness latch; pause uses zero pedestrian speed, not global pause.
+Editor mode robot_input.child_frame_id is batch_nanoseconds:scene_revision;
+legacy mode retains batch_nanoseconds. The bridge excludes old-version batches
+after a new version arrives, keeps exact odom/TF evidence pairing, and never
+refresh-stamps old observations. Do not use a stage-3 bridge with this binary.
+The default blank entry waits for editor ready before first simulator release.
+
 Optional single-pedestrian pedsim validation
 ==========================================
 Planner baseline: 1d16286. Upstream: srl-freiburg/pedsim_ros revision
@@ -11,7 +45,8 @@ are unchanged. Use one source only; do not launch a detector/truth bridge too.
 
 UPSTREAM PREPARATION (dedicated source checkout, never modify an installed copy)
 1. Obtain the exact revision above in a dedicated catkin source workspace.
-2. Compare SHA256 of the three source files with upstream-manifest.json.
+2. Compare baseline SHA256 of every listed file with upstream-manifest.json
+   (a null baseline denotes a new file, which must be absent).
    Refuse any mismatch. Apply upstream-startup-guard.patch only after verifying.
    Example from that dedicated checkout:
      git apply --check /ABS/plan_manage/config/pedsim/upstream-startup-guard.patch
@@ -82,7 +117,8 @@ must both be true; do not bypass the guard through another simulator binary.
 Bridge likewise latches after dependency loss and suppresses output; planner
 expires last real observation and STOPs. Restart BOTH simulator and bridge to
 recover/reset; restore fresh user state, then unpause. New navigation goals do
-not reset pedsim. Missed interactions cannot be reconstructed by fresh stamping.
+not clear the guard. In blank editor mode new goals may reset the people only.
+Missed interactions cannot be reconstructed by fresh stamping.
 
 VERIFICATION AND LIMITS
 Fixed upstream unchanged build succeeded; patched build succeeded. Private

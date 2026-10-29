@@ -3,15 +3,27 @@
   "files": {
     "pedsim_simulator/src/simulator.cpp": {
       "baseline_sha256": "a3132016a625fba757f460dee0d97b8d1c89d8157dd26d92623ab66bf6735002",
-      "patched_sha256": "830f884595292f9e1707f542b4d610642de6c75942eef63ff7a306f538999e75"
+      "patched_sha256": "2973cc1a45f95f39bc05d994784a2fd0fb3927a271a39db33495ec60c8087a92"
     },
     "pedsim_simulator/include/pedsim_simulator/simulator.h": {
       "baseline_sha256": "59e765ec16a3e6c7f9621ffc35f9c9e631ac056019b5be64966fb12ff4000249",
-      "patched_sha256": "b1bcd335f031837dd166b71b04c300bc33b7b858b7e8ae294c4b06c479678d9f"
+      "patched_sha256": "d89685b0f219b58a965ccc24f793949c2ac71377b0960f71cb193b9dde4a179c"
     },
     "pedsim_simulator/include/pedsim_simulator/scene.h": {
       "baseline_sha256": "635143701ef83898a065d93fd2da86eaa4d073d6d166a9a5ff0cd343a8d99b93",
       "patched_sha256": "e81a87bfe4a0d632a835088d6de36f880bb9c1a0e691b0df7bdb49b01888bf07"
+    },
+    "pedsim_srvs/CMakeLists.txt": {
+      "baseline_sha256": "335ea55f3e5b0a15d0cde967299491e66be4ab86b9fb06995b21aa591f99ddd8",
+      "patched_sha256": "8b9ccb6b2a030bc50d6f209212c8d856a8cd22c50358d54950fe7609b83acf79"
+    },
+    "pedsim_srvs/package.xml": {
+      "baseline_sha256": "6c723dd55ad4631823ffe66c468df92a9bfbf75a3649025cdc27ce5c5ac82326",
+      "patched_sha256": "53bbe1552cefe1b7b60f668e1c2ca8be9581b5e89a61d9dd692b37924c5ff168"
+    },
+    "pedsim_srvs/srv/EditScene.srv": {
+      "baseline_sha256": null,
+      "patched_sha256": "f4c6127af09570463b4cbe816edbf1a9407fcd93f686f3d4945fdcaa6bd08181"
     }
   }
 }

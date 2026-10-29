@@ -9,11 +9,11 @@ double cross(const V& a,const V& b) { return a.x()*b.y()-a.y()*b.x(); }
 constexpr double pi = 3.14159265358979323846;
 }
 bool PedestrianPolygon::validConfig(const Config& c) {
-    for(double x:{c.safety_radius,c.body_margin,c.wall_gain,c.system_gain,c.decay_length,c.fov_amplification,
+    for(double x:{c.safety_radius,c.body_margin,c.wall_gain,c.system_gain,c.peer_gain,c.decay_length,c.fov_amplification,
                   c.alpha,c.max_force,c.max_extension,c.influence_distance,c.max_seconds})
         if(!std::isfinite(x))return false;
     return c.safety_radius>=.01 && c.safety_radius<=2. && c.body_margin>=0 && c.body_margin<=.5 && c.wall_gain>=0 && c.wall_gain<=20 &&
-        c.system_gain>=0 && c.system_gain<=20 && c.decay_length>=.01 && c.decay_length<=5 &&
+        c.system_gain>=0 && c.system_gain<=20 && c.peer_gain>=0 && c.peer_gain<=20 && c.decay_length>=.01 && c.decay_length<=5 &&
         c.fov_amplification>=1 && c.fov_amplification<=10 && c.alpha>=0 && c.alpha<=5 &&
         c.max_force>0 && c.max_force<=20 && c.max_extension>=0 && c.max_extension<=5 &&
         c.influence_distance>=.01 && c.influence_distance<=10 && c.max_seconds>0 && c.max_seconds<=.1;
@@ -60,30 +60,25 @@ PedestrianPolygon::Result PedestrianPolygon::fromForce(const Observation&o,const
     r.reason=r.valid?"OK":"INVALID_HULL";return r;
 }
 PedestrianPolygon::Result PedestrianPolygon::build(const Observation&o,const Eigen::Vector3d& system,
-                                                   const ConvexCorridor::Grid&g,const Config&c) {
+                                                   const ConvexCorridor::Grid&g,const Config&c,
+                                                   const std::vector<Observation>& neighbors) {
     Result invalid;invalid.reason="INVALID_FORCE_INPUT";
     if(!validConfig(c)||!validObservation(o)||!system.allFinite() ||
        !g.origin.allFinite()||!std::isfinite(g.resolution)||g.resolution<.01 ||
        g.width<=0||g.height<=0||g.width>10000||g.height>10000 ||
        g.resolution*std::max(g.width,g.height)>100 ||
        g.blocked.size()!=size_t(g.width)*size_t(g.height))return invalid;
+    if(neighbors.size()>=ConvexCorridor::kMaxPedestrians)return invalid;
+    for(const auto& other:neighbors)if(!validObservation(other))return invalid;
     const auto began=std::chrono::steady_clock::now();
     V away=V::Zero();double nearest=c.influence_distance;
-    auto consider=[&](const V& q,const V& inside_direction) {
+    auto consider=[&](const V& q) {
         const V d=o.position-q;const double length=d.norm();
-        if(length<nearest) {nearest=length;away=length>1e-9?V(d/length):inside_direction;}
+        if(length<nearest) {nearest=length;away=length>1e-9?V(d/length):V::Zero();}
     };
-    const V upper=g.origin+g.resolution*V(g.width,g.height);
-    // Finite cropped-domain exterior is blocked by the same model as FIRI.
-    const V clamped=o.position.cwiseMax(g.origin).cwiseMin(upper);
-    if(clamped!=o.position) {
-        const double distance=(clamped-o.position).norm();
-        if(distance<nearest){nearest=distance;away=(clamped-o.position)/distance;}
-    }
-    else {
-        consider(V(g.origin.x(),o.position.y()),V(1,0));consider(V(upper.x(),o.position.y()),V(-1,0));
-        consider(V(o.position.x(),g.origin.y()),V(0,1));consider(V(o.position.x(),upper.y()),V(0,-1));
-    }
+    // A computation crop is not a wall. Only occupied cells in the supplied
+    // map contribute repulsion, including when the pedestrian is outside it.
+    // FIRI independently keeps its conservative finite-domain constraints.
     for(int y=0;y<g.height;++y) {
         if(std::chrono::duration<double>(std::chrono::steady_clock::now()-began).count()>=c.max_seconds) {invalid.reason="FORCE_BUDGET";return invalid;}
         for(int x=0;x<g.width;++x) {
@@ -98,18 +93,38 @@ PedestrianPolygon::Result PedestrianPolygon::build(const Observation&o,const Eig
                     if(d<best){best=d;direction=n;}
                 }
                 if(best<nearest){nearest=best;away=direction;}
-            } else consider(q,V::Zero());
+            } else consider(q);
         }
     }
     const double ds=std::max(c.safety_radius,.5*o.full_size.norm());
     auto magnitude=[&](double gain,double distance) {return gain*std::exp(std::min(0.,(ds-distance)/c.decay_length));};
-    V force=magnitude(c.wall_gain,nearest)*away;
+    const V map_force=magnitude(c.wall_gain,nearest)*away;
+    V system_force=V::Zero();
     const V delta=o.position-system.head<2>();const double distance=delta.norm();
     if(distance<c.influence_distance && distance>1e-9) {
         double gain=c.system_gain;
         if(o.velocity.norm()>1e-6 && o.velocity.normalized().dot(-delta/distance)>=std::cos(110*pi/180.))gain*=c.fov_amplification;
-        force+=magnitude(gain,distance)*delta/distance;
+        system_force=magnitude(gain,distance)*delta/distance;
     }
-    return fromForce(o,force,c);
+    V peer_force=V::Zero();
+    for(const auto& other:neighbors) {
+        const V delta=o.position-other.position;const double distance=delta.norm();
+        // Coincident observations have no observable repulsion direction; body
+        // hulls still exclude their shared position from the spatial corridor.
+        if(distance>=c.influence_distance || distance<=1e-9)continue;
+        double gain=c.peer_gain;
+        if(o.velocity.norm()>1e-6 && o.velocity.normalized().dot(-delta/distance)>=std::cos(110*pi/180.))gain*=c.fov_amplification;
+        const double radii=.5*(o.full_size.norm()+other.full_size.norm());
+        peer_force+=gain*std::exp(std::min(0.,(radii-distance)/c.decay_length))*delta/distance;
+    }
+    const V force=map_force+system_force+peer_force;
+    auto result=fromForce(o,force,c);
+    if(result.valid) {
+        const double scale=force.norm()>c.max_force?c.max_force/force.norm():1.;
+        result.map_force=scale*map_force;
+        result.system_force=scale*system_force;
+        result.peer_force=scale*peer_force;
+    }
+    return result;
 }
 }

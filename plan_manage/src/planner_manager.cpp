@@ -293,6 +293,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             nh.param("pedestrian/body_margin",pedestrian_config_.body_margin,.03);
             nh.param("pedestrian/wall_gain", pedestrian_config_.wall_gain, 1.);
             nh.param("pedestrian/system_gain", pedestrian_config_.system_gain, 1.);
+            nh.param("pedestrian/peer_gain", pedestrian_config_.peer_gain, 1.);
             nh.param("pedestrian/decay_length", pedestrian_config_.decay_length, .5);
             nh.param("pedestrian/fov_amplification", pedestrian_config_.fov_amplification, 2.);
             nh.param("pedestrian/alpha", pedestrian_config_.alpha, .3);
@@ -1291,8 +1292,10 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             ROS_WARN_THROTTLE(1.0, "[StaticCorridor] grid unavailable: %s", reason.c_str());
         } else {
             grid.width = size.x(); grid.height = size.y();
-            if (pedestrians_enabled_) for (const auto& observation:pedestrian_observations_) {
-                const auto geometry=PedestrianPolygon::build(observation,current_pose,grid,pedestrian_config_);
+            if (pedestrians_enabled_) for (size_t i=0;i<pedestrian_observations_.size();++i) {
+                std::vector<PedestrianPolygon::Observation> neighbors;
+                for(size_t j=0;j<pedestrian_observations_.size();++j)if(j!=i)neighbors.push_back(pedestrian_observations_[j]);
+                const auto geometry=PedestrianPolygon::build(pedestrian_observations_[i],current_pose,grid,pedestrian_config_,neighbors);
                 if (!geometry.valid) {
                     pedestrian_data_reason_=geometry.reason;
                     pedestrian_geometry_.clear();
@@ -1432,7 +1435,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         }
         query.start=pose.head<2>();query.goal=end_pt_;
         const auto polygons=currentPedestrianPolygonsLocked(now);
-        if(!polygons.empty())query.obstacle=polygons.front();
+        query.obstacles=polygons;
         GlobalRouteResult metadata;metadata.revision=global_route_revision_;metadata.dynamic=pedestrians_enabled_;
         metadata.stamp=pedestrian_header_.stamp;metadata.receipt=pedestrian_receipt_;metadata.requested=now;
 #ifdef CANE_MANAGER_INTERLEAVING_TEST
@@ -1643,15 +1646,34 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         for(size_t i=0;i<pedestrian_geometry_.size() && i<pedestrian_observations_.size();++i) {
             const auto& observation=pedestrian_observations_[i];const auto& geometry=pedestrian_geometry_[i];
             const Eigen::Vector2d position=observation.position+observation.velocity*(corridor_geometry_epoch_-pedestrian_header_.stamp).toSec();
-            visualization_msgs::Marker force;force.header=clear.header;force.ns="mpc_pedestrian_force";force.id=i;
-            force.action=visualization_msgs::Marker::ADD;force.type=visualization_msgs::Marker::ARROW;
-            force.pose.orientation.w=1.;force.scale.x=.035;force.scale.y=.08;force.scale.z=.12;
-            force.color.r=1.;force.color.b=1.;force.color.a=.9;force.lifetime=ros::Duration(.3);
-            for(const Eigen::Vector2d point:{position,Eigen::Vector2d(position+.3*geometry.force)}) {
-                geometry_msgs::Point q;q.x=point.x();q.y=point.y();q.z=.3;force.points.push_back(q);
-            }
-            if(geometry.force.norm()>1e-9)markers.markers.push_back(force);
+            auto arrow=[&](const char* ns,const Eigen::Vector2d& value,double scale,double z,
+                           double red,double green,double blue) {
+                if(value.norm()<=1e-9)return;
+                visualization_msgs::Marker marker;marker.header=clear.header;marker.ns=ns;marker.id=i;
+                marker.action=visualization_msgs::Marker::ADD;marker.type=visualization_msgs::Marker::ARROW;
+                marker.pose.orientation.w=1.;marker.scale.x=.035;marker.scale.y=.08;marker.scale.z=.12;
+                marker.color.r=red;marker.color.g=green;marker.color.b=blue;marker.color.a=.9;
+                marker.lifetime=ros::Duration(.3);
+                for(const Eigen::Vector2d point:{position,Eigen::Vector2d(position+scale*value)}) {
+                    geometry_msgs::Point q;q.x=point.x();q.y=point.y();q.z=z;marker.points.push_back(q);
+                }
+                markers.markers.push_back(marker);
+            };
+            arrow("mpc_pedestrian_map_force",geometry.map_force,.3,.30,.1,.75,1.);
+            arrow("mpc_pedestrian_robot_force",geometry.system_force,.3,.34,1.,.55,0.);
+            arrow("mpc_pedestrian_peer_force",geometry.peer_force,.3,.36,.2,.3,1.);
+            arrow("mpc_pedestrian_force",geometry.force,.3,.38,1.,0.,1.);
+            arrow("mpc_pedestrian_velocity",observation.velocity,.8,.42,.1,1.,.2);
+            visualization_msgs::Marker label;label.header=clear.header;label.ns="mpc_pedestrian_force_label";label.id=i;
+            label.action=visualization_msgs::Marker::ADD;label.type=visualization_msgs::Marker::TEXT_VIEW_FACING;
+            label.pose.orientation.w=1.;label.pose.position.x=position.x();label.pose.position.y=position.y();label.pose.position.z=1.95;
+            label.scale.z=.13;label.color.r=label.color.g=label.color.b=label.color.a=1.;label.lifetime=ros::Duration(.3);
+            label.text="Planner force estimate #"+std::to_string(i+1)+"\nmap cyan | robot orange | peers blue\nsum magenta | velocity green";
+            markers.markers.push_back(label);
             if(observation.velocity.norm()>1e-6) {
+                visualization_msgs::Marker force;force.header=clear.header;force.id=i;
+                force.action=visualization_msgs::Marker::ADD;force.pose.orientation.w=1.;
+                force.color.r=1.;force.color.b=1.;force.lifetime=ros::Duration(.3);
                 force.ns="mpc_pedestrian_fov";force.type=visualization_msgs::Marker::LINE_STRIP;force.scale.x=.012;
                 force.points.clear();force.color.a=.45;
                 const double yaw=std::atan2(observation.velocity.y(),observation.velocity.x());
@@ -1970,10 +1992,13 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         publishTimedCollisionLocked(ros::Time::now(), false);
         if (!mpc_convex_corridor_pub_) return;
         visualization_msgs::MarkerArray markers;
-        for(const char* ns:{"mpc_pedestrian_body","mpc_pedestrian_social_hull","mpc_pedestrian_used_hull","mpc_pedestrian_force","mpc_pedestrian_fov"}) {
-            visualization_msgs::Marker marker;marker.header.frame_id="world";
-            marker.header.stamp=ros::Time::now();marker.ns=ns;marker.id=0;
-            marker.action=visualization_msgs::Marker::DELETE;markers.markers.push_back(marker);
+        for(const char* ns:{"mpc_pedestrian_body","mpc_pedestrian_social_hull","mpc_pedestrian_used_hull","mpc_pedestrian_force","mpc_pedestrian_fov",
+                            "mpc_pedestrian_map_force","mpc_pedestrian_robot_force","mpc_pedestrian_peer_force","mpc_pedestrian_velocity","mpc_pedestrian_force_label"}) {
+            for(size_t i=0;i<ConvexCorridor::kMaxPedestrians;++i) {
+                visualization_msgs::Marker marker;marker.header.frame_id="world";
+                marker.header.stamp=ros::Time::now();marker.ns=ns;marker.id=i;
+                marker.action=visualization_msgs::Marker::DELETE;markers.markers.push_back(marker);
+            }
         }
         mpc_convex_corridor_pub_.publish(markers);
     }
@@ -2074,7 +2099,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         pedestrian_observations_.clear(); pedestrian_geometry_.clear();
         pedestrian_positions_.clear(); pedestrian_velocities_.clear(); pedestrian_full_sizes_.clear();
         pedestrian_data_reason_ = "MALFORMED_FRAME";
-        if (msg->num > 1 || msg->position.size() != size_t(msg->num) ||
+        if (msg->num > ConvexCorridor::kMaxPedestrians || msg->position.size() != size_t(msg->num) ||
             msg->velocity.size() != size_t(msg->num) || msg->size.size() != size_t(msg->num)) return;
         if (msg->header.stamp.isZero() || msg->header.frame_id.empty() ||
             pedestrian_receipt_.isZero() || msg->header.stamp>pedestrian_receipt_ ||
@@ -2210,10 +2235,10 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             case WAIT_TARGET:
             {
                 std::lock_guard<std::mutex> lock(dynObsMutex_);
-                // LFPC is the lightweight plant authority. After arrival its
-                // stationary state remains real, even without another plan.
+                // A placed LFPC plant remains stationary and authoritative
+                // while waiting for a goal, including after another pose reset.
                 if (planner_==3 && simulation_ && !gazebo_sim_ &&
-                    have_odom_ && mpc_reached_goal_ && lfpc_model_ && !have_target_)
+                    have_odom_ && lfpc_model_ && !have_target_)
                     publishSimOdom(true);
                 if (!have_target_)
                     return;

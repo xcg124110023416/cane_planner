@@ -1,26 +1,23 @@
 --- a/pedsim_simulator/src/simulator.cpp
 +++ b/pedsim_simulator/src/simulator.cpp
-@@ -31,6 +31,9 @@
+@@ -31,5 +31,9 @@
 
  #include <QApplication>
++#include <pedsim_simulator/element/areawaypoint.h>
  #include <algorithm>
 +#include <sstream>
 +#include <iomanip>
 +#include <limits>
 
  #include <pedsim_simulator/element/agentcluster.h>
- #include <pedsim_simulator/scene.h>
-@@ -52,6 +55,8 @@
-   pub_agent_states_.shutdown();
+@@ -53,4 +57,6 @@
    pub_agent_groups_.shutdown();
    pub_robot_position_.shutdown();
 +  pub_robot_input_.shutdown();
 +  pub_guard_status_.shutdown();
    pub_waypoints_.shutdown();
 
-   srv_pause_simulation_.shutdown();
-@@ -127,7 +132,12 @@
-   nh_.param<std::string>("robot_base_frame_id", robot_base_frame_id_,
+@@ -128,5 +134,17 @@
        "base_footprint");
 
 -  paused_ = false;
@@ -30,34 +27,59 @@
 +    pub_robot_input_ = nh_.advertise<nav_msgs::Odometry>("robot_input", 10);
 +    pub_guard_status_ = nh_.advertise<std_msgs::String>("guard_status", 1, true);
 +  }
++  nh_.param<bool>("enable_scene_editor", scene_editor_enabled_, false);
++  if (scene_editor_enabled_) {
++    if (!require_fresh_robot_ || CONFIG.groups_enabled || !paused_) {
++      ROS_ERROR("Scene editor requires guarded, initially paused, ungrouped mode"); return false;
++    }
++    srv_edit_scene_ = nh_.advertiseService("edit_scene", &Simulator::editScene, this);
++  }
 
    spawn_timer_ =
-       nh_.createTimer(ros::Duration(spawn_period), &Simulator::spawnCallback, this);
-@@ -138,6 +148,22 @@
- void Simulator::runSimulation() {
+@@ -139,4 +157,42 @@
    ros::Rate r(CONFIG.updateRate);
 
 +  if (require_fresh_robot_) SCENE.dissolveClusters(); // instantiate robot without integrating agents
 +  double single_speed;
 +  nh_.param<double>("single_pedestrian_speed", single_speed, -1.);
-+  if (single_speed != -1.) {
-+    if (!require_fresh_robot_ || !std::isfinite(single_speed) || single_speed <= 0. || single_speed > 3.) {
-+      ROS_ERROR("Invalid single_pedestrian_speed or missing guarded mode"); return;
++  XmlRpc::XmlRpcValue configured_speeds;
++  std::vector<double> speeds;
++  if (nh_.getParam("pedestrian_speeds", configured_speeds)) {
++    if (configured_speeds.getType() != XmlRpc::XmlRpcValue::TypeArray || configured_speeds.size() > 5) {
++      ROS_ERROR("pedestrian_speeds must be an array of at most five values"); return;
 +    }
-+    Agent* pedestrian = nullptr;
++    for (int i = 0; i < configured_speeds.size(); ++i) {
++      const auto type = configured_speeds[i].getType();
++      if (type != XmlRpc::XmlRpcValue::TypeDouble && type != XmlRpc::XmlRpcValue::TypeInt) {
++        ROS_ERROR("pedestrian_speeds requires numeric values"); return;
++      }
++      speeds.push_back(type == XmlRpc::XmlRpcValue::TypeInt ? double(int(configured_speeds[i])) : double(configured_speeds[i]));
++    }
++  }
++  if (!speeds.empty() && single_speed != -1.) {
++    ROS_ERROR("Use either pedestrian_speeds or single_pedestrian_speed"); return;
++  }
++  if (single_speed != -1.) speeds.push_back(single_speed);
++  if (!speeds.empty()) {
++    if (!require_fresh_robot_) { ROS_ERROR("Pedestrian speeds require guarded mode"); return; }
++    for (double speed : speeds) if (!std::isfinite(speed) || speed <= 0. || speed > 3.) {
++      ROS_ERROR("Pedestrian desired/max speeds must be in (0,3] m/s"); return;
++    }
++    std::vector<Agent*> pedestrians;
 +    for (Agent* a : SCENE.getAgents()) if (a->getType() != Ped::Tagent::ROBOT) {
-+      if (pedestrian || a->getType() != Ped::Tagent::ADULT) { ROS_ERROR("Speed setting requires one ordinary pedestrian"); return; }
-+      pedestrian = a;
++      if (a->getType() != Ped::Tagent::ADULT) { ROS_ERROR("Speeds require ordinary pedestrians"); return; }
++      pedestrians.push_back(a);
 +    }
-+    if (!pedestrian) { ROS_ERROR("Missing single pedestrian"); return; }
-+    pedestrian->setVmax(single_speed);
-+    ROS_INFO_STREAM("Single pedestrian desired/max speed=" << single_speed << " m/s; initial speed=0");
++    if (pedestrians.size() != speeds.size()) { ROS_ERROR("Pedestrian speed count mismatch"); return; }
++    // Scene insertion order follows the XML agent elements; validate all before applying.
++    for (size_t i = 0; i < speeds.size(); ++i) {
++      pedestrians[i]->setVmax(speeds[i]);
++      ROS_INFO_STREAM("Pedestrian " << i << " desired/max speed=" << speeds[i] << " m/s; initial speed=0");
++    }
 +  }
    while (ros::ok()) {
      if (!robot_) {
-       // setup the robot
-@@ -150,8 +176,10 @@
-       }
+@@ -151,6 +207,9 @@
      }
 
 -    if (!paused_) {
@@ -65,11 +87,10 @@
 +    if (!paused_ && input_ready) {
        updateRobotPositionFromTF();
 +      if (require_fresh_robot_) robot_started_ = true;
++      if (scene_editor_enabled_) advanceEditedPedestrians();
        SCENE.moveAllAgents();
 
-       publishAgents();
-@@ -218,6 +246,58 @@
-   }
+@@ -219,4 +278,56 @@
  }
 
 +// Status updates are latched and emitted on transition only, never every cycle.
@@ -126,9 +147,7 @@
 +
  void Simulator::updateRobotPositionFromTF() {
    if (!robot_) return;
-
-@@ -229,7 +309,8 @@
-     // Get robot position via TF
+@@ -230,5 +341,6 @@
      tf::StampedTransform tfTransform;
      try {
 -      transform_listener_->lookupTransform(frame_id_, robot_base_frame_id_,
@@ -136,9 +155,14 @@
 +      else transform_listener_->lookupTransform(frame_id_, robot_base_frame_id_,
                                             ros::Time(0), tfTransform);
      } catch (tf::TransformException& e) {
-       ROS_WARN_STREAM_THROTTLE(
-@@ -345,6 +426,16 @@
-     all_status.agent_states.push_back(state);
+@@ -289,5 +401,5 @@
+
+ void Simulator::publishAgents() {
+-  if (SCENE.getAgents().size() < 2) {
++  if (SCENE.getAgents().size() < 2 && !require_fresh_robot_) {
+     return;
+   }
+@@ -346,4 +458,15 @@
    }
 
 +  if (require_fresh_robot_) {
@@ -148,23 +172,128 @@
 +    input.header.frame_id = frame_id_;
 +    input.header.stamp = guarded_robot_transform_.stamp_;
 +    input.child_frame_id = std::to_string(all_status.header.stamp.toNSec());
++    if (scene_editor_enabled_) input.child_frame_id += ":" + std::to_string(scene_revision_);
 +    tf::poseTFToMsg(guarded_robot_transform_, input.pose.pose);
 +    pub_robot_input_.publish(input);
 +  }
    pub_agent_states_.publish(all_status);
  }
-
+@@ -441,2 +564,95 @@
+   return msg_header;
+ }
++
++bool Simulator::editScene(pedsim_srvs::EditScene::Request& request,
++                          pedsim_srvs::EditScene::Response& response) {
++  auto snapshot = [&]() {
++    response.revision = scene_revision_;
++    response.running = scene_editor_running_ && !paused_ && !robot_failed_;
++    for (const auto& person : edited_pedestrians_) {
++      response.agent_ids.push_back(person.agent->getId());
++      geometry_msgs::Pose2D pose;
++      pose.x = person.agent->getx(); pose.y = person.agent->gety();
++      pose.theta = std::hypot(person.agent->getvx(), person.agent->getvy()) > 1e-6 ?
++          std::atan2(person.agent->getvy(), person.agent->getvx()) : person.start.theta;
++      response.poses.push_back(pose);
++      response.phases.push_back(!scene_editor_running_ && person.phase != "finished" && person.phase != "waiting" ? "paused" : person.phase);
++    }
++  };
++  auto reject = [&](const std::string& message) {
++    response.success = false; response.message = message; snapshot(); return true;
++  };
++  if (!scene_editor_enabled_) return reject("Scene editor disabled");
++  if (request.command == "state") {
++    if (robot_failed_) return reject("Robot input fault: restart this round");
++    response.success = true; snapshot(); return true;
++  }
++  // No command is allowed to clear the existing freshness latch.
++  if (robot_failed_) return reject("Robot input fault: restart this round");
++  if (request.expected_revision != scene_revision_) return reject("Scene revision changed; refresh before editing");
++  if (request.command == "replace") {
++    const size_t count = request.starts.size();
++    if (count > 5 || request.goals.size() != count || request.desired_speeds.size() != count || request.end_behaviors.size() != count)
++      return reject("Scene arrays must match and contain at most five people");
++    for (size_t i = 0; i < count; ++i) {
++      const auto& start = request.starts[i]; const auto& goal = request.goals[i];
++      const double speed = request.desired_speeds[i]; const auto& behavior = request.end_behaviors[i];
++      for (double coordinate : {start.x, start.y, goal.x, goal.y})
++        if (!std::isfinite(coordinate) || std::abs(coordinate) >= 14.5) return reject("Endpoint outside blank arena clearance");
++      if (!std::isfinite(start.theta) || !std::isfinite(goal.z) || std::abs(goal.z) > 1e-6 ||
++          !std::isfinite(speed) || speed < 0. || speed > 3. ||
++          (speed > 0. && std::hypot(start.x-goal.x, start.y-goal.y) <= .4) ||
++          (behavior != "stop" && behavior != "return" && behavior != "repeat")) return reject("Invalid pedestrian settings");
++      for (size_t j = 0; j < i; ++j)
++        if (std::hypot(start.x-request.starts[j].x, start.y-request.starts[j].y) < .55)
++          return reject("Pedestrian starts must be at least 0.55 m apart");
++    }
++    // Ordinary agents are removed from the neighbor tree before deletion. Walls
++    // and the externally controlled robot, including its guard history, survive.
++    const auto old_agents = SCENE.getAgents();
++    for (Agent* agent : old_agents) if (agent->getType() != Ped::Tagent::ROBOT) {
++      AgentStateMachine* state_machine = agent->getStateMachine();
++      SCENE.removeAgent(agent); delete state_machine; // upstream Agent does not own-delete this object
++    }
++    edited_pedestrians_.clear();
++    const auto old_waypoints = SCENE.getWaypoints();
++    for (Waypoint* waypoint : old_waypoints) SCENE.removeWaypoint(waypoint);
++    ++scene_revision_; scene_editor_running_ = false;
++    for (size_t i = 0; i < count; ++i) {
++      const auto& start = request.starts[i]; const auto& goal = request.goals[i];
++      auto* waypoint = new AreaWaypoint(QString("editor_%1_%2").arg(qulonglong(scene_revision_)).arg(qulonglong(i)), goal.x, goal.y, .2);
++      SCENE.addWaypoint(waypoint);
++      auto* agent = new Agent(); agent->setPosition(start.x, start.y);
++      agent->setvx(0.); agent->setvy(0.); agent->setVmax(0.); agent->addWaypoint(waypoint);
++      SCENE.addAgent(agent);
++      edited_pedestrians_.push_back({agent, waypoint, start, goal, request.desired_speeds[i], request.end_behaviors[i], "waiting"});
++    }
++  } else if (request.command == "start" || request.command == "pause") {
++    ++scene_revision_; scene_editor_running_ = request.command == "start";
++    for (auto& person : edited_pedestrians_) {
++      if (scene_editor_running_ && person.phase == "waiting") person.phase = "walking";
++      if (!scene_editor_running_) { person.agent->setVmax(0.); person.agent->setvx(0.); person.agent->setvy(0.); }
++    }
++  } else return reject("Unknown scene command");
++  response.success = true; response.message = "OK"; snapshot(); return true;
++}
++
++void Simulator::advanceEditedPedestrians() {
++  for (auto& person : edited_pedestrians_) {
++    if (scene_editor_running_ && person.phase != "finished") {
++      const bool returning = person.phase == "returning";
++      const double x = returning ? person.start.x : person.goal.x;
++      const double y = returning ? person.start.y : person.goal.y;
++      if (std::hypot(person.agent->getx()-x, person.agent->gety()-y) <= .2) {
++        if (person.behavior == "repeat" || (person.behavior == "return" && !returning)) {
++          person.phase = returning ? "walking" : "returning";
++          person.waypoint->setPosition(returning ? person.goal.x : person.start.x,
++                                       returning ? person.goal.y : person.start.y);
++        } else person.phase = "finished";
++      }
++    }
++    const bool moving = scene_editor_running_ && person.phase != "finished";
++    person.agent->setVmax(moving ? person.speed : 0.);
++    if (!moving) { person.agent->setvx(0.); person.agent->setvy(0.); }
++  }
++}
 --- a/pedsim_simulator/include/pedsim_simulator/simulator.h
 +++ b/pedsim_simulator/include/pedsim_simulator/simulator.h
-@@ -54,6 +54,7 @@
- #include <geometry_msgs/TwistWithCovariance.h>
+@@ -48,4 +48,5 @@
+ #include <pedsim_msgs/Waypoint.h>
+ #include <pedsim_msgs/Waypoints.h>
++#include <pedsim_srvs/EditScene.h>
+
+ #include <geometry_msgs/Point.h>
+@@ -55,4 +56,5 @@
  #include <nav_msgs/Odometry.h>
  #include <std_msgs/Header.h>
 +#include <std_msgs/String.h>
  #include <std_srvs/Empty.h>
 
- #include <pedsim_simulator/agentstatemachine.h>
-@@ -105,6 +106,16 @@
+@@ -102,9 +104,33 @@
+   void publishRobotPosition();
+   void publishWaypoints();
++  bool editScene(pedsim_srvs::EditScene::Request&, pedsim_srvs::EditScene::Response&);
++  void advanceEditedPedestrians();
+
   private:
    ros::NodeHandle nh_;
    bool paused_;
@@ -179,20 +308,29 @@
 +  bool robotInputReady();
 +  tf::StampedTransform guarded_robot_transform_;
    ros::Timer spawn_timer_;
++  bool scene_editor_enabled_ = false, scene_editor_running_ = false;
++  uint64_t scene_revision_ = 0;
++  ros::ServiceServer srv_edit_scene_;
++  struct EditedPedestrian {
++    Agent* agent;
++    Waypoint* waypoint;
++    geometry_msgs::Pose2D start;
++    geometry_msgs::Point goal;
++    double speed;
++    std::string behavior, phase;
++  };
++  std::vector<EditedPedestrian> edited_pedestrians_;
 
    // publishers
-@@ -112,6 +123,7 @@
-   ros::Publisher pub_agent_states_;
+@@ -113,4 +139,5 @@
    ros::Publisher pub_agent_groups_;
    ros::Publisher pub_robot_position_;
 +  ros::Publisher pub_robot_input_;
    ros::Publisher pub_waypoints_;
 
-   // provided services
 --- a/pedsim_simulator/include/pedsim_simulator/scene.h
 +++ b/pedsim_simulator/include/pedsim_simulator/scene.h
-@@ -61,7 +61,9 @@
-       : x{xx}, y{yy}, n{nn}, dx{dxi}, dy{dyi} {}
+@@ -62,5 +62,7 @@
  };
 
 +class Simulator;
@@ -200,4 +338,50 @@
 +  friend class Simulator;
    Q_OBJECT
 
-  public:
+--- a/pedsim_srvs/CMakeLists.txt
++++ b/pedsim_srvs/CMakeLists.txt
+@@ -6,4 +6,5 @@
+     pedsim_msgs
+     std_msgs
++    geometry_msgs
+ )
+
+@@ -24,4 +25,5 @@
+   GetAgentState.srv
+   SetAllAgentsState.srv
++  EditScene.srv
+   GetAllAgentsState.srv
+ )
+--- a/pedsim_srvs/package.xml
++++ b/pedsim_srvs/package.xml
+@@ -13,4 +13,5 @@
+
+   <build_depend>pedsim_msgs</build_depend>
++  <build_depend>geometry_msgs</build_depend>
+   <build_depend>roscpp</build_depend>
+   <build_depend>rospy</build_depend>
+@@ -20,4 +21,5 @@
+   <run_depend>message_runtime</run_depend>
+   <run_depend>pedsim_msgs</run_depend>
++  <run_depend>geometry_msgs</run_depend>
+   <run_depend>roscpp</run_depend>
+   <run_depend>rospy</run_depend>
+--- /dev/null
++++ b/pedsim_srvs/srv/EditScene.srv
+@@ -0,0 +1,16 @@
++# Guarded blank-arena editor. Replace resets all pedestrians and waits.
++# state | replace | start | pause
++string command
++uint64 expected_revision
++geometry_msgs/Pose2D[] starts
++geometry_msgs/Point[] goals
++float64[] desired_speeds
++string[] end_behaviors
++---
++bool success
++string message
++uint64 revision
++int64[] agent_ids
++geometry_msgs/Pose2D[] poses
++string[] phases
++bool running

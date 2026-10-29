@@ -12,6 +12,7 @@ There is no web frontend in this repository. Operator-facing work belongs in RVi
 | [Markers and topic contracts](./markers-and-topics.md) | Paths, point clouds, markers, obstacles, and goal topics |
 | [Operator verification](./operator-verification.md) | Simulation, RViz inspection, and visualization quality |
 | [Pedestrian editor](./pedestrian-editor.md) | Single-pedestrian RViz panel, placement tool, and simulator control |
+| [Social-force scene editor](./social-scene-editor.md) | Real pedsim multi-person editing, pause, persistence and scene revisions |
 
 ## Operator interaction
 

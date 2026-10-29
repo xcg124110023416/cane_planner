@@ -31,8 +31,8 @@ find_package(catkin REQUIRED COMPONENTS
 find_package(Qt5 REQUIRED COMPONENTS Widgets)
 find_library(RVIZ_DEFAULT_PLUGIN_LIBRARY rviz_default_plugin HINTS ${rviz_LIBRARY_DIRS})
 catkin_python_setup()
-add_message_files(FILES PedestrianState.msg)
-add_service_files(FILES ControlPedestrian.srv)
+add_message_files(FILES PedestrianState.msg SocialPedestrian.msg SocialSceneState.msg)
+add_service_files(FILES ControlPedestrian.srv ControlSocialScene.srv)
 generate_messages(DEPENDENCIES std_msgs geometry_msgs)
 
 # 2. 传递 PCL 的编译器宏定义（可选，防患未然）
@@ -87,7 +87,9 @@ target_link_libraries(kin_replan_node
 add_library(pedestrian_panel
   src/pedestrian_panel.cpp
   src/pedestrian_tool.cpp
+  src/social_pedestrian_panel.cpp
   include/plan_manage/pedestrian_panel.h
+  include/plan_manage/social_pedestrian_panel.h
 )
 set_target_properties(pedestrian_panel PROPERTIES AUTOMOC ON)
 add_dependencies(pedestrian_panel ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
@@ -96,7 +98,15 @@ target_link_libraries(pedestrian_panel ${catkin_LIBRARIES} ${RVIZ_DEFAULT_PLUGIN
 
 if(CATKIN_ENABLE_TESTING)
   catkin_add_nosetests(test/test_pedestrian_motion.py)
+  catkin_add_nosetests(test/test_pedsim_blank.py)
+  catkin_add_nosetests(test/test_social_scene.py)
   find_package(rostest REQUIRED)
+  # Optional real-pedsim test; pedsim_scene_smoke.py supplies the owned master.
+  catkin_add_executable_with_gtest(test_social_pedestrian_panel test/test_social_pedestrian_panel.cpp)
+  if(TARGET test_social_pedestrian_panel)
+    add_dependencies(test_social_pedestrian_panel pedestrian_panel ${${PROJECT_NAME}_EXPORTED_TARGETS})
+    target_link_libraries(test_social_pedestrian_panel ${catkin_LIBRARIES} Qt5::Widgets)
+  endif()
   add_rostest(test/pedestrian_editor.test)
   add_rostest(test/pedestrian_persistence.test)
   add_rostest_gtest(test_pedestrian_panel test/pedestrian_panel.test test/test_pedestrian_panel.cpp)
@@ -135,7 +145,9 @@ install(DIRECTORY launch urdf worlds scripts config maps models plugins
 catkin_install_python(PROGRAMS
   scripts/pedsim_round.py
   scripts/pedsim_single_bridge.py
+  scripts/pedsim_scene_editor.py
   scripts/export_pedsim_office.py
+  scripts/export_pedsim_blank.py
   scripts/pedestrian_sim.py
   scripts/cmd_vel_to_state.py
   scripts/imu_from_state.py

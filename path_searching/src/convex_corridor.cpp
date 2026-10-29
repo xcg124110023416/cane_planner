@@ -13,6 +13,7 @@
 #include <iomanip>
 #include <sstream>
 namespace cane_planner {
+constexpr size_t ConvexCorridor::kMaxPedestrians;
 namespace {
 using V = Eigen::Vector2d;
 using M = Eigen::Matrix2d;
@@ -472,7 +473,7 @@ ConvexCorridor::Result ConvexCorridor::build(const Poly&path,const Grid&grid,con
         for(size_t i=0;i<path.size();++i){require(path[i].allFinite(),FailureReason::INVALID_INPUT);require(path[i].cwiseAbs().maxCoeff()<=1e4,FailureReason::UNSUPPORTED_SCALE);
             if(i){double d=(path[i]-path[i-1]).norm();require(d>=1e-9,FailureReason::DEGENERATE_PATH);arc.push_back(arc.back()+d);}}
         end=began+std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(c.max_seconds));
-        require(dynamic.size()<=1,FailureReason::DYNAMIC_DATA_INVALID);
+        require(dynamic.size()<=kMaxPedestrians,FailureReason::DYNAMIC_DATA_INVALID);
         for(const auto& polygon:dynamic) {
             require(polygon.size()>=3 && polygon.size()<=32,FailureReason::DYNAMIC_DATA_INVALID);
             for(const auto& p:polygon)require(p.allFinite() && p.cwiseAbs().maxCoeff()<=1e4 &&
