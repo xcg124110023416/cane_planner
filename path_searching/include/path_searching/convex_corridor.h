@@ -61,6 +61,9 @@ public:
         Diagnostics diagnostics;
         std::vector<Segment> segments;
         bool feasible = false;
+        bool complete = false;
+        double covered_length = 0.;
+        FailureReason truncation_reason = FailureReason::NONE;
         bool has_dynamic_input = false; // static-only snapshot capture must reject
         FailureReason failure_reason = FailureReason::NONE;
         int failure_segment_index = -1;
@@ -85,9 +88,16 @@ public:
     using Polygon = std::vector<Eigen::Vector2d>;
     Result buildStatic(const std::vector<Eigen::Vector2d>&, const Grid&,
                        const std::vector<Polygon>& dynamic_polygons = {}) const;
+    // Adaptive mode may retain a freshly certified connected prefix when a
+    // farther geometric obstruction prevents full coverage. Callers must still
+    // validate their entire local trajectory inside the returned regions.
+    Result buildPrefix(const std::vector<Eigen::Vector2d>&, const Grid&,
+                       const std::vector<Polygon>& dynamic_polygons = {}) const;
     void setConfig(const Config& c) { cfg_ = c; }
     const Config& getConfig() const { return cfg_; }
 private:
+    Result build(const std::vector<Eigen::Vector2d>&, const Grid&,
+                 const std::vector<Polygon>&, bool allow_prefix) const;
     Config cfg_;
 };
 }

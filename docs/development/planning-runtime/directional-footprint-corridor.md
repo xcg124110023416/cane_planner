@@ -29,7 +29,11 @@ The spatial corridor has no time dimension.
 Adaptive inflation protects a bounded forward portion of the original COM
 polyline. Retain both endpoints of each intersected original edge and intermediate
 corners, never a chord shortcut. The prefix length is capped by
-min(max_segment_length, local_radius/2), truncated to the remaining route. Include
+min(max_segment_length, local_radius/2), truncated to the remaining route. If the
+whole protected interval cannot be geometrically separated, halve it down to the
+remaining current original straight edge before rejecting. A free bent polyline
+does not imply its convex hull is free. Never shorten away the actual root hull,
+ change clearance, or recover invalid/budget failures this way. Include
 the actual hull only in the first region's protected set. Analytically clip the
 point polyline against the resulting halfspaces and advance to before its first
 coverage exit (up to .25 m overlap). Require progress, original-path coverage,
@@ -37,6 +41,18 @@ positive-interior joins, deadlines and raw region cap. Legacy per-edge mode also
 protects the actual hull only at the first seed. Snapshot v3 continues to record
 sampling mode, physical dimensions, enable and root yaw; old snapshots are replayed
 with current algorithm semantics, not a frozen historical generator.
+
+`buildStatic` requires complete coverage. `buildPrefix` in adaptive mode may
+retain an already generated connected prefix on a geometric suffix failure
+(reference occupied, geometric output certificate, no progress or no overlap).
+This only retains regions generated before the failed suffix; if the first region
+fails, no prefix is returned. Re-certify original-path
+coverage from zero to `covered_length` and all positive-interior joins. Input,
+Input, scale, numerical and deadline failures remain unusable. A feasible prefix
+reports `complete=false`, `failure_reason=NONE`, and `truncation_reason`;
+its retained failure location/diagnostics describe the omitted suffix. MPPI must
+still validate its complete configured horizon in the returned corridor; never
+shorten the optimization horizon or admit unchecked remaining states.
 
 MPPI checks COM containment in the corridor and static traversability of COM and
 support foot. Future full envelopes do NOT have to fit one common region and are

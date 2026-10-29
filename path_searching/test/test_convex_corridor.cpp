@@ -16,6 +16,31 @@ TEST(Firi, CellCrossingNotCenter) {auto g=grid();g.blocked[8*48+20]=1;auto r=run
 TEST(Firi, UnknownAndMapEdge) {auto g=grid();for(int y=0;y<24;++y)g.blocked[y*48+20]=255;EXPECT_FALSE(run({V(1,3),V(11,3)},g).feasible);for(auto&p:std::vector<Path>{{V(-.1,1),V(3,1)},{V(1,1),V(13,1)},{V(0,1),V(1,1)}})EXPECT_FALSE(run(p,grid()).feasible);}
 TEST(Firi, InvalidAndBudgets) {for(auto&p:std::vector<Path>{{},{V(1,1)},{V(1,1),V(1,1)},{V(1,1),V(NAN,2)}})EXPECT_FALSE(run(p,grid()).feasible);C::Config c;c.max_regions=1;EXPECT_EQ(run({V(1,3),V(11,3)},grid(),c).failure_reason,C::FailureReason::BUDGET);c=C::Config();c.max_seconds=1e-12;EXPECT_EQ(run({V(1,3),V(11,3)},grid(),c).failure_reason,C::FailureReason::BUDGET);c=C::Config();c.max_segment_length=10;EXPECT_EQ(run({V(1,3),V(11,3)},grid(),c).failure_reason,C::FailureReason::INVALID_INPUT);c=C::Config();c.optimizer_iterations=1;EXPECT_FALSE(run({V(1,3),V(11,3)},grid(),c).feasible);}
 TEST(Firi, NoCutCornerGap) {auto g=grid();g.blocked[8*48+20]=1;EXPECT_FALSE(run({V(1,2.02),V(11,2.02),V(1,2.02)},g).feasible);}
+TEST(FiriAdaptive, FreeDetourDoesNotRequireOneConvexSeedAcrossCorner) {
+    const Path path{V(2.8,3.3),V(3.3,3.3),V(3.3,2.8),V(4,2.8)};
+    const Path obstacle{V(3,3),V(3.25,3),V(3.25,3.25),V(3,3.25)};
+    for(bool dynamic:{false,true}) {
+        auto g=grid();if(!dynamic)g.blocked[12*48+12]=1;
+        C generator;C::Config cfg;
+        const std::vector<Path> polygons=dynamic?std::vector<Path>{obstacle}:std::vector<Path>{};
+        generator.setConfig(cfg);ASSERT_TRUE(generator.buildStatic(path,g,polygons).feasible);
+        cfg.adaptive_sampling=true;generator.setConfig(cfg);
+        const auto result=generator.buildStatic(path,g,polygons);
+        ASSERT_TRUE(result.feasible)<<dynamic<<" "<<C::failureReasonName(result.failure_reason);
+        for(size_t i=1;i<path.size();++i)for(int j=0;j<=100;++j) {
+            const V p=path[i-1]+(j/100.)*(path[i]-path[i-1]);
+            EXPECT_TRUE(std::any_of(result.segments.begin(),result.segments.end(),[&](const C::Segment& s){return C::contains(s,p);}));
+        }
+        for(const auto& s:result.segments) {
+            bool separated=false;
+            for(const auto& h:s.halfspaces) {
+                double gap=1e9;for(const auto& p:obstacle)gap=std::min(gap,h.normal.dot(p)-h.offset);
+                separated=separated || gap>=cfg.clearance-1e-7;
+            }
+            EXPECT_TRUE(separated);
+        }
+    }
+}
 TEST(Firi, TranslationAndAreaThreshold) {auto base=run({V(1,3),V(11,3)},grid());good(base);for(double o:{-9000.,9000.}){auto r=run({V(1+o,3+o),V(11+o,3+o)},grid(o));good(r);EXPECT_EQ(r.segments.size(),base.segments.size());EXPECT_NEAR(r.min_overlap_area,base.min_overlap_area,1e-6);}for(double o:{0.,9000.,1e9}){Path v{V(o,o),V(o+3.098,o),V(o+3.098,o+5.996),V(o,o+5.996)};EXPECT_NEAR(C::polygonArea(v),3.098*5.996,2e-6);EXPECT_EQ(C::polygonArea({V(o,o),V(o+1,o+1),V(o+2,o+2)}),0.);}}
 TEST(Firi, ScaleEnvelope) {EXPECT_EQ(run({V(1e9+1,1e9+3),V(1e9+11,1e9+3)},grid(1e9)).failure_reason,C::FailureReason::UNSUPPORTED_SCALE);auto g=grid();g.resolution=.001;EXPECT_EQ(run({V(1,1),V(2,1)},g).failure_reason,C::FailureReason::UNSUPPORTED_SCALE);}
 
@@ -41,6 +66,37 @@ TEST(Firi, DensePathBudgetRemainsBounded) {
     Path path;for(int i=0;i<=500;++i)path.push_back(V(1+i*.02,3));
     const auto r=run(path,grid());EXPECT_FALSE(r.feasible);
     EXPECT_EQ(r.failure_reason,C::FailureReason::BUDGET);EXPECT_TRUE(r.segments.empty());
+}
+TEST(FiriAdaptive, FarObstructionRetainsOnlyCertifiedPrefix) {
+    const Path path{V(1,3.1),V(11,3.1)};
+    const Path obstacle{V(7,3),V(7.25,3),V(7.25,3.25),V(7,3.25)};
+    for(bool dynamic:{false,true}) {
+        auto g=grid();if(!dynamic)g.blocked[12*48+28]=1;
+        const std::vector<Path> polygons=dynamic?std::vector<Path>{obstacle}:std::vector<Path>{};
+        C generator;C::Config cfg;cfg.adaptive_sampling=true;cfg.footprint.enabled=true;generator.setConfig(cfg);
+        EXPECT_FALSE(generator.buildStatic(path,g,polygons).feasible);
+        const auto prefix=generator.buildPrefix(path,g,polygons);
+        ASSERT_TRUE(prefix.feasible)<<C::failureReasonName(prefix.failure_reason);
+        EXPECT_FALSE(prefix.complete);EXPECT_EQ(C::FailureReason::NONE,prefix.failure_reason);
+        EXPECT_EQ(dynamic?C::FailureReason::DYNAMIC_REFERENCE_BLOCKED:C::FailureReason::REFERENCE_OCCUPIED,prefix.truncation_reason);
+        EXPECT_GT(prefix.covered_length,3.);EXPECT_LT(prefix.covered_length,6.);
+        EXPECT_TRUE(C::containsFootprint(prefix.segments.front(),path.front(),
+            cane_planner::HumanCaneFootprint::relative(cfg.footprint,0.)));
+        for(double s=0.;s<=prefix.covered_length;s+=.01) {
+            const V p=path.front()+V(s,0);
+            EXPECT_TRUE(std::any_of(prefix.segments.begin(),prefix.segments.end(),[&](const C::Segment& r){return C::contains(r,p);}));
+        }
+        for(const auto& r:prefix.segments)EXPECT_FALSE(C::contains(r,V(7.1,3.1)));
+        // Invalid geometry and expired work must not become a usable prefix.
+        EXPECT_FALSE(generator.buildPrefix(path,g,{Path{V(8,3)}}).feasible);
+        cfg.max_seconds=1e-12;generator.setConfig(cfg);
+        const auto expired=generator.buildPrefix(path,g,polygons);
+        EXPECT_FALSE(expired.feasible);EXPECT_TRUE(expired.segments.empty());
+        cfg.max_seconds=.5;generator.setConfig(cfg);
+        auto root_blocked=g;root_blocked.blocked[12*48+4]=1;
+        const auto blocked=generator.buildPrefix(path,root_blocked,polygons);
+        EXPECT_FALSE(blocked.feasible);EXPECT_TRUE(blocked.segments.empty());
+    }
 }
 TEST(FiriAdaptive, DenseAndSparseUseCoverageRatherThanEveryEdge) {
     C::Config c;c.adaptive_sampling=true;c.footprint.enabled=true;

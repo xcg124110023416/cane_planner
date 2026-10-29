@@ -70,15 +70,28 @@ support phase without moving the plant; other adapters retain immediate integrat
 A new candidate resets optimizer warm start, never actual LFPC state. Its target
 and reference are temporary; only successful final execution authorization replaces
 global_waypoints_/index/lookahead. Publish accepted A* afterward. Search failure
-may use the retained route only after fresh FIRI/MPPI/all execution checks. Candidate
-rebuild/MPPI/freshness/execution rejection cannot replace the authoritative route
-or advance LFPC. Keep STOP heartbeat, current-root containment, timed pedestrian envelopes, static COM/foot checks and exact goal.
+may use the retained route only after fresh FIRI/MPPI/all execution checks.
+Candidate corridor or MPPI rejection retries the retained route once in the same
+observation transaction, rebuilding geometry and resetting/seeding MPPI from the
+actual LFPC state. Do not schedule another search or reuse old corridor/controls.
+Report RETAINED_AFTER_REBUILD_FAILED or RETAINED_AFTER_MPPI_REJECTED on successful
+fallback; rejected candidates never replace the authoritative route. Invalid or
+expired observations still withhold execution. Keep STOP heartbeat, current-root
+containment, timed pedestrian envelopes, static COM/foot checks and exact goal.
 
 FIRI and preview always separate static cells and accepted current pedestrian
 hulls. Timed collision enable does not remove spatial pedestrian exclusion.
 Nonempty frames report CURRENT_FRAME; empty/disabled frames remain STATIC_BASE.
-If the retained reference crosses current occupancy, reject it until a full global
-candidate passes the current-frame FIRI/MPPI transaction, without static fallback. Preview defaults to .2s (.1..5s),
+New global candidates require complete active-length FIRI. For the retained
+reference, adaptive FIRI may return a connected independently certified prefix
+when a farther geometric obstruction prevents full coverage. The full MPPI
+prediction and execution checks must fit that fresh prefix; otherwise STOP.
+Never substitute a static-only corridor or accept invalid/numerical/expired work
+as a prefix. A geometric output-certificate failure after one or more certified
+regions may retain only that prior prefix after re-certification; a first-region
+or failed re-certification still stops. `complete`, `covered_length`, `suffix_reason` diagnostics distinguish
+this from full coverage; the truncation marker is orange. Preview still requires
+complete coverage and has no STOP authority. Preview defaults to .2s (.1..5s),
 with fixed next deadlines initialized from the global search phase, not the
 variable completion time after MPPI. Both global and preview eligibility use one
 scheduling epoch captured after acquiring the accepted-observation mutex: using

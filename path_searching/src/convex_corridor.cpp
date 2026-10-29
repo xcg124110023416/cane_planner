@@ -250,7 +250,13 @@ C::Segment inflate(const C::Grid&grid,const V&begin,const V&finish,const C::Conf
                 for(const auto& p:polygon)gap=std::min(gap,-slack(h,p));
                 excluded=excluded || gap>=cfg.clearance-1e-8;
             }
-            if(!excluded)hs.push_back(separate(polygon,a_seed,b_seed,center,L,cfg,end,diag,protected_points));
+            if(!excluded) {
+                try {hs.push_back(separate(polygon,a_seed,b_seed,center,L,cfg,end,diag,protected_points));}
+                catch(const Failure& f) {
+                    if(f.reason==C::FailureReason::REFERENCE_OCCUPIED)throw Failure{C::FailureReason::DYNAMIC_REFERENCE_BLOCKED};
+                    throw;
+                }
+            }
         }
         mvie(hs,center,L,cfg,end,diag);
     }
@@ -440,7 +446,14 @@ std::string ConvexCorridor::diagnosticsText(const Result& r) {
     return ss.str();
 }
 ConvexCorridor::Result ConvexCorridor::buildStatic(const Poly&path,const Grid&grid,const std::vector<Poly>& dynamic) const {
+    return build(path,grid,dynamic,false);
+}
+ConvexCorridor::Result ConvexCorridor::buildPrefix(const Poly&path,const Grid&grid,const std::vector<Poly>& dynamic) const {
+    return build(path,grid,dynamic,true);
+}
+ConvexCorridor::Result ConvexCorridor::build(const Poly&path,const Grid&grid,const std::vector<Poly>& dynamic,bool allow_prefix) const {
     Result out;out.has_dynamic_input=!dynamic.empty();out.diagnostics.stage=FailureStage::INPUT;const auto began=Clock::now();const auto&c=cfg_;
+    std::vector<double> arc;Clock::time_point end;
     try {
         require(path.size()>=2 && grid.width>0 && grid.height>0 && grid.width<=10000 && grid.height<=10000 &&
                 grid.blocked.size()==size_t(grid.width)*size_t(grid.height),FailureReason::INVALID_INPUT);
@@ -455,10 +468,10 @@ ConvexCorridor::Result ConvexCorridor::buildStatic(const Poly&path,const Grid&gr
                 grid.origin.cwiseAbs().maxCoeff()<=1e4 && upper.cwiseAbs().maxCoeff()<=1e4 &&
                 c.local_radius>=.01&&c.local_radius<=100.&&c.clearance>=1e-4&&c.max_segment_length>=1e-4,
                 FailureReason::UNSUPPORTED_SCALE);
-        std::vector<double> arc{0.};
+        arc.push_back(0.);
         for(size_t i=0;i<path.size();++i){require(path[i].allFinite(),FailureReason::INVALID_INPUT);require(path[i].cwiseAbs().maxCoeff()<=1e4,FailureReason::UNSUPPORTED_SCALE);
             if(i){double d=(path[i]-path[i-1]).norm();require(d>=1e-9,FailureReason::DEGENERATE_PATH);arc.push_back(arc.back()+d);}}
-        const auto end=began+std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(c.max_seconds));
+        end=began+std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(c.max_seconds));
         require(dynamic.size()<=1,FailureReason::DYNAMIC_DATA_INVALID);
         for(const auto& polygon:dynamic) {
             require(polygon.size()>=3 && polygon.size()<=32,FailureReason::DYNAMIC_DATA_INVALID);
@@ -478,7 +491,7 @@ ConvexCorridor::Result ConvexCorridor::buildStatic(const Poly&path,const Grid&gr
         }
         // Check the entire protected local reference before numerical inflation:
         // a later crossing must not be obscured by an earlier MVIE failure.
-        for(size_t edge=0;edge+1<path.size() && !dynamic.empty();++edge) {
+        for(size_t edge=0;edge+1<path.size() && !dynamic.empty() && !(allow_prefix && c.adaptive_sampling);++edge) {
             out.failure_segment_index=edge;out.failure_s=arc[edge];
             out.failure_position=path[edge];out.failure_position_valid=true;
             for(const auto& world:dynamic) {
@@ -516,21 +529,33 @@ ConvexCorridor::Result ConvexCorridor::buildStatic(const Poly&path,const Grid&gr
                 // Protect a bounded forward portion of the ORIGINAL polyline,
                 // using reference points, not predicted human-cane envelopes.
                 // Only the actual current pose belongs to this spatial corridor.
-                const double seed_finish=std::min(arc.back(),position+std::min(c.max_segment_length,.5*c.local_radius));
-                Poly protected_world;
-                for(size_t e=edge;e+1<path.size() && arc[e]<seed_finish;++e) {
-                    deadline(end);
-                    const V d=path[e+1]-path[e];const double length=arc[e+1]-arc[e];
-                    for(double s:{std::max(position,arc[e]),std::min(seed_finish,arc[e+1])})
-                        protected_world.push_back(path[e]+d*((s-arc[e])/length));
-                }
-                if(out.segments.empty() && c.footprint.enabled)
-                    for(const auto& p:HumanCaneFootprint::world(c.footprint,path.front(),c.root_yaw))protected_world.push_back(p);
-                // Only extreme vertices can activate a linear seed constraint.
-                if(protected_world.size()>2)protected_world=PedestrianPolygon::convexHull(std::move(protected_world));
+                double seed_finish=std::min(arc.back(),position+std::min(c.max_segment_length,.5*c.local_radius));
                 out.failure_s=position;out.failure_position=point;out.failure_position_valid=true;
                 out.failure_segment_index=out.generated_regions;
-                Segment region=inflate(grid,point,point,c,end,out.diagnostics,dynamic,protected_world);
+                Segment region;
+                // A free bent polyline need not have a free convex hull. Split
+                // the protected interval, down to this original straight edge,
+                // before rejecting it. Keep the actual root hull at every retry.
+                const double minimum_finish=std::min(seed_finish,arc[edge+1]);
+                for(;;) {
+                    Poly protected_world;
+                    for(size_t e=edge;e+1<path.size() && arc[e]<seed_finish;++e) {
+                        deadline(end);
+                        const V d=path[e+1]-path[e];const double length=arc[e+1]-arc[e];
+                        for(double s:{std::max(position,arc[e]),std::min(seed_finish,arc[e+1])})
+                            protected_world.push_back(path[e]+d*((s-arc[e])/length));
+                    }
+                    if(out.segments.empty() && c.footprint.enabled)
+                        for(const auto& p:HumanCaneFootprint::world(c.footprint,path.front(),c.root_yaw))protected_world.push_back(p);
+                    if(protected_world.size()>2)protected_world=PedestrianPolygon::convexHull(std::move(protected_world));
+                    try {region=inflate(grid,point,point,c,end,out.diagnostics,dynamic,protected_world);break;}
+                    catch(const Failure& f) {
+                        if((f.reason!=FailureReason::REFERENCE_OCCUPIED && f.reason!=FailureReason::DYNAMIC_REFERENCE_BLOCKED &&
+                            f.reason!=FailureReason::OUTPUT_CERTIFICATE) ||
+                           seed_finish<=minimum_finish+1e-9)throw;
+                        seed_finish=std::max(minimum_finish,position+.5*(seed_finish-position));
+                    }
+                }
                 stage(out.diagnostics,FailureStage::COVERAGE);
                 double covered=position;
                 for(size_t e=edge;e+1<path.size();++e) {
@@ -599,11 +624,36 @@ ConvexCorridor::Result ConvexCorridor::buildStatic(const Poly&path,const Grid&gr
             out.min_overlap_depth=std::min(out.min_overlap_depth,o.second);
         }
         deadline(end);
-        out.feasible=true;
+        out.feasible=true;out.complete=true;out.covered_length=arc.back();
         require(out.feasible,FailureReason::BUDGET);out.failure_segment_index=-1;out.failure_position_valid=false;
         out.diagnostics=Diagnostics();
         if(out.segments.size()==1)out.min_overlap_area=out.min_overlap_depth=0.;
-    }catch(const Failure&f){out.segments.clear();out.feasible=false;out.failure_reason=f.reason;out.min_overlap_area=out.min_overlap_depth=0.;}
+    }catch(const Failure&f){
+        out.failure_reason=f.reason;
+        // No prefix on invalid input, expired budget or numerical failure. A
+        // geometric suffix failure may retain only independently certified
+        // original-path coverage and positive-interior joins from the root.
+        if(allow_prefix && c.adaptive_sampling && !out.segments.empty() &&
+           (f.reason==FailureReason::REFERENCE_OCCUPIED || f.reason==FailureReason::DYNAMIC_REFERENCE_BLOCKED ||
+            f.reason==FailureReason::OUTPUT_CERTIFICATE || f.reason==FailureReason::NO_PROGRESS ||
+            f.reason==FailureReason::NO_OVERLAP)) {
+            try {
+                const double covered=out.segments.back().s1;
+                std::vector<const Segment*> refs;for(const auto& r:out.segments)refs.push_back(&r);
+                require(covered>1e-6 && coversPath(path,arc,refs,0.,covered,end),FailureReason::OUTPUT_CERTIFICATE);
+                out.min_overlap_area=out.min_overlap_depth=std::numeric_limits<double>::infinity();
+                for(size_t i=1;i<out.segments.size();++i) {
+                    deadline(end);const auto o=overlap(out.segments[i-1],out.segments[i]);
+                    out.min_overlap_area=std::min(out.min_overlap_area,o.first);
+                    out.min_overlap_depth=std::min(out.min_overlap_depth,o.second);
+                }
+                deadline(end);out.feasible=true;out.covered_length=covered;
+                out.truncation_reason=f.reason;out.failure_reason=FailureReason::NONE;
+                if(out.segments.size()==1)out.min_overlap_area=out.min_overlap_depth=0.;
+            }catch(const Failure& certificate){out.failure_reason=certificate.reason;out.feasible=false;}
+        }
+        if(!out.feasible){out.segments.clear();out.complete=false;out.covered_length=0.;out.min_overlap_area=out.min_overlap_depth=0.;}
+    }
     out.elapsed_seconds=std::chrono::duration<double>(Clock::now()-began).count();return out;
 }
 }
