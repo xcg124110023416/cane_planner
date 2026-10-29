@@ -47,8 +47,15 @@ The launcher passes the entire speed array to the patched simulator in XML
 agent order. Initial velocity is zero. Office still uses YAML plus round restart.
 
 PEDESTRIAN RESPONSE TO ROBOT
---pedestrian-mode interactive (default): retain upstream social interaction with
-the robot. --pedestrian-mode independent: pedestrians ignore the robot while
+--pedestrian-mode interactive (default): pedestrians react to the robot only in
+their forward 220-degree FOV (heading +/-110 degrees, including both boundaries).
+Outside it the robot social force is zero. This uses the paper's angle; zero
+outside is an explicit experimental rule, beyond the paper's in-view enhancement.
+Heading follows actual motion above 1e-4 m/s and is retained at rest/pause/arrival.
+Placed people start with the configured heading; legacy XML people without a
+heading initialize from the first desired direction. No wall-occlusion test is
+included; walls and interactions between pedestrians retain their existing laws.
+--pedestrian-mode independent: pedestrians ignore the robot while
 retaining goal driving, wall forces and interactions with other pedestrians.
 For independent avoidance evaluation:
   bash /home/xcg/ws/src/cane_planner/plan_manage/scripts/start_pedsim_navigation.sh start --world blank --scenario crowd_5 --pedestrian-mode independent
@@ -56,7 +63,7 @@ The chosen mode is printed at startup and applies for the whole round, including
 new/loaded/reset people. Restart the owned round to change mode; scene YAML and
 automatic scene memory do not override it. Direct launch users can pass
 pedestrians_avoid_robot:=false to pedsim_navigation.launch or
-pedsim_single_source.launch. true retains the original behavior.
+pedsim_single_source.launch. true selects the 220-degree interaction rule.
 This switch changes only simulator dynamics. Planner-side force estimates/hulls,
 observed-velocity CV prediction and collision checks are unchanged. Orange robot
 force markers are planner estimates, not the simulator's true robot force.
@@ -72,6 +79,10 @@ Configure desired speed 0..3m/s, stop / return once / repeat. Reference time onl
 computes goal = start + desired_speed * reference_time * heading; actual arrival
 depends on social forces. Speed zero creates a stationary observed pedestrian.
 Starts must be >=0.55m apart; endpoints need >=0.5m arena-wall clearance.
+In interactive mode the selected person shows a cyan social_fov sector and
+social_facing arrow at its actual pose; the 1m radius illustrates angles only,
+not interaction range. The original start arrow remains at the configured start.
+Independent mode shows no robot-response FOV sector.
 
 Apply, map endpoint edits, add/delete/clear, reset or load reset ALL pedestrians
 to their configured starts and wait. Robot state and the input guard survive.

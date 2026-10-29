@@ -167,7 +167,7 @@ bash "$(rospack find plan_manage)/scripts/start_pedsim_navigation.sh" \
 
 两种地图均支持 `headon`、`overtake`、`crossing`；空场地另有 `crowd_2`、`crowd_5` 多人场景。脚本生成场景并启动 planner 3、pedsim 和桥接，使用独立 ROS master，默认端口 `11551`。空场地的默认配置见 [blank_scenarios.yaml](plan_manage/config/pedsim/blank_scenarios.yaml)，办公室配置见 [scenarios.yaml](plan_manage/config/pedsim/scenarios.yaml)。新场地建议在 RViz 将机器人放在 `(-5,0)`，朝向 `+X`，终点设置为 `(5,0)`（超越场景为 `(6,0)`）；启动器只打印建议，不自动设置起终点。无人测试可加 `--no-rviz`。
 
-默认 `--pedestrian-mode interactive` 中，行人会主动避让人杖。检验规划器自身避障能力时，使用独立模式：
+默认 `--pedestrian-mode interactive` 中，行人只对当前朝向左右各 110°、总共 220° 视野内的人杖产生避让响应；视野外关闭对人杖的社会力。运动时朝向随实际速度更新，静止后保留最后朝向，编辑复位时使用设置的起始朝向；旧 XML 场景在未指定朝向时以初始目标方向初始化。这采用论文的 220° 角度，并按本项目实验要求增加“视野外为零”的规则，论文只明确了视野内增强。视野不包含墙体遮挡判断，墙体与行人之间的交互保持原样。检验规划器自身避障能力时，使用独立模式：
 
 ```bash
 bash "$(rospack find plan_manage)/scripts/start_pedsim_navigation.sh" \
@@ -176,7 +176,7 @@ bash "$(rospack find plan_manage)/scripts/start_pedsim_navigation.sh" \
 
 独立模式只关闭仿真端行人对机器人的社会力，保留目标驱动、墙体和行人间社会力；行人可能减速或绕开其他行人，但不会主动让开人杖。模式在整轮启动时选择，编辑、复位和加载场景不改变它；终端打印当前模式。规划端社会力凸包与 CV 预测碰撞检查不变，橙色机器人力箭头仍表示规划端估计，不代表仿真端行人还在避让。手动 launch 对应 `pedestrians_avoid_robot:=false`；切回交互模式使用 `--pedestrian-mode interactive`。
 
-空场地使用专用“社会力行人”面板，可编辑零至五人。点“新增”，再用“行人起点”（P）在地图点击并拖拽设置起点/朝向，“行人终点”（K）设置目标，“选择行人”（U）或下拉框切换行人。面板设置期望速度和终点停止、返回起点后停止或持续往返；参考单程时间用于按朝向计算终点，实际到达时间由社会力运动决定。
+空场地使用专用“社会力行人”面板，可编辑零至五人。点“新增”，再用“行人起点”（P）在地图点击并拖拽设置起点/朝向，“行人终点”（K）设置目标，“选择行人”（U）或下拉框切换行人。交互模式下选中行人后显示青色 220° 视野扇区和当前朝向箭头；扇区 1 m 半径仅示意角度，不表示作用距离，独立模式不画该扇区。面板设置期望速度和终点停止、返回起点后停止或持续往返；参考单程时间用于按朝向计算终点，实际到达时间由社会力运动决定。
 
 修改起终点、应用、增删或加载会把全部行人复位等待，机器人保持当前状态。“暂停行人”冻结行人并持续发布真实静止观测。“保存场景／加载场景”操作已应用的多人 YAML 配置；默认按预设场景分别记忆，下次启动恢复配置并复位等待。加 `--fresh-scene` 可忽略且不写自动记忆，回到 YAML 预设；`--editor-state-file PATH` 可指定独立记忆文件。办公室入口暂不支持交互编辑。详见 [社会力场景编辑说明](docs/development/operator-visualization/social-scene-editor.md) 与 [实施记录](docs/PEDSIM_IMPLEMENTATION_PROGRESS.md)。
 

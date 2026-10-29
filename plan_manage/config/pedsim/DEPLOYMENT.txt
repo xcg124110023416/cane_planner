@@ -46,12 +46,21 @@ forces. The simulator applies it before each integration so replacement agents
 inherit the selected mode. There is no runtime mode change or scene-file override.
 The robot still follows actual LFPC TF, and all input guards remain unchanged.
 The normal wrapper exposes --pedestrian-mode interactive|independent.
+With pedestrians_avoid_robot=true, ROBOT neighbors outside heading +/-110 degrees
+are excluded before the original social-force calculation. Both boundaries are
+included. The paper specifies 220-degree in-view enhancement; completely disabling
+out-of-view interaction is the project's explicit experiment policy. Peer and wall
+forces are unchanged. No occlusion model or planner-side hull/force change is added.
+Heading initializes from editor start.theta, or the first desired direction for
+legacy XML scenes; it tracks actual velocity above 1e-4m/s and persists at rest.
+AgentStates and EditScene state report that same heading, including pause/arrival.
 
 Optional verification after loading both ROS workspaces:
   python3 plan_manage/test/pedsim_robot_interaction_smoke.py
   python3 plan_manage/test/pedsim_navigation_smoke.py crowd_5 --pedestrian-mode independent
-The first checks both real simulation modes, startup/replaced people, retained
-peer/wall/goal forces and the real input-loss latch on owned private masters.
+The first checks both real simulation modes, startup/replaced people, rear and
+signed +/-110-degree boundaries, stationary heading, retained peer/wall/goal forces
+and the real input-loss latch on owned private masters.
 
 Optional single-pedestrian pedsim validation
 ==========================================
@@ -69,7 +78,8 @@ UPSTREAM PREPARATION (dedicated source checkout, never modify an installed copy)
      git apply --check /ABS/plan_manage/config/pedsim/upstream-startup-guard.patch
      git apply /ABS/plan_manage/config/pedsim/upstream-startup-guard.patch
    Verify result SHA256 against patched_sha256. Default guard parameters false
-   preserve upstream behavior. No planner source is included in this patch.
+   preserve upstream startup behavior; robot interaction uses the FOV policy above.
+   No planner source is included in this patch.
 3. Build pedsim_simulator with catkin_tools, extending /opt/ros/noetic and using
    -DCMAKE_BUILD_TYPE=Release -DPYTHON_EXECUTABLE=/usr/bin/python3.
    Core package dependencies: 3rdparty/libpedsim, pedsim_msgs, pedsim_srvs,

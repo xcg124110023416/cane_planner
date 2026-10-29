@@ -30,6 +30,7 @@ def child(directory):
     from plan_manage.srv import ControlSocialScene, ControlSocialSceneRequest
     from pedsim_srvs.srv import EditScene, EditSceneRequest
     from std_msgs.msg import String
+    from visualization_msgs.msg import Marker, MarkerArray
     processes = []
     editor = None
     try:
@@ -37,11 +38,12 @@ def child(directory):
             'scene_file:='+str(directory/'world.xml'), 'pedestrian_speeds:=[0.45,0.5]',
             'enable_scene_editor:=true', 'auto_start:=true'], start_new_session=True))
         rospy.init_node('social_scene_smoke', disable_signals=True)
-        states=[];observations=[];statuses=[];guards=[];published_odoms=[]
+        states=[];observations=[];statuses=[];guards=[];published_odoms=[];visuals=[]
         subscribers=[rospy.Subscriber('/pedsim_scene/state',SocialSceneState,states.append,queue_size=30),
             rospy.Subscriber('/onboard_detector/dynamic_obstacles_info',DynamicObstacles,observations.append,queue_size=30),
             rospy.Subscriber('/pedsim_single_bridge/status',String,lambda m:statuses.append(m.data),queue_size=30)]
         subscribers.append(rospy.Subscriber('/pedsim_simulator/guard_status',String,lambda m:guards.append(m.data),queue_size=30))
+        subscribers.append(rospy.Subscriber('/pedsim_scene/visualization',MarkerArray,visuals.append,queue_size=30))
         odom_pub=rospy.Publisher('/sim_odom',Odometry,queue_size=1)
         goal_pub=rospy.Publisher('/move_base_simple/goal',PoseStamped,queue_size=1)
         start_pub=rospy.Publisher('/pedsim_scene/start_pose',PoseStamped,queue_size=1)
@@ -108,6 +110,20 @@ def child(directory):
         point=PointStamped();point.header.frame_id='world';point.point.x=-2.;point.point.y=-4.
         select_pub.publish(point)
         wait(lambda:states[-1].selected_id!=0,'map selection')
+        wait(lambda:visuals and any(m.ns=='social_fov' and m.action==Marker.ADD for m in visuals[-1].markers),
+             'selected pedestrian FOV visualization')
+        fov=next(m for m in visuals[-1].markers if m.ns=='social_fov' and m.action==Marker.ADD)
+        wait(lambda:any(s.header.stamp==fov.header.stamp for s in states), 'matching FOV pose state')
+        shown=next(s for s in reversed(states) if s.header.stamp==fov.header.stamp)
+        current=shown.poses[next(i for i,p in enumerate(shown.pedestrians) if p.id==fov.id)]
+        center=fov.points[0]
+        assert math.hypot(center.x-current.x,center.y-current.y)<1e-9
+        for boundary in (fov.points[1],fov.points[-2]):
+            forward=(boundary.x-center.x)*math.cos(current.theta)+(boundary.y-center.y)*math.sin(current.theta)
+            assert abs(forward-math.cos(math.radians(110.)))<1e-9
+        midpoint=fov.points[len(fov.points)//2]
+        assert math.hypot(midpoint.x-center.x-math.cos(current.theta),
+                          midpoint.y-center.y-math.sin(current.theta))<1e-9
         revision=states[-1].revision
         bad=rospy.ServiceProxy('/pedsim_scene/control',ControlSocialScene)(
             ControlSocialSceneRequest(command='clear',expected_revision=revision-1))
@@ -132,6 +148,7 @@ def child(directory):
         assert any(s.phases[2]=='returning' for s in states[start_index:])
         wait(lambda:any(s.phases[2]=='walking' for s in states[start_index:] if s.header.stamp>states[start_index].header.stamp+rospy.Duration(2.)), 'repeat turns back',7.)
         assert abs(states[-1].poses[0].x-.8)<.22 and abs(states[-1].poses[1].x)<.22
+        assert math.cos(states[-1].poses[1].theta)<-.9, 'returning pedestrian lost its final facing direction at rest'
         assert abs(states[-1].poses[3].x)<1e-9
         command('pause');command('delete')
         wait(lambda:observations[-1].num==3,'delete reflected in observations')

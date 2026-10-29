@@ -25,7 +25,7 @@
 +  nh_.param<bool>("require_fresh_robot", require_fresh_robot_, false);
 +  nh_.param<bool>("pedestrians_avoid_robot", pedestrians_avoid_robot_, true);
 +  ROS_INFO_STREAM("Pedestrian interaction mode: " <<
-+      (pedestrians_avoid_robot_ ? "interactive (avoid robot)" : "independent (ignore robot)"));
++      (pedestrians_avoid_robot_ ? "interactive (avoid robot within 220 deg FOV)" : "independent (ignore robot)"));
 +  if (require_fresh_robot_) {
 +    pub_robot_input_ = nh_.advertise<nav_msgs::Odometry>("robot_input", 10);
 +    pub_guard_status_ = nh_.advertise<std_msgs::String>("guard_status", 1, true);
@@ -168,6 +168,13 @@
 +  if (SCENE.getAgents().size() < 2 && !require_fresh_robot_) {
      return;
    }
+@@ -313,5 +431,5 @@
+     state.pose.position.y = a->gety();
+     state.pose.position.z = a->getz();
+-    auto theta = std::atan2(a->getvy(), a->getvx());
++    auto theta = a->getHeading();
+     state.pose.orientation = pedsim::angleToQuaternion(theta);
+
 @@ -346,4 +464,15 @@
    }
 
@@ -197,8 +204,7 @@
 +      response.agent_ids.push_back(person.agent->getId());
 +      geometry_msgs::Pose2D pose;
 +      pose.x = person.agent->getx(); pose.y = person.agent->gety();
-+      pose.theta = std::hypot(person.agent->getvx(), person.agent->getvy()) > 1e-6 ?
-+          std::atan2(person.agent->getvy(), person.agent->getvx()) : person.start.theta;
++      pose.theta = person.agent->getHeading();
 +      response.poses.push_back(pose);
 +      response.phases.push_back(!scene_editor_running_ && person.phase != "finished" && person.phase != "waiting" ? "paused" : person.phase);
 +    }
@@ -247,6 +253,7 @@
 +      auto* waypoint = new AreaWaypoint(QString("editor_%1_%2").arg(qulonglong(scene_revision_)).arg(qulonglong(i)), goal.x, goal.y, .2);
 +      SCENE.addWaypoint(waypoint);
 +      auto* agent = new Agent(); agent->setPosition(start.x, start.y);
++      agent->setHeading(start.theta);
 +      agent->setvx(0.); agent->setvy(0.); agent->setVmax(0.); agent->addWaypoint(waypoint);
 +      SCENE.addAgent(agent);
 +      edited_pedestrians_.push_back({agent, waypoint, start, goal, request.desired_speeds[i], request.end_behaviors[i], "waiting"});
@@ -394,30 +401,70 @@
 +bool running
 --- a/3rdparty/libpedsim/include/pedsim/ped_agent.h
 +++ b/3rdparty/libpedsim/include/pedsim/ped_agent.h
-@@ -62,4 +62,5 @@
+@@ -62,4 +62,7 @@
    void setTeleop(bool opstatus) { teleop = opstatus; }
    void setRobotPosDiffScalingFactor(double scalingFactor);
 +  void setAvoidRobot(bool enabled) { avoidRobot = enabled; }
++  void setHeading(double angle) { heading = angle; headingInitialized = true; }
++  double getHeading() const { return heading; }
 
    int getId() const { return id; };
-@@ -107,4 +108,5 @@
+@@ -107,4 +110,7 @@
    bool teleop;
    double robotPosDiffScalingFactor;
 +  bool avoidRobot;
++  double heading;
++  bool headingInitialized;
 
    double forceFactorDesired;
 --- a/3rdparty/libpedsim/src/ped_agent.cpp
 +++ b/3rdparty/libpedsim/src/ped_agent.cpp
-@@ -43,4 +43,5 @@
+@@ -43,4 +43,7 @@
    relaxationTime = 0.5;
    robotPosDiffScalingFactor = 5;
 +  avoidRobot = true;
++  heading = 0.;
++  headingInitialized = false;
  }
 
-@@ -155,4 +156,6 @@
+@@ -150,4 +153,5 @@
+   // (set according to Moussaid-Helbing 2009)
+   const double n_prime = 3;
++  const double robotViewCos = std::cos(110. * std::acos(-1.) / 180.);
+
+   Tvector force;
+@@ -155,9 +159,18 @@
      // don't compute social force to yourself
      if (other->id == id) continue;
 +    // Independent navigation tests retain all pedestrian/obstacle forces.
 +    if (!avoidRobot && other->getType() == ROBOT) continue;
 
      // compute difference between both agents' positions
+     Tvector diff = other->p - p;
+
+-    if(other->getType() == ROBOT) diff /= robotPosDiffScalingFactor;
++    if (other->getType() == ROBOT) {
++      // Explicit 220-degree perception gate for human-cane interaction. Walls
++      // and pedestrian neighbors retain their original force calculations.
++      if (!headingInitialized) continue;
++      const double forward = diff.x * std::cos(heading) + diff.y * std::sin(heading);
++      if (forward < robotViewCos * diff.length() - 1e-12) continue;
++      diff /= robotPosDiffScalingFactor;
++    }
+
+     Tvector diffDirection = diff.normalized();
+@@ -241,4 +254,7 @@
+   // update forces
+   desiredforce = desiredForce();
++  if (v.lengthSquared() > 1e-8) setHeading(std::atan2(v.y, v.x));
++  else if (!headingInitialized && desiredDirection.lengthSquared() > 1e-8)
++    setHeading(std::atan2(desiredDirection.y, desiredDirection.x));
+   if (forceFactorSocial > 0) socialforce = socialForce();
+   if (forceFactorObstacle > 0) obstacleforce = obstacleForce();
+@@ -266,4 +282,6 @@
+   double speed = v.length();
+   if (speed > vmax) v = v.normalized() * vmax;
++  // Preserve the last facing direction when stopped, including pause/arrival.
++  if (v.lengthSquared() > 1e-8) setHeading(std::atan2(v.y, v.x));
+
+   // internal position update = actual move

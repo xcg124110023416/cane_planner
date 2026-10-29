@@ -158,7 +158,7 @@ def main():
     parser.add_argument('--scenario',default='headon', help='YAML scene name; blank also supports crowd_2 and crowd_5')
     parser.add_argument('--world', choices=['blank', 'office'], default='blank')
     parser.add_argument('--pedestrian-mode', choices=['interactive', 'independent'], default='interactive',
-                        help='interactive: people avoid robot; independent: ignore robot, retain walls/peers')
+                        help='interactive: avoid robot within 220-deg FOV; independent: ignore robot, retain walls/peers')
     parser.add_argument('--no-rviz', action='store_true', help='Headless navigation; no goals are sent automatically')
     parser.add_argument('--fresh-scene', action='store_true', help='Use the YAML preset without reading or writing remembered edits')
     parser.add_argument('--editor-state-file', help='Explicit scene memory file (blank arena only)')
@@ -219,7 +219,7 @@ def main():
         print('Round geometry: %s' % directory, flush=True)
         print('Pedestrian mode: %s (%s)' % (args.pedestrian_mode,
               'people ignore the robot; walls/peers remain active' if args.pedestrian_mode == 'independent'
-              else 'people react to the robot'), flush=True)
+              else 'people react to the robot only within heading +/-110 deg'), flush=True)
         return directory/'world.xml', map_pcd
     return run_owned(args.port, prepare, lambda world: ['roslaunch', '--wait', 'plan_manage', 'pedsim_navigation.launch',
                      'scene_file:='+str(world[0]), 'map_pcd:='+str(world[1]),

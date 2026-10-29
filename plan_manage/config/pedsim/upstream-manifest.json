@@ -3,7 +3,7 @@
   "files": {
     "pedsim_simulator/src/simulator.cpp": {
       "baseline_sha256": "a3132016a625fba757f460dee0d97b8d1c89d8157dd26d92623ab66bf6735002",
-      "patched_sha256": "c7018e36fa2fad0bdffcb75ace4ca227a75d2ded71312257b4a1f54a92c0476f"
+      "patched_sha256": "2972ec6d6a9e597e19187b1d44a24b6e6d34e4a1dbd20639c003507587a6a3a2"
     },
     "pedsim_simulator/include/pedsim_simulator/simulator.h": {
       "baseline_sha256": "59e765ec16a3e6c7f9621ffc35f9c9e631ac056019b5be64966fb12ff4000249",
@@ -27,11 +27,11 @@
     },
     "3rdparty/libpedsim/include/pedsim/ped_agent.h": {
       "baseline_sha256": "0840956136ccb70172938a17dbe894823d67a77eb5e79c9b645ee8ae87243742",
-      "patched_sha256": "d43d2aef0fd2e30bd980e3d54cdcc40474746f542f9605655eff2e87e08ed883"
+      "patched_sha256": "37b42326c76c15c7813fe81a814cbf758dd5f02139de4810438ddc491eb1a3d1"
     },
     "3rdparty/libpedsim/src/ped_agent.cpp": {
       "baseline_sha256": "f6630b554d7e3fd03a58e0cf7131753203c701a137b48b6d3de6996735f305a9",
-      "patched_sha256": "14db383c9f2968283a2a3bf014fe96eca10204de94b78730eeca4bbb1fda9219"
+      "patched_sha256": "a1d915f0ac95c5e3a2b18ec8209a7aed852bd45b2d2003c6c7f76efbe0a9737b"
     }
   }
 }

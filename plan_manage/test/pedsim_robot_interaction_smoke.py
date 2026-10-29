@@ -91,10 +91,11 @@ def child(directory, mode):
             assert response.success, response.message
             revision = response.revision
 
-        def sample(starts, goals):
-            command('replace', starts=[Pose2D(x=x, y=y) for x, y in starts],
+        def sample(starts, goals, headings=None, speeds=None):
+            headings = headings or [0.]*len(starts)
+            command('replace', starts=[Pose2D(x=x, y=y, theta=h) for (x, y), h in zip(starts, headings)],
                     goals=[Point(x=x, y=y) for x, y in goals],
-                    desired_speeds=[.8]*len(starts), end_behaviors=['stop']*len(starts))
+                    desired_speeds=speeds if speeds is not None else [.8]*len(starts), end_behaviors=['stop']*len(starts))
             command('start')
             cutoff = rospy.Time.now()+rospy.Duration(.1)
             wait(lambda: sum(b.header.stamp > cutoff for b in batches) >= 8, 'edited-scene motion')
@@ -110,6 +111,28 @@ def child(directory, mode):
         wall_force = max(magnitude(a.forces.obstacle_force) for a in wall_agents)
         desired_force = max(magnitude(a.forces.desired_force) for a in wall_agents)
         assert wall_force > .01 and desired_force > .01, 'wall or goal force was disabled'
+
+        rear_agents = people(sample([(4., 0.)], [(8., 0.)]))
+        rear_force = max(magnitude(a.forces.social_force) for a in rear_agents)
+        assert rear_force < 1e-12, 'pedestrian reacts to the robot behind its field of view'
+        assert max(abs(a.pose.position.y) for a in rear_agents) < 1e-12, 'rear robot deflected pedestrian'
+        # At rest, a deliberately different goal must not override the placed
+        # heading. Both signed boundaries belong to the 220-degree view sector.
+        fov_cases = []
+        for angle in (0., 109.9, 110., 110.1, -109.9, -110., -110.1, 180.):
+            yaw = math.radians(angle)
+            # Keep the robot fixed and move the stationary pedestrian so its
+            # relative bearing is exactly the requested angle at every sample.
+            start = (2.-1.5*math.cos(yaw), .25-1.5*math.sin(yaw))
+            frames = sample([start], [(start[0]+4., start[1])], speeds=[0.])
+            force = max(magnitude(a.forces.social_force) for a in people(frames))
+            visible = mode == 'interactive' and abs(angle) <= 110.
+            assert force > .01 if visible else force < 1e-12, ('FOV boundary', mode, angle, force)
+            fov_cases.append(dict(bearing_degrees=angle, social_force=force, visible=visible))
+        placed = people(sample([(0., 0.)], [(4., 0.)], headings=[math.pi], speeds=[0.]))
+        assert max(magnitude(a.forces.social_force) for a in placed) < 1e-12, 'stationary heading ignored'
+        for a in placed:
+            assert abs(abs(2.*math.atan2(a.pose.orientation.z, a.pose.orientation.w))-math.pi) < 1e-9
         assert 'FAULT_RESTART_ROUND' not in statuses, 'unexpected input fault'
 
         # Ignoring robot forces must not bypass the real observation/TF guard.
@@ -119,6 +142,7 @@ def child(directory, mode):
         assert not response.success, 'scene start cleared a real input fault'
         report = dict(mode=mode, passed=True, startup_robot_social_force=startup_force,
                       edited_robot_social_force=edited_force, peer_social_force=peer_force,
+                      rear_robot_social_force=rear_force, fov_cases=fov_cases,
                       wall_force=wall_force, desired_force=desired_force, agent_frames=len(batches),
                       input_loss_latched=True)
         (directory/'results.json').write_text(json.dumps(report, indent=2)+'\n')

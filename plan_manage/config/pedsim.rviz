@@ -477,6 +477,8 @@ Visualization Manager:
         social_body: true
         social_goal: true
         social_heading: true
+        social_facing: true
+        social_fov: true
         social_label: true
         social_route: true
       Queue Size: 10

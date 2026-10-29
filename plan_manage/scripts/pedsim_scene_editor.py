@@ -63,6 +63,7 @@ class Editor:
         self.guard_sub = rospy.Subscriber('/pedsim_simulator/guard_status', String, self.guard, queue_size=1)
         self.bridge_sub = rospy.Subscriber('/pedsim_single_bridge/status', String, self.guard, queue_size=1)
         rospy.wait_for_service('/pedsim_simulator/edit_scene', timeout=15.)
+        self.robot_interaction = rospy.get_param('/pedsim_simulator/pedestrians_avoid_robot', True)
         self.upstream = rospy.ServiceProxy('/pedsim_simulator/edit_scene', EditScene)
         self.call('state')
         self.replace(self.scene, remember=False)
@@ -296,10 +297,24 @@ class Editor:
             arrow=marker('social_heading',Marker.ARROW);arrow.scale.x=.04;arrow.scale.y=.12;arrow.scale.z=.15
             arrow.points=[Point(*p['start'][:2],.25),Point(p['start'][0]+.65*math.cos(p['start'][2]),p['start'][1]+.65*math.sin(p['start'][2]),.25)]
             markers.markers.append(arrow)
+            if selected and self.robot_interaction:
+                # The 1 m radius illustrates angular perception, not interaction range.
+                fov=marker('social_fov',Marker.LINE_STRIP);fov.scale.x=.025
+                fov.color.r=.1;fov.color.g=.85;fov.color.b=1.;fov.color.a=.65
+                fov.points=[Point(current.x,current.y,.18)]
+                for step in range(45):
+                    angle=current.theta+math.radians(-110.+220.*step/44.)
+                    fov.points.append(Point(current.x+math.cos(angle),current.y+math.sin(angle),.18))
+                fov.points.append(Point(current.x,current.y,.18));markers.markers.append(fov)
+                facing=marker('social_facing',Marker.ARROW);facing.scale.x=.035;facing.scale.y=.09;facing.scale.z=.1
+                facing.color=fov.color
+                facing.points=[Point(current.x,current.y,.2),Point(current.x+.65*math.cos(current.theta),current.y+.65*math.sin(current.theta),.2)]
+                markers.markers.append(facing)
             label=marker('social_label',Marker.TEXT_VIEW_FACING);label.scale.z=.22
             label.pose.position=Point(current.x,current.y,1.85)
             phase=state.phases[i] if i<len(state.phases) else 'waiting'
             label.text='#%d | %.2f m/s | %s'%(p['id'],p['desired_speed'],phase)
+            if selected and self.robot_interaction: label.text+=' | FOV 220 deg'
             markers.markers.append(label)
         self.marker_pub.publish(markers)
 

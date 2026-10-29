@@ -2,6 +2,7 @@
 """Optional pinned pedsim_ros adapter. No goals or internal forces reach planner."""
 import math
 import threading
+import time
 from collections import OrderedDict
 import rospy
 import tf2_ros
@@ -37,6 +38,9 @@ class Bridge:
     def __init__(self):
         self.lock=threading.Lock();self.odoms=OrderedDict();self.inputs=OrderedDict();self.agents=OrderedDict()
         self.started=False;self.failed=False;self.last_now=None;self.last_pair=None
+        self.last_input_received=None;self.last_agents_received=None
+        self.last_input_stamp=None;self.last_agents_stamp=None
+        self.last_watchdog_wall=time.monotonic();self.watchdog_gap_wall=None
         self.scene_revision=None;self.scene_cutoff=0;self.last_output=0
         self.auto_start=rospy.get_param('~auto_start',False)
         self.editor_required=rospy.get_param('~scene_editor_required',False)
@@ -70,6 +74,25 @@ class Bridge:
     def fault(self,reason):
         if not self.failed:
             rospy.logwarn('pedsim input fault: %s; restart this round',reason)
+            now=rospy.Time.now();wall=time.monotonic()
+            def ros_age(stamp):
+                return 'NA' if stamp is None else '%.3f'%(now-stamp).to_sec()
+            def wall_age(stamp):
+                return 'NA' if stamp is None else '%.3f'%(wall-stamp)
+            odom=next(reversed(self.odoms.values())) if self.odoms else None
+            rospy.logwarn(
+                'pedsim fault evidence: pair_age_ros=%s odom_age_ros=%s '
+                'input_stamp_age_ros=%s agents_stamp_age_ros=%s '
+                'input_rx_age_wall=%s agents_rx_age_wall=%s watchdog_gap_wall=%s '
+                'pending_input=%d pending_agents=%d odom_history=%d '
+                'scene_revision=%s last_output=%d guard=%s',
+                ros_age(self.last_pair),ros_age(odom.header.stamp if odom else None),
+                ros_age(getattr(self,'last_input_stamp',None)),
+                ros_age(getattr(self,'last_agents_stamp',None)),
+                wall_age(getattr(self,'last_input_received',None)),
+                wall_age(getattr(self,'last_agents_received',None)),
+                getattr(self,'watchdog_gap_wall',None),len(self.inputs),len(self.agents),
+                len(self.odoms),self.scene_revision,self.last_output,getattr(self,'guard_state',''))
         self.failed=True
 
     def workflow(self,now):
@@ -122,6 +145,7 @@ class Bridge:
 
     def on_input(self,msg):
         with self.lock:
+            self.last_input_received=time.monotonic();self.last_input_stamp=msg.header.stamp
             now=self.now_checked()
             try:
                 parts=msg.child_frame_id.split(':')
@@ -144,6 +168,7 @@ class Bridge:
 
     def on_agents(self,msg):
         with self.lock:
+            self.last_agents_received=time.monotonic();self.last_agents_stamp=msg.header.stamp
             now=self.now_checked()
             key=msg.header.stamp.to_nsec()
             if key<self.scene_cutoff or key<=self.last_output:return
@@ -184,6 +209,10 @@ class Bridge:
 
     def watchdog(self,_):
         with self.lock:
+            wall=time.monotonic()
+            previous=getattr(self,'last_watchdog_wall',None)
+            self.watchdog_gap_wall=None if previous is None else wall-previous
+            self.last_watchdog_wall=wall
             now=self.now_checked();self.match(now)
             if self.started:
                 if not self.odoms or not fresh(next(reversed(self.odoms.values())).header.stamp,now):
