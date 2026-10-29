@@ -6,6 +6,7 @@
   <arg name="pedestrian_speeds" default="[]"/>
   <arg name="auto_start" default="false"/>
   <arg name="enable_scene_editor" default="false"/>
+  <arg name="pedestrians_avoid_robot" default="true"/>
   <node pkg="pedsim_simulator" type="pedsim_simulator" name="pedsim_simulator" output="screen" required="true">
     <param name="scene_file" value="$(arg scene_file)"/>
     <param name="frame_id" value="world"/>
@@ -13,6 +14,7 @@
     <param name="single_pedestrian_speed" value="$(arg pedestrian_speed)"/>
     <rosparam param="pedestrian_speeds" subst_value="true">$(arg pedestrian_speeds)</rosparam>
     <param name="robot_mode" value="1"/>
+    <param name="pedestrians_avoid_robot" value="$(arg pedestrians_avoid_robot)"/>
     <param name="enable_groups" value="false"/>
     <param name="update_rate" value="10.0"/>
     <param name="simulation_factor" value="1.0"/>

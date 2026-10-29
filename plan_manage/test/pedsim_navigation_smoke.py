@@ -7,6 +7,7 @@ Uses a free private master, sends the configured robot poses, checks all people
 and force/prediction markers, writes /tmp evidence, and stops only its own round.
 Not registered in catkin: the pinned pedsim overlay is optional.
 """
+import argparse
 import json
 import math
 import os
@@ -18,10 +19,17 @@ import sys
 import time
 import xmlrpc.client
 
-scenario = sys.argv[1] if len(sys.argv) > 1 else 'crowd_2'
-edit_scene = '--edit-scene' in sys.argv[2:]
-repeat_goals = '--repeat-goals' in sys.argv[2:]
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('scenario', nargs='?', default='crowd_2')
+parser.add_argument('--edit-scene', action='store_true')
+parser.add_argument('--repeat-goals', action='store_true')
+parser.add_argument('--pedestrian-mode', choices=['interactive', 'independent'], default='interactive')
+args = parser.parse_args()
+scenario = args.scenario
+edit_scene = args.edit_scene
+repeat_goals = args.repeat_goals
 evidence_tag = 'repeat-goals' if repeat_goals else ('stage4-edited' if edit_scene else 'stage3')
+if args.pedestrian_mode == 'independent': evidence_tag += '-independent'
 package=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(package/'scripts'))
 from export_pedsim_blank import load_blank_scene
@@ -36,7 +44,8 @@ os.environ.pop('ROS_IP', None)
 logpath = Path('/tmp/cane-pedsim-%s-%s.log' % (evidence_tag, scenario))
 log = logpath.open('w')
 process = subprocess.Popen(['bash', str(package/'scripts/start_pedsim_navigation.sh'),
-                            'start', '--world', 'blank', '--scenario', scenario, '--fresh-scene', '--no-rviz', '--port', str(port)],
+                            'start', '--world', 'blank', '--scenario', scenario, '--fresh-scene', '--no-rviz',
+                            '--pedestrian-mode', args.pedestrian_mode, '--port', str(port)],
                            stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
 try:
     from pedsim_round import TimeoutTransport
@@ -187,7 +196,7 @@ try:
         values=sorted(values)
         return dict(count=len(values),p50_ms=round(values[len(values)//2]*1000,3),p95_ms=round(values[int(.95*(len(values)-1))]*1000,3),max_ms=round(max(values)*1000,3)) if values else {}
     p = odoms[-1].pose.pose.position if odoms else None
-    report = dict(edited_scene=edit_scene,repeat_goals=repeat_goals,completed_goals=len(arrivals),expected_people=expected_people,observed_max_speeds=observed_max_speeds,all_hull_frames=all_hull_frames,all_timed_frames=all_timed_frames,execution_seconds=profile([v[7] for v in execution]),transaction_seconds=profile([v[18] for v in transactions if len(v)>18]),mppi_seconds=profile([v[16] for v in transactions if len(v)>16 and math.isfinite(v[16])]),force_frames_checked=checked, marker_namespaces=sorted(namespaces),scenario=scenario, port=port, log=str(logpath), reached=reached,
+    report = dict(pedestrian_mode=args.pedestrian_mode,edited_scene=edit_scene,repeat_goals=repeat_goals,completed_goals=len(arrivals),expected_people=expected_people,observed_max_speeds=observed_max_speeds,all_hull_frames=all_hull_frames,all_timed_frames=all_timed_frames,execution_seconds=profile([v[7] for v in execution]),transaction_seconds=profile([v[18] for v in transactions if len(v)>18]),mppi_seconds=profile([v[16] for v in transactions if len(v)>16 and math.isfinite(v[16])]),force_frames_checked=checked, marker_namespaces=sorted(namespaces),scenario=scenario, port=port, log=str(logpath), reached=reached,
                   elapsed=round(time.monotonic()-began, 3), robot_final=[p.x, p.y] if p else None,
                   agent_frames=len(agents), observation_frames=len(observations), statuses=statuses,
                   path_max_points=max(paths, default=0), cloud_counts=sorted(set(clouds)),
@@ -200,7 +209,9 @@ try:
     print(json.dumps(report, indent=2), flush=True)
     assert reached, 'robot did not reach the requested goal'
     assert len(observations) >= 20 and people and all(m.num == expected_people for m in observations), 'multi-pedestrian data missing'
-    assert 'RUNNING' in statuses and force_max > 0., 'social simulation did not run'
+    assert 'RUNNING' in statuses, 'social simulation did not run'
+    if expected_people > 1 or args.pedestrian_mode == 'interactive':
+        assert force_max > 0., 'social interaction missing'
     assert clouds and all(count == 162120 and frame == 'world' for count, frame in clouds), 'wrong simulation map'
     assert report['planner_map'].endswith('/world.pcd'), 'wrong planner map'
     assert max(paths, default=0) > 10, 'local trajectory was not published'

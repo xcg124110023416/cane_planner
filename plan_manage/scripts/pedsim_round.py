@@ -157,6 +157,8 @@ def main():
     parser.add_argument('command', nargs='?', default='start', choices=['start', 'record'])
     parser.add_argument('--scenario',default='headon', help='YAML scene name; blank also supports crowd_2 and crowd_5')
     parser.add_argument('--world', choices=['blank', 'office'], default='blank')
+    parser.add_argument('--pedestrian-mode', choices=['interactive', 'independent'], default='interactive',
+                        help='interactive: people avoid robot; independent: ignore robot, retain walls/peers')
     parser.add_argument('--no-rviz', action='store_true', help='Headless navigation; no goals are sent automatically')
     parser.add_argument('--fresh-scene', action='store_true', help='Use the YAML preset without reading or writing remembered edits')
     parser.add_argument('--editor-state-file', help='Explicit scene memory file (blank arena only)')
@@ -215,10 +217,14 @@ def main():
             map_pcd = map_package/'resource/office2_modify.pcd'
             subprocess.run(['/usr/bin/python3', str(package/'scripts/export_pedsim_office.py'), str(map_pcd), str(directory/'world.xml'),'--scenario',args.scenario], check=True)
         print('Round geometry: %s' % directory, flush=True)
+        print('Pedestrian mode: %s (%s)' % (args.pedestrian_mode,
+              'people ignore the robot; walls/peers remain active' if args.pedestrian_mode == 'independent'
+              else 'people react to the robot'), flush=True)
         return directory/'world.xml', map_pcd
     return run_owned(args.port, prepare, lambda world: ['roslaunch', '--wait', 'plan_manage', 'pedsim_navigation.launch',
                      'scene_file:='+str(world[0]), 'map_pcd:='+str(world[1]),
                      'enable_scene_editor:='+str(args.world == 'blank').lower(),
+                     'pedestrians_avoid_robot:='+str(args.pedestrian_mode == 'interactive').lower(),
                      'scene_description:='+str(world[0].with_suffix('.json')),
                      'remember_last:='+str(not args.fresh_scene).lower(),
                      'editor_state_file:='+(str(Path(args.editor_state_file).expanduser().resolve()) if args.editor_state_file else ''),

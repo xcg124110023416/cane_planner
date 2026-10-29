@@ -32,6 +32,7 @@
 2. 后续地图扩展顺序：同源长走廊，再做交叉场景；仍由同一几何生成仿真墙和规划地图。当前四个阶段没有尚未接通的模块。
 3. 继续跟踪偶发输入时效故障：阶段 3 曾有一次，阶段 4 预验证也出现过 TF_STALE 和配对心跳超时。本次用户日志中重新放置机器人造成的确定性心跳中断已修复；此前其他间歇故障仍保留记录，不据此宣称全部解决。桥接会输出首次故障的具体分支；保留 guard 状态和消息间隔证据，不放宽 0.5s 限制。
 4. 研究评估下一步可在可编辑场景上固定配置、重复运行并统计等待/绕行/碰撞与耗时；仿真目标和真实社会力继续只用于诊断，规划预测仍以 CV 为基线。
+5. 已提供 `--pedestrian-mode independent`，用于行人不主动避让人杖的独立避障实验；默认 `interactive` 保留原交互。真实双模式受力对照及独立模式五人导航已通过，见末节；该开关不改变规划端凸包/预测算法。
 
 ## 已完成的阶段 1
 
@@ -177,3 +178,29 @@ bash "$(rospack find plan_manage)/scripts/start_pedsim_navigation.sh" \
 ## 本地提交节点（2026-10-29）
 
 按用户要求，阶段 1–4 的社会力仿真接入、多人规划、RViz 编辑与连续测试心跳修复一并纳入 `mpc-lfpc-prototype` 的本地提交，本次未推送云端。前面章节中的“未提交”描述各阶段验证结束时的历史状态；当前提交范围以本节为准。后续仍按“当前工作与下一步”推进。
+
+## 独立避障模式（2026-10-29）
+
+已完成。新增启动参数 `--pedestrian-mode independent|interactive`，默认保留 `interactive`。独立模式只在仿真端社会力计算中跳过 ROBOT 邻居，保留目标驱动、墙体及行人间交互。仍保留真实机器人、LFPC 位姿反馈、原时效保护和成对观测；不是关闭全部社会力。该参数在本轮启动时选择，每次积分前应用，编辑替换、加载或复位不会丢失；场景 YAML 和记忆不覆盖模式。
+
+规划端社会力凸包、当前空间走廊、实际速度 CV 预测与时间同步碰撞检查不变。橙色机器人力箭头仍属于规划估计，不是 pedsim 真值；仿真端单行人机器人交互力可从原始 `simulated_agents` 验证。上游完整补丁/manifest 增至八文件，新增 libpedsim 的头文件和实现；已从原固定 revision 校验原始文件并重新应用全部补丁核对 hash，依赖工作区已重建。
+
+运行：
+
+```bash
+bash "$(rospack find plan_manage)/scripts/start_pedsim_navigation.sh" \
+  start --world blank --scenario crowd_5 --pedestrian-mode independent
+```
+
+沿用 RViz 的机器人起点 `(-5,0)` 朝 +X、终点 `(5,0)` 和原场景编辑操作。改用 `--pedestrian-mode interactive` 恢复双向交互；当前轮结束后重新启动命令生效。启动器还修复了 `--help` 被 catkin 环境脚本截获的问题。
+
+验证：
+
+- `catkin build pedsim_simulator --no-status -j4 -p2`：五个依赖包全部构建成功；主规划 C++ 未改动。
+- `pedsim_robot_interaction_smoke.py`：在私有端口 `48589`、`47299` 分别运行真实交互/独立模式，均通过。单行人启动与编辑替换后的机器人社会力，交互模式约 `0.447/0.444`，独立模式均为 `0`；独立模式仍有约 `0.214` 的邻居社会力、`0.014` 的墙体力和 `1.280` 的目标力。主动断开真实机器人输入仍按原规则锁定，场景 start 不能清除锁定。
+- `pedsim_navigation_smoke.py crowd_5 --edit-scene --pedestrian-mode independent`：私有端口 `46989` 通过，真实编辑五人后完成一次到达，最终约 `(4.911,-0.058)`，87 帧有效观测、137 帧全员当前凸包、426 帧全员预测显示，无输入锁定。MPPI P50/P95/最大约 `35.410/55.312/56.319 ms`，仅代表本轮观测。
+- `pedsim_navigation_smoke.py headon --pedestrian-mode independent`：更新后的启动脚本完整通过，机器人完成一次到达，最终约 `(4.920,0.039)`；单行人社会力始终为 `0`，沿原目标直线行走。87 帧观测，无输入锁定，摘要为 `/tmp/cane-pedsim-stage3-independent-headon.json`。
+- 启动器帮助与 Bash/Python 语法检查通过。真实受力测试日志 `/tmp/cane-pedsim-robot-interaction-test.log`；五人导航摘要 `/tmp/cane-pedsim-stage4-edited-independent-crowd_5.json`。临时证据可能被系统清理。
+- `git diff --check` 通过；自有测试进程已清理，用户原 11311 master 保留。
+
+用户已实测确认该模式正常，本次按要求将模式开关、上游补丁、测试和说明一并纳入本地提交，未推送云端。下一步仍按“当前工作与下一步”进行地图扩展和可重复实验统计；本开关不是规划算法改动，也不代表所有场景避障成功。

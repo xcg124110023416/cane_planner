@@ -17,12 +17,15 @@
 +  pub_guard_status_.shutdown();
    pub_waypoints_.shutdown();
 
-@@ -128,5 +134,17 @@
+@@ -128,5 +134,20 @@
        "base_footprint");
 
 -  paused_ = false;
 +  nh_.param<bool>("start_paused", paused_, false);
 +  nh_.param<bool>("require_fresh_robot", require_fresh_robot_, false);
++  nh_.param<bool>("pedestrians_avoid_robot", pedestrians_avoid_robot_, true);
++  ROS_INFO_STREAM("Pedestrian interaction mode: " <<
++      (pedestrians_avoid_robot_ ? "interactive (avoid robot)" : "independent (ignore robot)"));
 +  if (require_fresh_robot_) {
 +    pub_robot_input_ = nh_.advertise<nav_msgs::Odometry>("robot_input", 10);
 +    pub_guard_status_ = nh_.advertise<std_msgs::String>("guard_status", 1, true);
@@ -36,7 +39,7 @@
 +  }
 
    spawn_timer_ =
-@@ -139,4 +157,42 @@
+@@ -139,4 +160,42 @@
    ros::Rate r(CONFIG.updateRate);
 
 +  if (require_fresh_robot_) SCENE.dissolveClusters(); // instantiate robot without integrating agents
@@ -79,7 +82,7 @@
 +  }
    while (ros::ok()) {
      if (!robot_) {
-@@ -151,6 +207,9 @@
+@@ -151,6 +210,12 @@
      }
 
 -    if (!paused_) {
@@ -88,9 +91,12 @@
        updateRobotPositionFromTF();
 +      if (require_fresh_robot_) robot_started_ = true;
 +      if (scene_editor_enabled_) advanceEditedPedestrians();
++      // Apply before every force calculation, including newly edited agents.
++      for (Agent* agent : SCENE.getAgents())
++        if (agent->getType() != Ped::Tagent::ROBOT) agent->setAvoidRobot(pedestrians_avoid_robot_);
        SCENE.moveAllAgents();
 
-@@ -219,4 +278,56 @@
+@@ -219,4 +284,56 @@
  }
 
 +// Status updates are latched and emitted on transition only, never every cycle.
@@ -147,7 +153,7 @@
 +
  void Simulator::updateRobotPositionFromTF() {
    if (!robot_) return;
-@@ -230,5 +341,6 @@
+@@ -230,5 +347,6 @@
      tf::StampedTransform tfTransform;
      try {
 -      transform_listener_->lookupTransform(frame_id_, robot_base_frame_id_,
@@ -155,14 +161,14 @@
 +      else transform_listener_->lookupTransform(frame_id_, robot_base_frame_id_,
                                             ros::Time(0), tfTransform);
      } catch (tf::TransformException& e) {
-@@ -289,5 +401,5 @@
+@@ -289,5 +407,5 @@
 
  void Simulator::publishAgents() {
 -  if (SCENE.getAgents().size() < 2) {
 +  if (SCENE.getAgents().size() < 2 && !require_fresh_robot_) {
      return;
    }
-@@ -346,4 +458,15 @@
+@@ -346,4 +464,15 @@
    }
 
 +  if (require_fresh_robot_) {
@@ -178,7 +184,7 @@
 +  }
    pub_agent_states_.publish(all_status);
  }
-@@ -441,2 +564,95 @@
+@@ -441,2 +570,95 @@
    return msg_header;
  }
 +
@@ -288,7 +294,7 @@
 +#include <std_msgs/String.h>
  #include <std_srvs/Empty.h>
 
-@@ -102,9 +104,33 @@
+@@ -102,9 +104,34 @@
    void publishRobotPosition();
    void publishWaypoints();
 +  bool editScene(pedsim_srvs::EditScene::Request&, pedsim_srvs::EditScene::Response&);
@@ -298,6 +304,7 @@
    ros::NodeHandle nh_;
    bool paused_;
 +  bool require_fresh_robot_ = false;
++  bool pedestrians_avoid_robot_ = true;
 +  bool robot_started_ = false; // set only at actual integration boundary
 +  std::string guard_status_;
 +  std::string guard_latch_reason_;
@@ -322,7 +329,7 @@
 +  std::vector<EditedPedestrian> edited_pedestrians_;
 
    // publishers
-@@ -113,4 +139,5 @@
+@@ -113,4 +140,5 @@
    ros::Publisher pub_agent_groups_;
    ros::Publisher pub_robot_position_;
 +  ros::Publisher pub_robot_input_;
@@ -385,3 +392,32 @@
 +geometry_msgs/Pose2D[] poses
 +string[] phases
 +bool running
+--- a/3rdparty/libpedsim/include/pedsim/ped_agent.h
++++ b/3rdparty/libpedsim/include/pedsim/ped_agent.h
+@@ -62,4 +62,5 @@
+   void setTeleop(bool opstatus) { teleop = opstatus; }
+   void setRobotPosDiffScalingFactor(double scalingFactor);
++  void setAvoidRobot(bool enabled) { avoidRobot = enabled; }
+
+   int getId() const { return id; };
+@@ -107,4 +108,5 @@
+   bool teleop;
+   double robotPosDiffScalingFactor;
++  bool avoidRobot;
+
+   double forceFactorDesired;
+--- a/3rdparty/libpedsim/src/ped_agent.cpp
++++ b/3rdparty/libpedsim/src/ped_agent.cpp
+@@ -43,4 +43,5 @@
+   relaxationTime = 0.5;
+   robotPosDiffScalingFactor = 5;
++  avoidRobot = true;
+ }
+
+@@ -155,4 +156,6 @@
+     // don't compute social force to yourself
+     if (other->id == id) continue;
++    // Independent navigation tests retain all pedestrian/obstacle forces.
++    if (!avoidRobot && other->getType() == ROBOT) continue;
+
+     // compute difference between both agents' positions

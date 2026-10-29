@@ -1,7 +1,7 @@
 PEDSIM SOCIAL-FORCE NAVIGATION (UP TO FIVE PEDESTRIANS)
 ====================================================
 Deploy the optional patched dependency described in DEPLOYMENT.txt and
-upstream-manifest.json first. The launcher checks all six patched source
+upstream-manifest.json first. The launcher checks all eight patched source
 hashes. The standard deterministic pedestrian launch is a separate source.
 
 START
@@ -45,6 +45,23 @@ uses the new SocialPedestrianPanel, described below. Multi-person presets use
 a pedestrians list with independent start, goal and desired_max_speed values.
 The launcher passes the entire speed array to the patched simulator in XML
 agent order. Initial velocity is zero. Office still uses YAML plus round restart.
+
+PEDESTRIAN RESPONSE TO ROBOT
+--pedestrian-mode interactive (default): retain upstream social interaction with
+the robot. --pedestrian-mode independent: pedestrians ignore the robot while
+retaining goal driving, wall forces and interactions with other pedestrians.
+For independent avoidance evaluation:
+  bash /home/xcg/ws/src/cane_planner/plan_manage/scripts/start_pedsim_navigation.sh start --world blank --scenario crowd_5 --pedestrian-mode independent
+The chosen mode is printed at startup and applies for the whole round, including
+new/loaded/reset people. Restart the owned round to change mode; scene YAML and
+automatic scene memory do not override it. Direct launch users can pass
+pedestrians_avoid_robot:=false to pedsim_navigation.launch or
+pedsim_single_source.launch. true retains the original behavior.
+This switch changes only simulator dynamics. Planner-side force estimates/hulls,
+observed-velocity CV prediction and collision checks are unchanged. Orange robot
+force markers are planner estimates, not the simulator's true robot force.
+Robot odom/TF feedback and the original freshness guard remain mandatory in both
+modes; ignoring robot forces does not remove the controlled robot from the scene.
 
 INTERACTIVE BLANK SCENES
 The blank launcher selects pedsim.rviz and enables the real simulator editor.

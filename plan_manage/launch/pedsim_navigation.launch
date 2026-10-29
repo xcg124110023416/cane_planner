@@ -6,6 +6,7 @@
   <arg name="use_static_global_map" default="false"/>
   <arg name="visualize" default="true"/>
   <arg name="enable_scene_editor" default="false"/>
+  <arg name="pedestrians_avoid_robot" default="true"/>
   <arg name="scene_description" default=""/>
   <arg name="scene_context" default="$(find plan_manage)/config/pedsim/blank_scenarios.yaml"/>
   <arg name="remember_last" default="true"/>
@@ -26,6 +27,7 @@
     <arg name="pedestrian_speed" value="$(arg pedestrian_speed)"/>
     <arg name="pedestrian_speeds" value="$(arg pedestrian_speeds)"/>
     <arg name="enable_scene_editor" value="$(arg enable_scene_editor)"/>
+    <arg name="pedestrians_avoid_robot" value="$(arg pedestrians_avoid_robot)"/>
   </include>
   <node if="$(arg enable_scene_editor)" pkg="plan_manage" type="pedsim_scene_editor.py" name="pedsim_scene" output="screen" required="true">
     <param name="scene_description" value="$(arg scene_description)"/>

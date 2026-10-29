@@ -3,11 +3,11 @@
   "files": {
     "pedsim_simulator/src/simulator.cpp": {
       "baseline_sha256": "a3132016a625fba757f460dee0d97b8d1c89d8157dd26d92623ab66bf6735002",
-      "patched_sha256": "2973cc1a45f95f39bc05d994784a2fd0fb3927a271a39db33495ec60c8087a92"
+      "patched_sha256": "c7018e36fa2fad0bdffcb75ace4ca227a75d2ded71312257b4a1f54a92c0476f"
     },
     "pedsim_simulator/include/pedsim_simulator/simulator.h": {
       "baseline_sha256": "59e765ec16a3e6c7f9621ffc35f9c9e631ac056019b5be64966fb12ff4000249",
-      "patched_sha256": "d89685b0f219b58a965ccc24f793949c2ac71377b0960f71cb193b9dde4a179c"
+      "patched_sha256": "e8c3430941fb18e6a6bd79112a57888f6619fbb3a346615b5306a333063330ef"
     },
     "pedsim_simulator/include/pedsim_simulator/scene.h": {
       "baseline_sha256": "635143701ef83898a065d93fd2da86eaa4d073d6d166a9a5ff0cd343a8d99b93",
@@ -24,6 +24,14 @@
     "pedsim_srvs/srv/EditScene.srv": {
       "baseline_sha256": null,
       "patched_sha256": "f4c6127af09570463b4cbe816edbf1a9407fcd93f686f3d4945fdcaa6bd08181"
+    },
+    "3rdparty/libpedsim/include/pedsim/ped_agent.h": {
+      "baseline_sha256": "0840956136ccb70172938a17dbe894823d67a77eb5e79c9b645ee8ae87243742",
+      "patched_sha256": "d43d2aef0fd2e30bd980e3d54cdcc40474746f542f9605655eff2e87e08ed883"
+    },
+    "3rdparty/libpedsim/src/ped_agent.cpp": {
+      "baseline_sha256": "f6630b554d7e3fd03a58e0cf7131753203c701a137b48b6d3de6996735f305a9",
+      "patched_sha256": "14db383c9f2968283a2a3bf014fe96eca10204de94b78730eeca4bbb1fda9219"
     }
   }
 }

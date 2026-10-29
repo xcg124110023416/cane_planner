@@ -3,7 +3,8 @@ The manual source/unpause commands below are low-level deployment/debug steps,
 not needed by start_pedsim_navigation.sh.
 
 CURRENT MULTI-PERSON AND SCENE EDITOR EXTENSION (2026-10-29)
-The current manifest includes pedestrian_speeds and guarded EditScene.srv.
+The current manifest includes pedestrian_speeds, guarded EditScene.srv and
+selective pedestrian/robot social interaction.
 Reapply the complete patch to pristine pinned sources, not on top of an older
 patch; verify baseline and patched SHA256. The locally deployed workspace has
 been rebuilt for this version; no existing user nodes were restarted.
@@ -21,10 +22,13 @@ names containing 'single' are retained for compatibility. Older validation notes
 below describe the original single-person deployment and historical candidates;
 current stage evidence is in docs/PEDSIM_IMPLEMENTATION_PROGRESS.md.
 
-Blank navigation enables enable_scene_editor. The patch now spans six files,
+Blank navigation enables enable_scene_editor. The patch now spans eight files,
 including pedsim_srvs CMakeLists.txt/package.xml and new srv/EditScene.srv.
 baseline_sha256=null means the file must not exist in pristine pinned sources.
-Rebuild pedsim_srvs and pedsim_simulator together with catkin build. The main
+The two additional files are libpedsim's ped_agent.h and ped_agent.cpp. Rebuild
+pedsim and pedsim_simulator (including dependencies) with catkin build; the Tagent
+layout changes, so do not reuse an older simulator binary with the new library.
+The main
 planner package remains buildable without this optional overlay; the editor
 Python node imports EditScene only when launched by the blank entry.
 The scene service supports state/replace/start/pause with expected_revision.
@@ -35,6 +39,19 @@ legacy mode retains batch_nanoseconds. The bridge excludes old-version batches
 after a new version arrives, keeps exact odom/TF evidence pairing, and never
 refresh-stamps old observations. Do not use a stage-3 bridge with this binary.
 The default blank entry waits for editor ready before first simulator release.
+
+pedestrians_avoid_robot defaults to true. Setting false makes each pedestrian
+skip ROBOT neighbors only in socialForce(), preserving goal, obstacle and peer
+forces. The simulator applies it before each integration so replacement agents
+inherit the selected mode. There is no runtime mode change or scene-file override.
+The robot still follows actual LFPC TF, and all input guards remain unchanged.
+The normal wrapper exposes --pedestrian-mode interactive|independent.
+
+Optional verification after loading both ROS workspaces:
+  python3 plan_manage/test/pedsim_robot_interaction_smoke.py
+  python3 plan_manage/test/pedsim_navigation_smoke.py crowd_5 --pedestrian-mode independent
+The first checks both real simulation modes, startup/replaced people, retained
+peer/wall/goal forces and the real input-loss latch on owned private masters.
 
 Optional single-pedestrian pedsim validation
 ==========================================
