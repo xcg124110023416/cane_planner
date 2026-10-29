@@ -8,6 +8,8 @@
 #include <queue>
 #include <string>
 #include <vector>
+#include <cstdint>
+#include <utility>
 
 #include <plan_env/sdf_map.h>
 
@@ -20,6 +22,8 @@ namespace cane_planner
   {
   private:
     friend class StaticMpcTestAccess;
+    uint64_t map_generation_ = 0;
+    std::pair<uint64_t,uint64_t> staticMapRevisionUnlocked() const;
     /* data */
     ros::NodeHandle node_;
     double resolution_inv_;
@@ -117,6 +121,9 @@ namespace cane_planner
     bool isTraversable(Eigen::Vector3d state, double times);
     double getCollisionDistance(Eigen::Vector2d pos);
     bool hasStaticGlobalMap() const { return static_global_esdf_ready_ || static_global_map_ready_; }
+    using MapRevision = std::pair<uint64_t,uint64_t>;
+    // Static backends are immutable between init/setMap; local ESDF has its own revision.
+    MapRevision getStaticMapRevision() const;
     // Matches the backend selected by isStaticTraversable, with local SDF fallback.
     double getStaticQueryResolution() const
     {
@@ -128,7 +135,7 @@ namespace cane_planner
     // Preserves selected backend semantics; not an observed-free certificate.
     bool getStaticCorridorGrid(const Eigen::Vector2d& lower, const Eigen::Vector2d& upper,
         Eigen::Vector2d& origin, double& resolution, Eigen::Vector2i& size,
-        std::vector<uint8_t>& blocked, std::string& reason);
+        std::vector<uint8_t>& blocked, std::string& reason, MapRevision* revision = nullptr);
     bool isStaticTraversable(double x, double y) const;
     double getStaticCollisionDistance(Eigen::Vector2d pos);
     int countStaticTraversableAround(const Eigen::Vector2d &pos, double radius) const;

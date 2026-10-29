@@ -77,7 +77,7 @@ actual LFPC state. Do not schedule another search or reuse old corridor/controls
 Report RETAINED_AFTER_REBUILD_FAILED or RETAINED_AFTER_MPPI_REJECTED on successful
 fallback; rejected candidates never replace the authoritative route. Invalid or
 expired observations still withhold execution. Keep STOP heartbeat, current-root
-containment, timed pedestrian envelopes, static COM/foot checks and exact goal.
+containment, timed pedestrian envelopes, COM/foot certified-corridor-union checks and selected-map revision validation and exact goal.
 
 FIRI and preview always separate static cells and accepted current pedestrian
 hulls. Timed collision enable does not remove spatial pedestrian exclusion.

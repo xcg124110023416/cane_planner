@@ -63,6 +63,13 @@ bool PlannerManager::advanceExecutionLocked(const ros::Time& now) {
     const PedestrianFrameToken frame{pedestrian_generation_,pedestrians_enabled_,pedestrian_header_.stamp,pedestrian_receipt_};
     std::vector<PoseSample> samples;
     const auto current=lfpc_model_->getCOMPos();const double current_yaw=lfpc_model_->getNextIterState().z();
+    // Rebuild spatial free space only when its selected map backend changes.
+    // Unchanged maps require no per-pose static queries during execution.
+    if(collision_->getStaticMapRevision()!=execution_map_revision_) {
+        const auto rebuilt=updateAndPublishConvexCorridorLocked(Eigen::Vector3d(current.x(),current.y(),current_yaw));
+        if(!rebuilt.feasible)return finish("INVALID_STATIC_CORRIDOR");
+        execution_corridor_=rebuilt;execution_map_revision_=corridor_map_revision_;
+    }
     samples.push_back({current,current_yaw,execution_phase_});
     // Include boundary rotation, every nominal LFPC sample, and extra20ms poses.
     if(execution_phase_==0.) {
@@ -107,17 +114,17 @@ bool PlannerManager::advanceExecutionLocked(const ros::Time& now) {
         }
     }
     if(!dynamic_check.bind(obstacles,shape))return finish("DYNAMIC_DATA_INVALID");
-    auto static_free=[&](const V& p) {return p.allFinite() && (collision_->hasStaticGlobalMap()?
-        collision_->isStaticTraversable(p.x(),p.y()):collision_->isTraversable(p.x(),p.y()));};
-    if(!static_free(canonical.getFootPosition()))return finish("INVALID_STATIC_CORRIDOR");
+    auto in_corridor=[&](const V& p) {
+        return p.allFinite() && std::any_of(execution_corridor_.segments.begin(),execution_corridor_.segments.end(),
+            [&](const ConvexCorridor::Segment& region){return ConvexCorridor::contains(region,p,1e-6);});
+    };
+    if(!in_corridor(canonical.getFootPosition()))return finish("INVALID_STATIC_CORRIDOR");
     for(const auto& s:samples) {
-        // The spatial corridor constrains the COM reference. Future human-cane
+        // The spatial corridor constrains COM samples and the support foot. Future human-cane
         // envelopes are used only for time-matched pedestrian collision checks.
-        if(!std::any_of(execution_corridor_.segments.begin(),execution_corridor_.segments.end(),
-            [&](const ConvexCorridor::Segment& region){return ConvexCorridor::contains(region,s.position.head<2>(),1e-6);}))
-            return finish("INVALID_STATIC_CORRIDOR");
-        if(!static_free(s.position.head<2>()))return finish("INVALID_STATIC_CORRIDOR");
+        if(!in_corridor(s.position.head<2>()))return finish("INVALID_STATIC_CORRIDOR");
     }
+    if(collision_->getStaticMapRevision()!=execution_map_revision_)return finish("INVALID_STATIC_CORRIDOR");
     const auto authorized=ros::Time::now();
     if(!authorizePedestrianFrameLocked(frame,authorized))return finish("DYNAMIC_DATA_INVALID");
     const double age=frame.enabled && mpc_controller_->timedCollisionEnabled()?(authorized-frame.stamp).toSec():0.;

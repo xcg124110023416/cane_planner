@@ -115,10 +115,11 @@ public:
         EXPECT_EQ(reason,"MAP_UNAVAILABLE");
     }
 
-    static void localProducer(CollisionDetection& c)
+    static void localProducer(CollisionDetection& c,bool signed_distance=false)
     {
         ros::NodeHandle nh("/firi_local_producer_test");
         nh.setParam("sdf_map/resolution", .1);
+        nh.setParam("sdf_map/signed_dist", signed_distance);
         nh.setParam("sdf_map/map_size_x", 6.); nh.setParam("sdf_map/map_size_y", 6.); nh.setParam("sdf_map/map_size_z", 4.);
         nh.setParam("sdf_map/ground_height", -1.);
         nh.setParam("sdf_map/local_update_range_x", 5.5); nh.setParam("sdf_map/local_update_range_y", 5.5); nh.setParam("sdf_map/local_update_range_z", 4.5);
@@ -137,6 +138,13 @@ public:
         EXPECT_EQ(c.sdf_map_->getOccupancy(Eigen::Vector3d(1.05,.05,.45)),SDFMap::OCCUPIED);
         EXPECT_FALSE(c.isTraversable(1.05,.05));
         EXPECT_TRUE(c.isTraversable(-1.05,-1.05)); // existing optimistic unknown semantics
+        const auto first_revision=c.getStaticMapRevision();
+        fast_planner::SdfProducerTestAccess::update(*c.sdf_map_);
+        EXPECT_EQ(first_revision,c.getStaticMapRevision()); // identical ESDF values keep the certificate
+        c.sdf_map_->setOccupied(Eigen::Vector3d(.55,.05,.45));
+        c.sdf_map_->updateESDF3d();
+        EXPECT_NE(first_revision,c.getStaticMapRevision());
+        EXPECT_FALSE(c.isTraversable(.55,.05));
         Eigen::Vector2d origin; Eigen::Vector2i size; double res;std::vector<uint8_t> blocked;std::string reason;
         ASSERT_TRUE(c.getStaticCorridorGrid(Eigen::Vector2d(-2,-2),Eigen::Vector2d(2,2),origin,res,size,blocked,reason));
         int free_count=0;
@@ -147,6 +155,18 @@ public:
         }
         EXPECT_GT(free_count,0);
         EXPECT_FALSE(c.getStaticCorridorGrid(Eigen::Vector2d(20,20),Eigen::Vector2d(21,21),origin,res,size,blocked,reason));
+        CollisionDetection::MapRevision snapshot_revision;
+        ASSERT_TRUE(c.getStaticCorridorGrid(Eigen::Vector2d(-2,-2),Eigen::Vector2d(2,2),origin,res,size,blocked,reason,&snapshot_revision));
+        EXPECT_EQ(snapshot_revision,c.getStaticMapRevision());
+        c.static_global_map_ready_=true; // the selected fixed map ignores local ESDF changes
+        const auto fixed_revision=c.getStaticMapRevision();
+        c.sdf_map_->resetBuffer();
+        EXPECT_EQ(fixed_revision,c.getStaticMapRevision());
+        c.static_global_map_ready_=false;
+        EXPECT_NE(snapshot_revision,c.getStaticMapRevision());
+        const auto before_replacement=c.getStaticMapRevision();
+        auto replacement=c.sdf_map_;c.setMap(replacement);
+        EXPECT_NE(before_replacement,c.getStaticMapRevision());
     }
 
     static void resolutionBackends(CollisionDetection &c)
@@ -247,18 +267,44 @@ TEST(StaticMpcRuntime, WeightedCommandMatchesExecutedAction)
     expectExecutedPath(c,m,command);
 }
 
-TEST(StaticMpcRuntime, WeightedFootCollisionFallsBackToVerifiedSampleReproducibly)
+TEST(StaticMpcRuntime, CertifiedCorridorDoesNotRequirePointMapQueries)
+{
+    MpcController c;StaticMpcTestAccess::configure(c);
+    // FIRI's caller owns the map certificate; the rollout needs only its regions.
+    c.setConvexCorridor({box()});
+    const auto model=StaticMpcTestAccess::model();
+    const auto command=c.plan(model,Eigen::Vector3d(2,0,0));
+    ASSERT_TRUE(c.lastPlanValid());
+    expectExecutedPath(c,model,command);
+}
+
+TEST(StaticMpcRuntime, FootMustBelongToCorridorUnionEvenWhenMapIsFree)
+{
+    MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::angleLimit(c,0.);
+    c.setCollision(StaticMpcTestAccess::map());c.setConvexCorridor({box(-.2,1.)});
+    const auto model=StaticMpcTestAccess::model();
+    c.plan(model,Eigen::Vector3d(2,0,0));
+    EXPECT_FALSE(c.lastPlanValid());
+    EXPECT_GT(c.getDebugMetrics().convex_corridor_reject_count,0);
+    // The foot may occupy another region than the COM; only union membership matters.
+    c.setConvexCorridor({box(-.2,1.),box(-.4,-.15)});
+    c.plan(model,Eigen::Vector3d(2,0,0));
+    EXPECT_TRUE(c.lastPlanValid());
+}
+
+TEST(StaticMpcRuntime, WeightedFootOutsideUnionFallsBackToVerifiedSampleReproducibly)
 {
     MpcController a,b;auto m=StaticMpcTestAccess::model();auto collision=StaticMpcTestAccess::map(true);
     for(auto* c:{&a,&b}) {
         StaticMpcTestAccess::configure(*c);StaticMpcTestAccess::sampling(*c,64,1,.35);
-        c->setCollision(collision);c->setConvexCorridor({box()});
+        c->setCollision(collision);
+        c->setConvexCorridor({box(-.20,1.),box(-1.,-.295),box(-1.,1.,.045,1.),box(-1.,1.,-1.,-.045)});
     }
     const auto expected=a.plan(m,Eigen::Vector3d(2,0,0));const auto actual=b.plan(m,Eigen::Vector3d(2,0,0));
     ASSERT_TRUE(a.lastPlanValid());ASSERT_TRUE(b.lastPlanValid());EXPECT_EQ(expected,actual);
     EXPECT_TRUE(a.getDebugMetrics().weighted_checked);EXPECT_TRUE(a.getDebugMetrics().weighted_fallback);
     EXPECT_EQ(1,a.optimizationEvidence().weighted_rejects);
-    EXPECT_GT(a.getDebugMetrics().static_reject_count,0);expectExecutedPath(a,m,expected);
+    EXPECT_GT(a.getDebugMetrics().convex_corridor_reject_count,0);expectExecutedPath(a,m,expected);
 }
 
 TEST(StaticMpcRuntime, WeightedMeanAcrossNonconvexUnionIsRechecked)
@@ -273,17 +319,15 @@ TEST(StaticMpcRuntime, WeightedMeanAcrossNonconvexUnionIsRechecked)
     expectExecutedPath(c,m,command);
 }
 
-TEST(StaticMpcRuntime, EverySampleOutsideUnionOrInStaticObstacleStops)
+TEST(StaticMpcRuntime, EverySampleOutsideUnionStops)
 {
-    for(bool static_obstacle:{false,true}) {
         MpcController c;StaticMpcTestAccess::configure(c);
-        c.setCollision(StaticMpcTestAccess::map(false,static_obstacle));
-        c.setConvexCorridor({static_obstacle?box():box(-.001,.001)});
+        c.setCollision(StaticMpcTestAccess::map());
+        c.setConvexCorridor({box(-.001,.001)});
         EXPECT_TRUE(c.plan(StaticMpcTestAccess::model(),Eigen::Vector3d(2,0,0)).isZero());
         EXPECT_FALSE(c.lastPlanValid());EXPECT_FALSE(c.getDebugMetrics().weighted_checked);
         EXPECT_EQ(0,c.getDebugMetrics().valid_trajectory_count);
         EXPECT_TRUE(c.getBestPath().empty());EXPECT_TRUE(StaticMpcTestAccess::warm(c).empty());
-    }
 }
 
 TEST(StaticMpcRuntime, ContinuousOptimizationImprovesCostAndReplaysFullState)
@@ -439,6 +483,12 @@ TEST(StaticMpcRuntime, LocalProducerMatchesDefaultHeightFilterAndModel)
 {
     auto c=StaticMpcTestAccess::map();
     StaticMpcTestAccess::localProducer(*c);
+}
+
+TEST(StaticMpcRuntime, SignedDistanceRevisionIgnoresIdenticalRecomputation)
+{
+    auto c=StaticMpcTestAccess::map();
+    StaticMpcTestAccess::localProducer(*c,true);
 }
 
 TEST(StaticMpcRuntime, TriangularCorridorAccepted)

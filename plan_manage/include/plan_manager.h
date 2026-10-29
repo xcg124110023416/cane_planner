@@ -286,6 +286,7 @@ namespace cane_planner
         double execution_phase_=0.;
         ros::Time execution_clock_;
         ConvexCorridor::Result execution_corridor_;
+        CollisionDetection::MapRevision corridor_map_revision_, execution_map_revision_;
         MpcController::CollisionWitness execution_witness_;
         std::mutex fsmMutex_;
         ros::Timer execution_timer_;

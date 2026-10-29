@@ -303,14 +303,11 @@ bool MpcController::advance(LFPC& state,double action,std::vector<Eigen::Vector3
     state.updateOneStep();
     const auto points=state.getStepCOMPath();
     const auto& phases=state.getStepCOMTimes();
-    auto free=[&](const Eigen::Vector2d& p){return p.allFinite() && (collision_->hasStaticGlobalMap()?
-        collision_->isStaticTraversable(p.x(),p.y()):collision_->isTraversable(p.x(),p.y()));};
     if(points.size()<=previous_samples || phases.size()!=points.size() ||
-       !state.getCOMPos().allFinite() || !free(state.getFootPosition())) {
+       !state.getCOMPos().allFinite()) {
         ++last_debug_metrics_.static_reject_count;return false;
     }
-    for(size_t i=previous_samples;i<points.size();++i) {
-        const Eigen::Vector2d p=points[i].head<2>();
+    auto in_corridor=[&](const Eigen::Vector2d& p) {
         last_debug_metrics_.corridor_evaluated=true;
         const bool inside=spatialFree(p);
         if(!inside) {
@@ -319,7 +316,14 @@ bool MpcController::advance(LFPC& state,double action,std::vector<Eigen::Vector3
             last_debug_metrics_.max_convex_corridor_violation=std::max(last_debug_metrics_.max_convex_corridor_violation,v);
             ++last_debug_metrics_.convex_corridor_reject_count;return false;
         }
-        if(!free(p)){++last_debug_metrics_.static_reject_count;return false;}
+        return true;
+    };
+    // Static free space is certified by FIRI once, outside the sampled rollouts.
+    // The support foot and COM may belong to different regions of the union.
+    if(!in_corridor(state.getFootPosition()))return false;
+    for(size_t i=previous_samples;i<points.size();++i) {
+        const Eigen::Vector2d p=points[i].head<2>();
+        if(!in_corridor(p))return false;
         const double time=elapsed+phases[i]-phase_start;
         if (!std::isfinite(time) || time<=elapsed || !timedFree(p,time,timed_observation_age_,state.getNextIterState()(2))) return false;
     }
@@ -422,9 +426,7 @@ Eigen::Vector3d MpcController::plan(const LFPC::Ptr& base,const Eigen::Vector3d&
         cfg_.nominal_aw>=0 && cfg_.nominal_aw<=cfg_.max_aw && cfg_.max_api>=0 && cfg_.sigma_api>=0 &&
         cfg_.max_api<=3.14159265358979323846 && cfg_.temperature>0 && cfg_.w_steer>=0 && cfg_.w_dapi>=0 && cfg_.w_goal>=0 && cfg_.goal_arrival_threshold>=0;
     const bool inside=base && std::isfinite(base->getNextIterState()(2)) && spatialFree(base->getCOMPos().head<2>());
-    if(!config || !timed_input_valid_ || !collision_ || !goal.allFinite() || !has_convex_corridor_ || !inside ||
-       !(collision_->hasStaticGlobalMap()?collision_->isStaticTraversable(base->getCOMPos().x(),base->getCOMPos().y()):
-         collision_->isTraversable(base->getCOMPos().x(),base->getCOMPos().y()))) {
+    if(!config || !timed_input_valid_ || !goal.allFinite() || !has_convex_corridor_ || !inside) {
         publishSampleTrajectories({},Eigen::VectorXd());return finish();
     }
     timed_root_=base->getCOMPos().head<2>();timed_root_yaw_=base->getNextIterState()(2);

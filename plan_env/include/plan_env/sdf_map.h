@@ -5,6 +5,8 @@
 #include <Eigen/StdVector>
 
 #include <queue>
+#include <cstdint>
+#include <mutex>
 #include <ros/ros.h>
 #include <tuple>
 
@@ -58,6 +60,9 @@ public:
   double getDistance(const Eigen::Vector3i& id);
   double getDistWithGrad(const Eigen::Vector3d& pos, Eigen::Vector3d& grad);
   void updateESDF3d();
+  // Pair snapshots/revisions with the producer's existing map mutex.
+  std::unique_lock<std::mutex> lockDistanceMap() const;
+  uint64_t distanceRevision() const { return distance_revision_; } // caller holds lockDistanceMap
   void resetBuffer();
   void resetBuffer(const Eigen::Vector3d& min, const Eigen::Vector3d& max);
 
@@ -83,6 +88,7 @@ public:
 
 private:
   friend class SdfProducerTestAccess;
+  uint64_t distance_revision_ = 0;
   void clearAndInflateLocalMap();
   void inflatePoint(const Eigen::Vector3i& pt, int step, vector<Eigen::Vector3i>& pts);
   void setCacheOccupancy(const int& adr, const int& occ);

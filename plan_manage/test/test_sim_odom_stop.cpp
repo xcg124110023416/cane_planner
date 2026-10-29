@@ -30,6 +30,7 @@ public:
     static void block(CollisionDetection& c, const Eigen::Vector2d& p) {
         const Eigen::Vector2i cell=((p-c.static_origin_)*c.static_map_inv_resolution_).array().floor().cast<int>();
         c.static_inflated_[c.staticToAddress(cell)]=1;
+        ++c.map_generation_; // model a selected-map update, as init/setMap do in production
     }
     static std::vector<double> state(const LFPC& m)
     {
@@ -157,6 +158,14 @@ public:
     static LFPC expectedSample(PlannerManager& m,double phase) {LFPC value;m.execution_root_.sampleControlledStep(m.execution_control_,phase,value);return value;}
     static void clipExecutionCorridor(PlannerManager& m,double xmax) {
         for(auto& region:m.execution_corridor_.segments)region.halfspaces.push_back({Eigen::Vector2d(1,0),xmax});
+    }
+    static void clipExecutionFoot(PlannerManager& m,double xmin) {
+        for(auto& region:m.execution_corridor_.segments)region.halfspaces.push_back({Eigen::Vector2d(-1,0),-xmin});
+    }
+    static auto executionRevision(PlannerManager& m) {return m.execution_map_revision_;}
+    static bool executionContains(PlannerManager& m,const Eigen::Vector2d& p) {
+        return std::any_of(m.execution_corridor_.segments.begin(),m.execution_corridor_.segments.end(),
+            [&](const ConvexCorridor::Segment& r){return ConvexCorridor::contains(r,p,1e-6);});
     }
     static void workerHook(PlannerManager& m,std::function<void()> hook) {m.global_worker_test_hook_=std::move(hook);}
     static bool workerReady(PlannerManager& m) {
@@ -934,7 +943,7 @@ TEST_F(SimOdomTest, ExpiredExecutionFreezesTruePhaseAndFreshClearResumes)
     SimOdomTestAccess::receive(manager_,frame(ros::Time::now()));
     ros::Time::setNow(ros::Time(701.72));EXPECT_TRUE(SimOdomTestAccess::execute(manager_));EXPECT_NEAR(.04,SimOdomTestAccess::phase(manager_),1e-9);
 }
-TEST_F(SimOdomTest, ExecutionUsesFutureHullForPedestriansButNotStaticContainment)
+TEST_F(SimOdomTest, ExecutionUsesFutureHullForPedestriansButOnlyComAndFootForContainment)
 {
     ros::Time::setNow(ros::Time(709));SimOdomTestAccess::timedSetup(manager_,nh_);
     SimOdomTestAccess::step(manager_);ASSERT_TRUE(SimOdomTestAccess::executing(manager_));
@@ -947,15 +956,61 @@ TEST_F(SimOdomTest, ExecutionUsesFutureHullForPedestriansButNotStaticContainment
     const double limit=.5*(std::max_element(root.begin(),root.end(),max_x)->x()+tip.x());
     ASSERT_LT(future.getCOMPos().x(),limit);
     SimOdomTestAccess::clipExecutionCorridor(manager_,limit);
-    // A new cell touches only the future cane, away from the actual root and COM.
+    // This square touches only the future cane, away from the actual root and COM.
     const Eigen::Vector2d cell=(tip.array()/.1).floor().matrix()*.1;
     const TimedPedestrianCollision::Polygon square{cell,cell+Eigen::Vector2d(.1,0),cell+Eigen::Vector2d(.1,.1),cell+Eigen::Vector2d(0,.1)};
     TimedPedestrianCollision oracle;ASSERT_TRUE(oracle.bind({{square,Eigen::Vector2d::Zero()}},controller.robotFootprintAt(Eigen::Vector2d::Zero(),0.)));
     EXPECT_FALSE(oracle.intersects(Eigen::Vector2d::Zero(),0.));
     EXPECT_TRUE(oracle.intersects(future.getCOMPos().head<2>(),0.,future.getNextIterState().z()));
-    SimOdomTestAccess::block(manager_,cell+Eigen::Vector2d(.05,.05));
     ros::Time::setNow(ros::Time(709.02));EXPECT_TRUE(SimOdomTestAccess::execute(manager_));
     EXPECT_NEAR(.02,SimOdomTestAccess::phase(manager_),1e-9);
+}
+
+TEST_F(SimOdomTest, UnchangedMapExecutesWithoutRebuildingStaticCorridor)
+{
+    ros::Time::setNow(ros::Time(710));SimOdomTestAccess::timedSetup(manager_,nh_);
+    SimOdomTestAccess::step(manager_);ASSERT_TRUE(SimOdomTestAccess::executing(manager_));
+    const auto revision=SimOdomTestAccess::executionRevision(manager_);
+    SimOdomTestAccess::invalidateRebuild(manager_); // any unexpected FIRI rebuild would fail
+    ros::Time::setNow(ros::Time(710.02));ASSERT_TRUE(SimOdomTestAccess::execute(manager_));
+    EXPECT_EQ(revision,SimOdomTestAccess::executionRevision(manager_));
+    EXPECT_NEAR(.02,SimOdomTestAccess::phase(manager_),1e-9);
+}
+
+TEST_F(SimOdomTest, MapUpdateRebuildsCorridorBeforeContinuingQueuedStep)
+{
+    ros::Time::setNow(ros::Time(711));SimOdomTestAccess::timedSetup(manager_,nh_);
+    SimOdomTestAccess::step(manager_);ASSERT_TRUE(SimOdomTestAccess::executing(manager_));
+    const auto revision=SimOdomTestAccess::executionRevision(manager_);
+    const Eigen::Vector2d obstacle(.85,.75);
+    ASSERT_TRUE(SimOdomTestAccess::executionContains(manager_,obstacle));
+    SimOdomTestAccess::block(manager_,obstacle);
+    ros::Time::setNow(ros::Time(711.02));ASSERT_TRUE(SimOdomTestAccess::execute(manager_));
+    EXPECT_NE(revision,SimOdomTestAccess::executionRevision(manager_));
+    EXPECT_FALSE(SimOdomTestAccess::executionContains(manager_,obstacle));
+}
+
+TEST_F(SimOdomTest, ExecutionRejectsFootOutsideUnionWithFreeMap)
+{
+    ros::Time::setNow(ros::Time(712));SimOdomTestAccess::timedSetup(manager_,nh_);
+    SimOdomTestAccess::step(manager_);ASSERT_TRUE(SimOdomTestAccess::executing(manager_));
+    const auto initial=SimOdomTestAccess::model(manager_).getCOMPos();
+    auto future=SimOdomTestAccess::expectedSample(manager_,.28);
+    ASSERT_LT(future.getFootPosition().x(),initial.x());
+    SimOdomTestAccess::clipExecutionFoot(manager_,.5*(initial.x()+future.getFootPosition().x()));
+    ros::Time::setNow(ros::Time(712.02));EXPECT_FALSE(SimOdomTestAccess::execute(manager_));
+    EXPECT_EQ(initial,SimOdomTestAccess::model(manager_).getCOMPos());
+    EXPECT_DOUBLE_EQ(0.,SimOdomTestAccess::phase(manager_));
+}
+
+TEST_F(SimOdomTest, MapChangeAfterOptimizationCannotAuthorizeOldCorridor)
+{
+    ros::Time::setNow(ros::Time(713));SimOdomTestAccess::timedSetup(manager_,nh_);
+    SimOdomTestAccess::afterMppi(manager_,[&] {SimOdomTestAccess::block(manager_,Eigen::Vector2d(.15,0.));});
+    const auto initial=SimOdomTestAccess::model(manager_).getCOMPos();
+    SimOdomTestAccess::step(manager_);
+    EXPECT_FALSE(SimOdomTestAccess::executing(manager_));
+    EXPECT_EQ(initial,SimOdomTestAccess::model(manager_).getCOMPos());
 }
 TEST_F(SimOdomTest, NewStaticCellAndPedestrianStopAnAlreadyQueuedStep)
 {

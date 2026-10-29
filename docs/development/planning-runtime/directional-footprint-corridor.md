@@ -54,8 +54,10 @@ its retained failure location/diagnostics describe the omitted suffix. MPPI must
 still validate its complete configured horizon in the returned corridor; never
 shorten the optimization horizon or admit unchecked remaining states.
 
-MPPI checks COM containment in the corridor and static traversability of COM and
-support foot. Future full envelopes do NOT have to fit one common region and are
+MPPI checks COM samples and support-foot containment in the certified corridor
+union, without per-point static-map queries. Different regions may contain the
+COM and foot. A foot outside the union is rejected even if the map is free there.
+Map generation still preserves the selected backend classification and margins. Future full envelopes do NOT have to fit one common region and are
 NOT tested against static cells, including during timed lightweight execution.
 The current actual hull is certified when building each new planning corridor.
 This does not guarantee future cane clearance from static obstacles.
@@ -84,7 +86,7 @@ Required tests: complete physical disks at rotated poses; directional pedestrian
 hulls; cane-tip-only timed collision; yaw/time/latency revalidation; dense/sparse
 point-reference coverage and forward progress; actual-root hull containment and
 rejection when obstructed; future static cane overlap / corridor escape no longer
-rejecting a free COM; original static COM/foot rejection; historical snapshots and
+rejecting a free COM; COM/foot corridor rejection, unchanged-map reuse and changed-map rebuilding; historical snapshots and
 v3 exact roundtrip; preview failure without STOP/route/model mutation; source
 freshness and accepted-observation transactions. No continuous safety or
 real-device calibration claim.

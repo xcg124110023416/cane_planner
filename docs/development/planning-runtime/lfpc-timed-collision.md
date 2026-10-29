@@ -16,7 +16,7 @@ pose; cache SAT normals/support intervals for that yaw. Same-yaw LFPC samples an
 execution queries reuse intervals. Contact is collision with 1e-9 m tolerance.
 Explicit human_cane/enabled=false retains the fixed circumscribed COM octagon for
 historical comparisons. Invalid geometry/time fails closed. The optional timed
-ablation does not bypass source freshness, COM/foot static checks or current-frame
+ablation does not bypass source freshness, COM/foot corridor-union checks or current-frame
 pedestrian exclusion in FIRI.
 See [directional-footprint-corridor.md](directional-footprint-corridor.md).
 
@@ -53,8 +53,14 @@ next plan immediately, avoiding an extra 100ms FSM idle wait. Global scheduling
 continues during the phase, but controls/reference adoption wait for its boundary.
 
 Before EACH advance, bind a fresh accepted observation and rebuild its geometry.
-Check COM point containment in the original admitted corridor and current static
-traversability of COM/support foot. Do not apply future full-hull static SAT or
+Check COM samples and support-foot containment in the admitted corridor union.
+No per-point static-map query is made. An unchanged selected-map revision retains
+the admitted corridor. On a selected-map change, rebuild current-frame FIRI from
+the actual pose before checking the remaining step; a failed rebuild/containment
+freezes the phase. Reject a map revision change during planning before admission.
+Grid snapshots and revision reads use the local producer mutex. The local
+revision changes on changed ESDF distance values/reset, not identical recomputes;
+unselected local updates do not invalidate a fixed global static backend. Do not apply future full-hull static SAT or
 full-hull containment in that spatial corridor. Dynamic checks retain the complete
 human-cane envelope at current/proposed poses, nominal LFPC samples, additional
 20ms samples and root yaw sweep. Reauthorize that original current token immediately

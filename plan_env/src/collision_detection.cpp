@@ -16,6 +16,7 @@ namespace cane_planner
 
     void CollisionDetection::init(ros::NodeHandle &nh)
     {
+        ++map_generation_;
         node_ = nh;
         node_.param("Collision/margin", margin_, -1.0);//当机器人与障碍物之间的距离小于 margin_ 时，认为有碰撞风险。
         node_.param("Collision/SliceHeight", slice_height_, -1.0);//它指定了要在哪个高度平面上进行碰撞检测。
@@ -64,6 +65,7 @@ namespace cane_planner
     }
     void CollisionDetection::setMap(shared_ptr<SDFMap> &map)
     {
+        ++map_generation_;
         this->sdf_map_ = map;
         resolution_inv_ = 1 / sdf_map_->getResolution();
         static_map_resolution_ = sdf_map_->getResolution();
@@ -822,11 +824,23 @@ bool CollisionDetection::isTraversable(double x, double y) {
         return min_dist;
     }
 
+    CollisionDetection::MapRevision CollisionDetection::staticMapRevisionUnlocked() const
+    {
+        return {map_generation_, !hasStaticGlobalMap() && sdf_map_ ? sdf_map_->distanceRevision() : 0};
+    }
+
+    CollisionDetection::MapRevision CollisionDetection::getStaticMapRevision() const
+    {
+        auto lock = !hasStaticGlobalMap() && sdf_map_ ? sdf_map_->lockDistanceMap() : std::unique_lock<std::mutex>();
+        return staticMapRevisionUnlocked();
+    }
+
     bool CollisionDetection::getStaticCorridorGrid(
         const Eigen::Vector2d& lower, const Eigen::Vector2d& upper,
         Eigen::Vector2d& origin, double& resolution, Eigen::Vector2i& size,
-        std::vector<uint8_t>& blocked, std::string& reason)
+        std::vector<uint8_t>& blocked, std::string& reason, MapRevision* revision)
     {
+        auto lock = !hasStaticGlobalMap() && sdf_map_ ? sdf_map_->lockDistanceMap() : std::unique_lock<std::mutex>();
         blocked.clear();
         reason = "INVALID_GRID_REQUEST";
         if (!lower.allFinite() || !upper.allFinite() ||
@@ -874,6 +888,7 @@ bool CollisionDetection::isTraversable(double x, double y) {
                 ? isStaticTraversable(p.x(), p.y()) : isTraversable(p.x(), p.y());
             blocked[y*size.x()+x] = free ? 0 : 1;
         }
+        if (revision) *revision = staticMapRevisionUnlocked();
         reason = "OK"; return true;
     }
 

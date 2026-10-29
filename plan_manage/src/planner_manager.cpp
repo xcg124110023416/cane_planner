@@ -1284,7 +1284,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         std::string reason;
         if (!collision_->getStaticCorridorGrid(lo-Eigen::Vector2d::Constant(radius),
                 hi+Eigen::Vector2d::Constant(radius), grid.origin, grid.resolution,
-                size, grid.blocked, reason)) {
+                size, grid.blocked, reason, &corridor_map_revision_)) {
             result.failure_reason = ConvexCorridor::FailureReason::UNSUPPORTED_BACKEND;
             result.failure_position = reference_path.front();
             result.failure_position_valid = true;
@@ -1311,7 +1311,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
                     lo=reference_path.front();hi=lo;
                     for(const auto& p:reference_path){lo=lo.cwiseMin(p);hi=hi.cwiseMax(p);}
                     if(!collision_->getStaticCorridorGrid(lo-Eigen::Vector2d::Constant(radius),
-                            hi+Eigen::Vector2d::Constant(radius),grid.origin,grid.resolution,size,grid.blocked,reason)) {
+                            hi+Eigen::Vector2d::Constant(radius),grid.origin,grid.resolution,size,grid.blocked,reason,&corridor_map_revision_)) {
                         global_replan_reason_="REBUILD_FAILED";
                         result.failure_reason=ConvexCorridor::FailureReason::UNSUPPORTED_BACKEND;
                         publishConvexCorridorLocked(result);return result;
@@ -1331,6 +1331,10 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             result = pending_route && !pending_route->empty() ?
                 convex_corridor_->buildStatic(reference_path,grid,polygons) :
                 convex_corridor_->buildPrefix(reference_path,grid,polygons);
+            if(collision_->getStaticMapRevision()!=corridor_map_revision_) {
+                result=ConvexCorridor::Result();
+                result.failure_reason=ConvexCorridor::FailureReason::MAP_CHANGED;
+            }
             transaction_diag_[13]=std::chrono::duration<double>(std::chrono::steady_clock::now()-firi_started).count();
             if(pending_route && !pending_route->empty())transaction_diag_[15]=transaction_diag_[13];
             // Recheck after cooperative numerical work; never execute a stale frame.
@@ -2940,7 +2944,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         if(timed_sim_execution_ && execution_active_) {
             Eigen::Vector3d pose=current_com;pose.z()=lfpc_model_->getNextIterState()(2);
             // Refresh source geometry for spatial global guidance. Execution has
-            // its own original admitted corridor and current-map checks.
+            // its own admitted corridor, rebuilt when the selected map changes.
             updateAndPublishConvexCorridorLocked(pose);
             if(!pedestrians_enabled_ || pedestrianDataValid(ros::Time::now())) {
                 std::vector<Eigen::Vector2d> unused;
@@ -3077,6 +3081,11 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
 #endif
         // Original snapshot must still be fresh even though replacement is queued.
         const auto authorization_started=std::chrono::steady_clock::now();
+        if(convex_corridor_result.feasible && collision_->getStaticMapRevision()!=corridor_map_revision_) {
+            convex_corridor_result=ConvexCorridor::Result();
+            convex_corridor_result.failure_reason=ConvexCorridor::FailureReason::MAP_CHANGED;
+            mpc_controller_->clearConvexCorridor();publishConvexCorridorLocked(convex_corridor_result);
+        }
         const ros::Time execution_epoch = ros::Time::now();
         if (!authorizePedestrianFrameLocked(planned_frame, execution_epoch)) {
             convex_corridor_result=ConvexCorridor::Result();
@@ -3112,6 +3121,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
                 execution_root_.copyState(*lfpc_model_);execution_control_=control;
                 execution_phase_=0.;execution_clock_=ros::Time::now();
                 execution_corridor_=convex_corridor_result;execution_active_=true;
+                execution_map_revision_=corridor_map_revision_;
             } else {
                 lfpc_model_->SetCtrlParams(control);
                 lfpc_model_->updateOneStep();
@@ -3136,7 +3146,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             // Preserve positions 0-25; index 5 now counts timed SAT rejects.
             // Distance/CPA metrics remain unavailable: SAT is an intersection test.
             std_msgs::MultiArrayDimension mode;
-            mode.label = "planner3_lfpc_mppi_v1;1=valid_sample_ratio,7=sampled_sequences,16=valid_sampled_sequences;19=static,20=weighted_checked,21=weighted_fallback,22=executed_cost;23=pedestrian_source_enabled,24=active_corridor_feasible,25=corridor_failure_reason;26=timed_active,27=timed_checks,28=execution_checked,29=execution_safe";
+            mode.label = "planner3_lfpc_mppi_v1;1=valid_sample_ratio,6=model_invalid,7=sampled_sequences,12=convex_corridor_rejects,16=valid_sampled_sequences;19=spatial_only,20=weighted_checked,21=weighted_fallback,22=executed_cost;23=pedestrian_source_enabled,24=active_corridor_feasible,25=corridor_failure_reason;26=timed_active,27=timed_checks,28=execution_checked,29=execution_safe";
             mode.size = 30;
             mode.stride = 30;
             metrics.layout.dim.push_back(mode);

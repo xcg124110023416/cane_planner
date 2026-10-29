@@ -10,6 +10,7 @@ SDFMap::~SDFMap() {
 }
 
 void SDFMap::initMap(ros::NodeHandle& nh) {
+  ++distance_revision_;
   mp_.reset(new MapParam);
   md_.reset(new MapData);
   mr_.reset(new MapROS);
@@ -118,7 +119,12 @@ void SDFMap::resetBuffer() {
   md_->local_bound_max_ = mp_->map_voxel_num_ - Eigen::Vector3i::Ones();
 }
 
+std::unique_lock<std::mutex> SDFMap::lockDistanceMap() const {
+  return std::unique_lock<std::mutex>(mr_->map_mutex_);
+}
+
 void SDFMap::resetBuffer(const Eigen::Vector3d& min_pos, const Eigen::Vector3d& max_pos) {
+  bool distance_changed = false;
   Eigen::Vector3i min_id, max_id;
   posToIndex(min_pos, min_id);
   posToIndex(max_pos, max_id);
@@ -131,12 +137,14 @@ void SDFMap::resetBuffer(const Eigen::Vector3d& min_pos, const Eigen::Vector3d& 
         int idx = toAddress(x, y, z);
         md_->occupancy_buffer_[idx] = mp_->clamp_min_log_ - mp_->unknown_flag_;
         md_->occupancy_buffer_inflate_[idx] = 0;
+        distance_changed |= md_->distance_buffer_[idx] != mp_->default_dist_;
         md_->distance_buffer_[idx] = mp_->default_dist_;
         md_->count_hit_[idx] = 0;
         md_->count_miss_[idx] = 0;
         md_->flag_rayend_[idx] = -1;
         md_->flag_visited_[idx] = -1;
       }
+  if (distance_changed) ++distance_revision_;
 }
 
 template <typename F_get_val, typename F_set_val>
@@ -176,6 +184,7 @@ void SDFMap::fillESDF(F_get_val f_get_val, F_set_val f_set_val, int start, int e
 }
 
 void SDFMap::updateESDF3d() {
+  bool distance_changed = false;
   Eigen::Vector3i min_esdf = md_->local_bound_min_;
   Eigen::Vector3i max_esdf = md_->local_bound_max_;
 
@@ -219,7 +228,15 @@ void SDFMap::updateESDF3d() {
       fillESDF(
           [&](int x) { return md_->tmp_buffer2_[toAddress(x, y, z)]; },
           [&](int x, double val) {
-            md_->distance_buffer_[toAddress(x, y, z)] = mp_->resolution_ * std::sqrt(val);
+            const int idx = toAddress(x, y, z);
+            const double distance = mp_->resolution_ * std::sqrt(val);
+            if (mp_->signed_dist_) {
+              // Keep the old published distance until the final signed value is known.
+              md_->distance_buffer_neg_[idx] = distance;
+            } else {
+              distance_changed |= md_->distance_buffer_[idx] != distance;
+              md_->distance_buffer_[idx] = distance;
+            }
           },
           min_esdf[0], max_esdf[0], 0);
     }
@@ -251,19 +268,18 @@ void SDFMap::updateESDF3d() {
         fillESDF(
             [&](int x) { return md_->tmp_buffer2_[toAddress(x, y, z)]; },
             [&](int x, double val) {
-              md_->distance_buffer_neg_[toAddress(x, y, z)] = mp_->resolution_ * std::sqrt(val);
+              const int idx = toAddress(x, y, z);
+              const double negative = mp_->resolution_ * std::sqrt(val);
+              const double distance = md_->distance_buffer_neg_[idx] +
+                  (negative > 0.0 ? -negative + mp_->resolution_ : 0.0);
+              distance_changed |= md_->distance_buffer_[idx] != distance;
+              md_->distance_buffer_[idx] = distance;
+              md_->distance_buffer_neg_[idx] = negative;
             },
             min_esdf[0], max_esdf[0], 0);
       }
-    // Merge negative distance with positive
-    for (int x = min_esdf(0); x <= max_esdf(0); ++x)
-      for (int y = min_esdf(1); y <= max_esdf(1); ++y)
-        for (int z = min_esdf(2); z <= max_esdf(2); ++z) {
-          int idx = toAddress(x, y, z);
-          if (md_->distance_buffer_neg_[idx] > 0.0)
-            md_->distance_buffer_[idx] += (-md_->distance_buffer_neg_[idx] + mp_->resolution_);
-        }
   }
+  if (distance_changed) ++distance_revision_;
 }
 
 void SDFMap::setCacheOccupancy(const int& adr, const int& occ) {

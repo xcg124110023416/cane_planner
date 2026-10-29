@@ -64,13 +64,15 @@ No penalty or safety guarantee is inferred from the Gaussian distribution.
 
 ## Feasibility, selection and execution
 
-One production rollout evaluator checks support-foot and every generated COM
-sample's static traversability and point containment in the spatial corridor.
+One production rollout evaluator checks the support foot and every generated COM
+sample for containment in the certified spatial corridor union. They may occupy
+different regions. Do not query the static map per rollout point: FIRI owns that
+certificate, and the manager checks its selected-map revision before admission.
 Future human-cane envelopes need not fit a spatial region and are not checked
 against static cells. Their purpose in rollouts is timed pedestrian SAT at the
 actual future time and torso yaw. Current-pose hull containment and current pedestrian exclusion are certified by
 FIRI generation before MPPI, regardless of timed collision enable. Intermediate step-root turn poses
-are retained with their yaw/time for execution revalidation. Root spatial/static/
+are retained with their yaw/time for execution revalidation. Root corridor and
 timed checks remain mandatory. See [directional-footprint-corridor.md](./directional-footprint-corridor.md).
 A sequence must safely complete the horizon or reach the actual final goal
 through a fully checked step.
@@ -129,6 +131,9 @@ lightweight execution_diagnostics describe current execution decisions.
 Existing debug indices are retained. Field 1 is valid/evaluated sampled ratio,
 7 is sampled count, 16/17 are valid sampled counts, 15 is -1 unavailable, 20 is
 weighted-check performed, 21 is fallback because every weighted update failed.
+Field 6 retains the legacy static-reject slot but now counts invalid LFPC model
+outputs only; COM/foot union failures use field 12 (convex corridor rejects).
+Field 19 remains spatial-only mode (zero when timed collision checking is active).
 Fields 2/22 differ when a sampled fallback is cheaper than the selected weighted
 solution. Counts include proposal/retained anchors in every iteration, so they
 are not independent Monte Carlo trials or a collision probability. Rejection
