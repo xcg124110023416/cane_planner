@@ -14,6 +14,8 @@ void PlannerManager::publishExecutionDecisionLocked(const std::string& reason) {
     if(mpc_stop_advice_pub_){std_msgs::Bool m;m.data=stopped;mpc_stop_advice_pub_.publish(m);}
     if(mpc_stop_reason_pub_){std_msgs::String m;m.data=reason;mpc_stop_reason_pub_.publish(m);}
     if(stopped) {
+        ROS_WARN_THROTTLE(1.,"[MPC execution] STOP reason=%s phase=%.3f/%.3f",
+            reason.c_str(),execution_phase_,execution_root_.stepDuration());
         publishTimedCollisionLocked(ros::Time::now(),false);
         if(reason=="TIMED_EXECUTION_COLLISION" && execution_witness_.valid && mpc_timed_collision_pub_) {
             visualization_msgs::MarkerArray markers;visualization_msgs::Marker m;
@@ -63,13 +65,7 @@ bool PlannerManager::advanceExecutionLocked(const ros::Time& now) {
     const PedestrianFrameToken frame{pedestrian_generation_,pedestrians_enabled_,pedestrian_header_.stamp,pedestrian_receipt_};
     std::vector<PoseSample> samples;
     const auto current=lfpc_model_->getCOMPos();const double current_yaw=lfpc_model_->getNextIterState().z();
-    // Rebuild spatial free space only when its selected map backend changes.
-    // Unchanged maps require no per-pose static queries during execution.
-    if(collision_->getStaticMapRevision()!=execution_map_revision_) {
-        const auto rebuilt=updateAndPublishConvexCorridorLocked(Eigen::Vector3d(current.x(),current.y(),current_yaw));
-        if(!rebuilt.feasible)return finish("INVALID_STATIC_CORRIDOR");
-        execution_corridor_=rebuilt;execution_map_revision_=corridor_map_revision_;
-    }
+    const bool rebuild=collision_->getStaticMapRevision()!=execution_map_revision_;
     samples.push_back({current,current_yaw,execution_phase_});
     // Include boundary rotation, every nominal LFPC sample, and extra20ms poses.
     if(execution_phase_==0.) {
@@ -95,18 +91,24 @@ bool PlannerManager::advanceExecutionLocked(const ros::Time& now) {
     // social force includes the same local planning domain as normal FIRI.
     std::vector<TimedPedestrianCollision::Obstacle> obstacles;
     pedestrian_geometry_.clear();
-    if(pedestrians_enabled_) {
-        ConvexCorridor::Grid social_grid;Eigen::Vector2i social_size;
+    ConvexCorridor::Grid social_grid;
+    CollisionDetection::MapRevision snapshot_revision;
+    if(pedestrians_enabled_ || rebuild) {
+        Eigen::Vector2i social_size;
         std::string why;
-        const auto reference=ConvexCorridor::referencePath(global_waypoints_,global_wp_idx_,current.head<2>(),corridor_planning_length_);
         V social_lo=current.head<2>(),social_hi=social_lo;
-        for(const auto& p:reference){social_lo=social_lo.cwiseMin(p);social_hi=social_hi.cwiseMax(p);}
+        if(pedestrians_enabled_) {
+            const auto reference=ConvexCorridor::referencePath(global_waypoints_,global_wp_idx_,current.head<2>(),corridor_planning_length_);
+            for(const auto& p:reference){social_lo=social_lo.cwiseMin(p);social_hi=social_hi.cwiseMax(p);}
+        }
+        for(const auto& s:samples){social_lo=social_lo.cwiseMin(s.position.head<2>());social_hi=social_hi.cwiseMax(s.position.head<2>());}
+        social_lo=social_lo.cwiseMin(canonical.getFootPosition());social_hi=social_hi.cwiseMax(canonical.getFootPosition());
         const auto padding=V::Constant(convex_corridor_->getConfig().local_radius).eval();
         if(!collision_->getStaticCorridorGrid(social_lo-padding,social_hi+padding,social_grid.origin,social_grid.resolution,
-            social_size,social_grid.blocked,why))return finish("INVALID_STATIC_CORRIDOR");
+            social_size,social_grid.blocked,why,&snapshot_revision))return finish("INVALID_STATIC_CORRIDOR");
         social_grid.width=social_size.x();social_grid.height=social_size.y();
         const Eigen::Vector3d pose(current.x(),current.y(),current_yaw);
-        for(size_t i=0;i<pedestrian_observations_.size();++i) {
+        if(pedestrians_enabled_)for(size_t i=0;i<pedestrian_observations_.size();++i) {
             const auto& o=pedestrian_observations_[i];
             std::vector<PedestrianPolygon::Observation> neighbors;
             for(size_t j=0;j<pedestrian_observations_.size();++j)if(j!=i)neighbors.push_back(pedestrian_observations_[j]);
@@ -115,6 +117,25 @@ bool PlannerManager::advanceExecutionLocked(const ros::Time& now) {
             pedestrian_geometry_.push_back(geometry);
             obstacles.push_back({geometry.hull,mpc_controller_->timedCollisionEnabled()?o.velocity:V::Zero()});
         }
+    }
+    if(rebuild) {
+        // Re-certify the actual remaining support phase, not the remote global
+        // reference. A blocked suffix must not prevent reaching the boundary
+        // where a new global route and MPPI control can be adopted safely.
+        std::vector<V> remainder{current.head<2>()};
+        for(const auto& s:samples)
+            if((s.position.head<2>()-remainder.back()).norm()>=1e-9)remainder.push_back(s.position.head<2>());
+        ConvexCorridor builder;
+        auto config=convex_corridor_->getConfig();
+        config.footprint=mpc_controller_->footprintConfig();config.root_yaw=current_yaw;
+        builder.setConfig(config);
+        const auto rebuilt=builder.buildStatic(remainder,social_grid,currentPedestrianPolygonsLocked(ros::Time::now()));
+        if(!rebuilt.feasible) {
+            ROS_WARN_THROTTLE(1.,"[MPC execution] remaining-step corridor failed: %s",
+                ConvexCorridor::failureReasonName(rebuilt.failure_reason));
+            return finish("INVALID_STATIC_CORRIDOR");
+        }
+        execution_corridor_=rebuilt;execution_map_revision_=snapshot_revision;
     }
     if(!dynamic_check.bind(obstacles,shape))return finish("DYNAMIC_DATA_INVALID");
     auto in_corridor=[&](const V& p) {

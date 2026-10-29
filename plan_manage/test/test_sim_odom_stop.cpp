@@ -32,6 +32,11 @@ public:
         c.static_inflated_[c.staticToAddress(cell)]=1;
         ++c.map_generation_; // model a selected-map update, as init/setMap do in production
     }
+    static void unblock(CollisionDetection& c, const Eigen::Vector2d& p) {
+        const Eigen::Vector2i cell=((p-c.static_origin_)*c.static_map_inv_resolution_).array().floor().cast<int>();
+        c.static_inflated_[c.staticToAddress(cell)]=0;
+        ++c.map_generation_;
+    }
     static std::vector<double> state(const LFPC& m)
     {
         return {double(m.support_leg_), m.t_sup_, m.delta_t_, m.h_, m.t_c_,
@@ -164,6 +169,7 @@ public:
         for(auto& region:m.execution_corridor_.segments)region.halfspaces.push_back({Eigen::Vector2d(-1,0),-xmin});
     }
     static auto executionRevision(PlannerManager& m) {return m.execution_map_revision_;}
+    static void unblock(PlannerManager& m,const Eigen::Vector2d& p) {StaticMpcTestAccess::unblock(*m.collision_,p);}
     static bool executionContains(PlannerManager& m,const Eigen::Vector2d& p) {
         return std::any_of(m.execution_corridor_.segments.begin(),m.execution_corridor_.segments.end(),
             [&](const ConvexCorridor::Segment& r){return ConvexCorridor::contains(r,p,1e-6);});
@@ -870,8 +876,11 @@ TEST_F(SimOdomTest, QueuedSameStampBlockerIsAcceptedAfterCommitThenStopsNextCycl
     EXPECT_GT((SimOdomTestAccess::model(manager_).getCOMPos()-position).norm(),1e-6);
     EXPECT_EQ(ConvexCorridor::FailureReason::DYNAMIC_REFERENCE_BLOCKED,SimOdomTestAccess::corridor(manager_).failure_reason);
     const auto before=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
+    // Distinct decisions use distinct simulation ticks: odom is coalesced per tick.
+    ros::Time::setNow(ros::Time::now()+ros::Duration(.001));
     EXPECT_FALSE(SimOdomTestAccess::step(manager_));waitForDecision(2,true);
     EXPECT_EQ(before,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
+    ros::Time::setNow(ros::Time::now()+ros::Duration(.001));
     auto clear=frame(ros::Time::now());SimOdomTestAccess::receive(manager_,clear);
     queuedFrameStep(clear);waitForDecision(3,false);
     EXPECT_NE(before,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
@@ -907,8 +916,10 @@ TEST_F(SimOdomTest, AcceptedInvalidFrameAndEnableTransitionRequireFreshValidData
     SimOdomTestAccess::receive(manager_,invalid);
     EXPECT_FALSE(SimOdomTestAccess::step(manager_));waitForDecision(1,true);
     SimOdomTestAccess::enabled(manager_,false);SimOdomTestAccess::enabled(manager_,true);
+    ros::Time::setNow(ros::Time::now()+ros::Duration(.001));
     EXPECT_FALSE(SimOdomTestAccess::step(manager_));waitForDecision(2,true);
     EXPECT_EQ(before,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
+    ros::Time::setNow(ros::Time::now()+ros::Duration(.001));
     auto clear=frame(ros::Time::now());SimOdomTestAccess::receive(manager_,clear);
     queuedFrameStep(clear);waitForDecision(3,false);
 }
@@ -1041,6 +1052,73 @@ TEST_F(SimOdomTest, MapUpdateRebuildsCorridorBeforeContinuingQueuedStep)
     EXPECT_FALSE(SimOdomTestAccess::executionContains(manager_,obstacle));
 }
 
+TEST_F(SimOdomTest, BlockedReferenceCannotFreezeSafeRemainingStepOrNextRoute)
+{
+    ros::Time::setNow(ros::Time(714));SimOdomTestAccess::timedSetup(manager_,nh_);
+    SimOdomTestAccess::step(manager_);ASSERT_TRUE(SimOdomTestAccess::executing(manager_));
+    ros::Time::setNow(ros::Time(714.04));ASSERT_TRUE(SimOdomTestAccess::execute(manager_));
+    ros::Time::setNow(ros::Time(714.08));ASSERT_TRUE(SimOdomTestAccess::execute(manager_));
+    const auto actual=SimOdomTestAccess::model(manager_).getCOMPos();
+    const auto foot=SimOdomTestAccess::model(manager_).getFootPosition();
+    const auto support=SimOdomTestAccess::model(manager_).getSupportFeet();
+    const auto step=SimOdomTestAccess::model(manager_).getStepNum();
+    const auto revision=SimOdomTestAccess::executionRevision(manager_);
+    // A newly occupied retained reference is unrelated to the already admitted
+    // straight support phase. Its full first seed cannot be certified.
+    const std::vector<Eigen::Vector2d> retained{actual.head<2>(),actual.head<2>()+Eigen::Vector2d(0,4),Eigen::Vector2d(8,0)};
+    SimOdomTestAccess::reference(manager_,retained);
+    const Eigen::Vector2d obstacle=actual.head<2>()+Eigen::Vector2d(0,.9);
+    SimOdomTestAccess::block(manager_,obstacle);
+    ASSERT_FALSE(SimOdomTestAccess::corridor(manager_).feasible);
+    ros::Time::setNow(ros::Time(714.10));ASSERT_TRUE(SimOdomTestAccess::execute(manager_));
+    EXPECT_NE(revision,SimOdomTestAccess::executionRevision(manager_));
+    EXPECT_NEAR(.10,SimOdomTestAccess::phase(manager_),1e-9);
+    EXPECT_EQ(foot,SimOdomTestAccess::model(manager_).getFootPosition());
+    EXPECT_EQ(support,SimOdomTestAccess::model(manager_).getSupportFeet());
+    EXPECT_EQ(step,SimOdomTestAccess::model(manager_).getStepNum());
+    auto expected=SimOdomTestAccess::expectedSample(manager_,.10);
+    EXPECT_EQ(expected.getCOMPos(),SimOdomTestAccess::model(manager_).getCOMPos());
+    EXPECT_FALSE(SimOdomTestAccess::executionContains(manager_,obstacle));
+    for(int i=6;i<=14;++i) {
+        ros::Time::setNow(ros::Time(714.+.02*i));ASSERT_TRUE(SimOdomTestAccess::execute(manager_));
+    }
+    ASSERT_FALSE(SimOdomTestAccess::executing(manager_));
+    EXPECT_EQ(step+1,SimOdomTestAccess::model(manager_).getStepNum());
+    EXPECT_NE(support,SimOdomTestAccess::model(manager_).getSupportFeet());
+    // The support boundary can now adopt a freshly searched route and run MPPI.
+    SimOdomTestAccess::astarSetup(manager_,nh_);ASSERT_TRUE(SimOdomTestAccess::primeGlobal(manager_));
+    SimOdomTestAccess::step(manager_);
+    EXPECT_TRUE(SimOdomTestAccess::executing(manager_));
+    EXPECT_TRUE(SimOdomTestAccess::planValid(manager_));
+    EXPECT_NE(retained,SimOdomTestAccess::route(manager_));
+}
+
+TEST_F(SimOdomTest, ActualRemainingStepBlockerPreservesPhaseAndResumesAfterClear)
+{
+    ros::Time::setNow(ros::Time(715));SimOdomTestAccess::timedSetup(manager_,nh_);
+    SimOdomTestAccess::step(manager_);ASSERT_TRUE(SimOdomTestAccess::executing(manager_));
+    ros::Time::setNow(ros::Time(715.04));ASSERT_TRUE(SimOdomTestAccess::execute(manager_));
+    ros::Time::setNow(ros::Time(715.08));ASSERT_TRUE(SimOdomTestAccess::execute(manager_));
+    const auto state=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
+    const auto actual=SimOdomTestAccess::model(manager_).getCOMPos();
+    const auto foot=SimOdomTestAccess::model(manager_).getFootPosition();
+    const auto phase=SimOdomTestAccess::phase(manager_);
+    auto endpoint=SimOdomTestAccess::expectedSample(manager_,.28);
+    const Eigen::Vector2d obstacle=endpoint.getCOMPos().head<2>();
+    SimOdomTestAccess::block(manager_,obstacle);
+    ros::Time::setNow(ros::Time(715.10));EXPECT_FALSE(SimOdomTestAccess::execute(manager_));
+    EXPECT_EQ(state,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
+    EXPECT_EQ(actual,SimOdomTestAccess::model(manager_).getCOMPos());
+    EXPECT_EQ(foot,SimOdomTestAccess::model(manager_).getFootPosition());
+    EXPECT_DOUBLE_EQ(phase,SimOdomTestAccess::phase(manager_));
+    SimOdomTestAccess::unblock(manager_,obstacle);
+    ros::Time::setNow(ros::Time(715.50));ASSERT_TRUE(SimOdomTestAccess::execute(manager_));
+    EXPECT_NEAR(phase+.04,SimOdomTestAccess::phase(manager_),1e-9);
+    auto expected=SimOdomTestAccess::expectedSample(manager_,phase+.04);
+    EXPECT_EQ(expected.getCOMPos(),SimOdomTestAccess::model(manager_).getCOMPos());
+    EXPECT_EQ(foot,SimOdomTestAccess::model(manager_).getFootPosition());
+}
+
 TEST_F(SimOdomTest, ExecutionRejectsFootOutsideUnionWithFreeMap)
 {
     ros::Time::setNow(ros::Time(712));SimOdomTestAccess::timedSetup(manager_,nh_);
@@ -1094,10 +1172,12 @@ TEST_F(SimOdomTest, TimedPlantStartResetPublishesRequestedYawAndClearsPriorVeloc
     ros::Time::setNow(ros::Time(708));SimOdomTestAccess::timedSetup(manager_,nh_);
     SimOdomTestAccess::step(manager_);ASSERT_TRUE(SimOdomTestAccess::executing(manager_));
     ros::Time::setNow(ros::Time(708.02));ASSERT_TRUE(SimOdomTestAccess::execute(manager_));
+    ros::Time::setNow(ros::Time(708.04));
     SimOdomTestAccess::startAt(manager_,1.2);waitForOdom(3);
     EXPECT_NEAR(1.2,tf::getYaw(odom_.back().pose.pose.orientation),1e-12);
     EXPECT_DOUBLE_EQ(0.,odom_.back().twist.twist.linear.x);
     EXPECT_FALSE(SimOdomTestAccess::executing(manager_));
+    ros::Time::setNow(ros::Time(708.06));
     SimOdomTestAccess::initializePlant(manager_);waitForOdom(4);
     EXPECT_NEAR(1.2,tf::getYaw(odom_.back().pose.pose.orientation),1e-12);
     EXPECT_DOUBLE_EQ(0.,odom_.back().twist.twist.linear.x);
@@ -1129,8 +1209,10 @@ TEST_F(SimOdomTest, ExecutionDisplayUsesCurrentSourceAgeAndOnlyCheckedRemainingT
     EXPECT_EQ(ros::Time::now(),path.header.stamp);ASSERT_GT(path.poses.size(),4u);
     const auto hull=SimOdomTestAccess::executionHull(manager_);
     for(const auto& m:visuals.back().markers)if(m.ns=="timed_pedestrian") {
-        ASSERT_GT(m.id,0);ASSERT_LE(size_t(m.id),path.poses.size());
-        const double tau=(path.poses[m.id-1].header.stamp-path.header.stamp).toSec();
+        ASSERT_EQ(0,m.id%32); // single pedestrian in the multi-person marker schema
+        const size_t sample=m.id/32;
+        ASSERT_GT(sample,0u);ASSERT_LE(sample,path.poses.size());
+        const double tau=(path.poses[sample-1].header.stamp-path.header.stamp).toSec();
         EXPECT_NEAR(hull[0].x()+.2*(.12+tau),m.points[0].x,1e-8);
         EXPECT_NEAR(hull[0].y(),m.points[0].y,1e-8);
     }
@@ -1534,6 +1616,7 @@ TEST_F(SimOdomTest, TransactionDiagnosticIdentityClockAndSkippedStageReset)
     EXPECT_TRUE(std::isnan(b[22]));EXPECT_TRUE(std::isnan(b[28]));EXPECT_TRUE(std::isnan(b[32]));
     EXPECT_EQ(1.,b[21]);EXPECT_EQ(0.,b[30]);
     EXPECT_EQ(static_cast<double>(ConvexCorridor::FailureReason::DYNAMIC_DATA_INVALID),b[31]);
+    ros::Time::setNow(ros::Time(603.001));
     SimOdomTestAccess::enabled(manager_,false);queuedFrameStep(clear);waitForDecision(3,false);wait(3);
     ASSERT_EQ(3u,records.size());EXPECT_EQ(0.,records[2].data[5]);EXPECT_TRUE(std::isnan(records[2].data[7]));
     EXPECT_NE(std::string::npos,records[2].layout.dim[0].label.find("source_frame=DISABLED"));

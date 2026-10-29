@@ -56,8 +56,16 @@ Before EACH advance, bind a fresh accepted observation and rebuild its geometry.
 Check COM samples and support-foot containment in the admitted corridor union.
 No per-point static-map query is made. An unchanged selected-map revision retains
 the admitted corridor. On a selected-map change, rebuild current-frame FIRI from
-the actual pose before checking the remaining step; a failed rebuild/containment
-freezes the phase. Reject a map revision change during planning before admission.
+the actual pose along the COMPLETE remaining support-phase COM polyline, using
+the same selected-grid classifier and current pedestrian hulls. Protect only the
+actual current human-cane hull; check the support foot and all remaining COM
+samples against the rebuilt union. Do not rebuild execution free space from the
+remote global reference: an obstructed reference suffix must not freeze an
+otherwise safe remaining support phase. A successful execution rebuild is private
+to that admitted phase; it neither replaces the planning reference/visible planning
+corridor nor bypasses full FIRI/MPPI authorization at the next boundary. A failed
+remaining-step rebuild/containment still freezes the original phase. Reject a map
+revision change during planning before admission.
 Grid snapshots and revision reads use the local producer mutex. The local
 revision changes on changed ESDF distance values/reset, not identical recomputes;
 unselected local updates do not invalidate a fixed global static backend. Do not apply future full-hull static SAT or
@@ -117,7 +125,10 @@ controller sample timing/copy/reset, crossing beyond first step, source age,
 latency rejection and ablation; manager captured snapshot and source-age binding,
 matched future marker/path stamps and empty cleanup, execution-time STOP before
 integration with frozen odometry. Add exact LFPC endpoint equivalence, phase and
-support switching; enqueue without motion, timed advance/catch-up bound, new-frame
+support switching; a blocked retained reference must allow a safe remaining step
+to finish and a fresh global candidate/MPPI plan to be adopted at the boundary;
+an actual midphase blocker must preserve state/foot/phase and resume after clear.
+Also cover enqueue without motion, timed advance/catch-up bound, new-frame
 STOP/resume, source expiry, goal reset, idle heartbeat, mode guards, delayed global
 worker progress and current execution display time/geometry. Existing transaction/
 arrival/static tests remain.
