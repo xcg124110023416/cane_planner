@@ -73,10 +73,10 @@ def stop_owned(process):
         process.wait(timeout=5)
 
 
-def run_owned(port, prepare, launch_command):
+def run_owned(port, prepare, launch_command, clock_command=None):
     """prepare runs under the lock; launch_command is called only after PID proof."""
     handle = acquire(port)
-    master = launch = rosout = None
+    master = launch = rosout = clock = None
     old_handlers = {}
     def interrupted(signum, _frame):
         raise KeyboardInterrupt()
@@ -116,6 +116,22 @@ def run_owned(port, prepare, launch_command):
         json.dump({'master_pid': master.pid, 'token': token}, handle)
         handle.flush(); os.fsync(handle.fileno())
         identity(port)
+        if clock_command is not None:
+            if server.setParam('/cane_round_owner', '/use_sim_time', True)[0] != 1:
+                raise RuntimeError('Could not select owned simulation time')
+            clock = subprocess.Popen(clock_command, start_new_session=True)
+            deadline = time.monotonic()+10
+            while time.monotonic()<deadline:
+                identity(port)
+                if clock.poll() is not None:
+                    raise RuntimeError('Owned clock exited before startup')
+                ready = server.getParam('/cane_round_owner', '/pedsim_monotonic_clock/ready')
+                if ready[0] == 1 and ready[2] is True:
+                    break
+                time.sleep(.05)
+            else:
+                raise RuntimeError('Owned clock did not become ready')
+            print('Simulation clock: monotonic /clock (1x), /use_sim_time=true', flush=True)
         rosout = subprocess.Popen(['rosrun', 'rosout', 'rosout', '__name:=rosout'], start_new_session=True)
         deadline = time.monotonic()+10
         while time.monotonic()<deadline:
@@ -129,6 +145,8 @@ def run_owned(port, prepare, launch_command):
             raise RuntimeError('Owned rosout did not become ready')
         launch = subprocess.Popen(launch_command(prepared), start_new_session=True)
         while launch.poll() is None:
+            if clock is not None and clock.poll() is not None:
+                raise RuntimeError('Owned clock lost; ending only this round')
             if rosout.poll() is not None:
                 raise RuntimeError('Owned rosout lost; ending only this round')
             if master.poll() is not None:
@@ -145,6 +163,7 @@ def run_owned(port, prepare, launch_command):
         try:
             stop_owned(launch)
             stop_owned(rosout)
+            stop_owned(clock)
             stop_owned(master)
         finally:
             handle.close()
@@ -230,7 +249,8 @@ def main():
                      'editor_state_file:='+(str(Path(args.editor_state_file).expanduser().resolve()) if args.editor_state_file else ''),
                      'use_static_global_map:='+str(args.world == 'blank').lower(),
                      'visualize:='+str(not args.no_rviz).lower(),
-                     'pedestrian_speeds:='+json.dumps(speeds)])
+                     'pedestrian_speeds:='+json.dumps(speeds)],
+                     clock_command=['/usr/bin/python3',str(package/'scripts/pedsim_monotonic_clock.py')])
 
 
 if __name__ == '__main__':

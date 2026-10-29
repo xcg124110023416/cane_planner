@@ -2,6 +2,21 @@ For the normal single-entry workflow and owned-round reset, use USAGE.txt.
 The manual source/unpause commands below are low-level deployment/debug steps,
 not needed by start_pedsim_navigation.sh.
 
+OWNED LIGHTWEIGHT SIMULATION CLOCK
+The normal wrapper starts scripts/pedsim_monotonic_clock.py on its verified
+private master before navigation. /use_sim_time is set before node startup;
+the publisher advances a single startup epoch using time.monotonic_ns(), with
+1ms sleep intervals. rosgraph_msgs is a plan_manage runtime dependency. Clock
+exit fails the round and cleans its owned children; no system clock or external
+master configuration is changed. Direct source launches retain their caller's
+time configuration. The pinned pedsim patch/manifest is unchanged by this fix.
+Optional regression, after sourcing both workspaces:
+  python3 plan_manage/test/pedsim_navigation_smoke.py crowd_5 --repeat-goals --clock-jumps
+This compiles a test-only ROS time interposer and injects Python wall-time reads
+in owned child processes; it requires a C++ compiler and pkg-config for rostime.
+It never changes the host clock. It checks forward/backward system-time offsets,
+two arrivals, real robot-input loss and clock-exit cleanup.
+
 CURRENT MULTI-PERSON AND SCENE EDITOR EXTENSION (2026-10-29)
 The current manifest includes pedestrian_speeds, guarded EditScene.srv and
 selective pedestrian/robot social interaction.

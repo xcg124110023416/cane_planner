@@ -14,6 +14,16 @@ another unused port. --no-rviz runs without the RViz window for unattended tests
 The entry script currently contains a machine-specific primary workspace path;
 adjust that path when deploying elsewhere.
 
+CLOCK
+The wrapper sets /use_sim_time on its owned master before starting any nodes.
+pedsim_monotonic_clock publishes /clock from elapsed monotonic time at 1x speed;
+the wall epoch is sampled once at startup, so later system-time corrections do
+not age all observations at once. The clock is required: its exit ends only this
+owned round. Real input loss still latches after 0.5s. Restart the existing command
+to use the new clock; an already faulted round is not unlocked automatically.
+Manual launch users must provide a consistent time source before startup.
+Do not change a live master's time mode or add this clock to a Gazebo master.
+
 MAPS AND SCENARIOS
 --world blank (default): uses the four walls from upstream blank_world.xml,
 translated by (-15,-15) into a centered 30x30m arena. The same wall centerlines

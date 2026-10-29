@@ -326,6 +326,7 @@ namespace cane_planner
         ros::Publisher cmd_vel_pub_;      // geometry_msgs::Twist for Gazebo
         ros::Publisher steer_pub_;        // std_msgs::Float64 steering joint angle
         ros::Publisher sim_odom_pub_;
+        ros::Time last_sim_odom_stamp_;
         tf::TransformListener tf_listener_;
 
         /*---------- helper function -----------*/

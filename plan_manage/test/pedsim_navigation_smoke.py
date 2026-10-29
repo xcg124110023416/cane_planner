@@ -3,6 +3,7 @@
 
 python3 plan_manage/test/pedsim_navigation_smoke.py crowd_5
 Add --repeat-goals to verify arrival, pose reset, idle heartbeats and a second goal.
+Add --clock-jumps to inject realtime jumps into owned processes and check input loss.
 Uses a free private master, sends the configured robot poses, checks all people
 and force/prediction markers, writes /tmp evidence, and stops only its own round.
 Not registered in catkin: the pinned pedsim overlay is optional.
@@ -13,9 +14,11 @@ import math
 import os
 from pathlib import Path
 import signal
+import shlex
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import xmlrpc.client
 
@@ -23,6 +26,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('scenario', nargs='?', default='crowd_2')
 parser.add_argument('--edit-scene', action='store_true')
 parser.add_argument('--repeat-goals', action='store_true')
+parser.add_argument('--clock-jumps', action='store_true')
 parser.add_argument('--pedestrian-mode', choices=['interactive', 'independent'], default='interactive')
 args = parser.parse_args()
 scenario = args.scenario
@@ -30,6 +34,7 @@ edit_scene = args.edit_scene
 repeat_goals = args.repeat_goals
 evidence_tag = 'repeat-goals' if repeat_goals else ('stage4-edited' if edit_scene else 'stage3')
 if args.pedestrian_mode == 'independent': evidence_tag += '-independent'
+if args.clock_jumps: evidence_tag += '-clock-jumps'
 package=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(package/'scripts'))
 from export_pedsim_blank import load_blank_scene
@@ -43,10 +48,28 @@ os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 os.environ.pop('ROS_IP', None)
 logpath = Path('/tmp/cane-pedsim-%s-%s.log' % (evidence_tag, scenario))
 log = logpath.open('w')
+round_env = os.environ.copy()
+clock_test = tempfile.TemporaryDirectory(prefix='cane-pedsim-clock-test.') if args.clock_jumps else None
+if clock_test:
+    offset_file = Path(clock_test.name)/'offset_ns'
+    offset_file.write_text('0')
+    shim = Path(clock_test.name)/'wall_clock_offset.so'
+    flags=shlex.split(subprocess.check_output(['pkg-config','--cflags','--libs','rostime'],text=True))
+    subprocess.run(['c++','-shared','-fPIC','-std=c++14','-O2',str(package/'test/wall_clock_offset.cpp'),
+                    '-ldl','-o',str(shim)]+flags,check=True)
+    round_env['LD_PRELOAD'] = str(shim)
+    round_env['CANE_TEST_WALL_OFFSET_FILE'] = str(offset_file)
+    (Path(clock_test.name)/'sitecustomize.py').write_text((package/'test/clock_offset_sitecustomize.py').read_text())
+    round_env['PYTHONPATH'] = clock_test.name+os.pathsep+round_env.get('PYTHONPATH','')
+    def realtime_offset():
+        return int(subprocess.check_output(['/usr/bin/python3','-c',
+            'import time; print(time.time_ns()-time.monotonic_ns())'],env=round_env,text=True))
+    baseline_offset = realtime_offset()
+clock_changes = []
 process = subprocess.Popen(['bash', str(package/'scripts/start_pedsim_navigation.sh'),
                             'start', '--world', 'blank', '--scenario', scenario, '--fresh-scene', '--no-rviz',
                             '--pedestrian-mode', args.pedestrian_mode, '--port', str(port)],
-                           stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+                           stdout=log, stderr=subprocess.STDOUT, start_new_session=True, env=round_env)
 try:
     from pedsim_round import TimeoutTransport
     master = xmlrpc.client.ServerProxy(os.environ['ROS_MASTER_URI'], transport=TimeoutTransport())
@@ -119,6 +142,7 @@ try:
     goal.pose.position.x, goal.pose.position.y = scene['robot_goal']; goal.pose.orientation.w = 1.
     goalpub.publish(goal)
     began = time.monotonic(); deadline = began+45.; reached = False
+    next_clock_change = began+2.
     while time.monotonic() < deadline:
         if process.poll() is not None: raise RuntimeError('navigation round exited')
         if 'FAULT_RESTART_ROUND' in statuses:
@@ -128,6 +152,15 @@ try:
             print(json.dumps(dict(fault=True,port=port,guards=guards,odom_max_gap=max_gap(odoms),
                                   agents_max_gap=max_gap(agents),observation_max_gap=max_gap(observations))),flush=True)
             raise RuntimeError('pedsim bridge fault')
+        if args.clock_jumps and 'RUNNING' in statuses and len(clock_changes)<3 and time.monotonic()>=next_clock_change:
+            offset = (1082000000,-800000000,0)[len(clock_changes)]
+            replacement = offset_file.with_suffix('.new')
+            replacement.write_text(str(offset)); replacement.replace(offset_file)
+            measured = realtime_offset()-baseline_offset
+            assert abs(measured-offset)<50000000, 'test did not inject the requested realtime jump'
+            clock_changes.append(dict(offset_ns=offset,measured_ns=measured,ros_time=rospy.Time.now().to_sec()))
+            print('Injected owned-process realtime offset:',offset,'ns',flush=True)
+            next_clock_change = time.monotonic()+1.5
         if odoms:
             p = odoms[-1].pose.pose.position
             reached = math.hypot(p.x-goal.pose.position.x, p.y-goal.pose.position.y) < .2
@@ -215,6 +248,38 @@ try:
     assert clouds and all(count == 162120 and frame == 'world' for count, frame in clouds), 'wrong simulation map'
     assert report['planner_map'].endswith('/world.pcd'), 'wrong planner map'
     assert max(paths, default=0) > 10, 'local trajectory was not published'
+    if args.clock_jumps:
+        assert len(clock_changes)==3 and rospy.get_param('/use_sim_time'), 'owned round is missing the stable simulation clock'
+        # Resolve and verify only children belonging to this private test round.
+        def owned_node_pid(name):
+            uri=master.lookupNode('/clock_test',name)[2]
+            pid=xmlrpc.client.ServerProxy(uri,transport=TimeoutTransport()).getPid('/clock_test')[2]
+            ancestor=pid
+            while ancestor!=process.pid and ancestor>1:
+                stat=Path('/proc/%d/stat'%ancestor).read_text()
+                ancestor=int(stat[stat.rindex(')')+2:].split()[1])
+            assert ancestor==process.pid, 'refusing to signal a node outside the owned test round'
+            return pid
+        planner_pid=owned_node_pid('/kin_replan_node')
+        try:
+            os.kill(planner_pid,signal.SIGSTOP)
+            deadline=time.monotonic()+3.
+            while time.monotonic()<deadline and 'FAULT_RESTART_ROUND' not in statuses:time.sleep(.05)
+            assert 'FAULT_RESTART_ROUND' in statuses, 'stable clock hid actual robot input loss'
+            deadline=time.monotonic()+2.
+            while time.monotonic()<deadline and not any('LATCHED_TF_STALE' in g for g in guards):time.sleep(.05)
+            assert any('LATCHED_TF_STALE' in g for g in guards), 'upstream TF loss guard did not latch'
+            time.sleep(.2);count=len(observations);time.sleep(.6)
+            assert len(observations)==count, 'faulted bridge emitted fallback observations'
+        finally:
+            os.kill(planner_pid,signal.SIGCONT)
+        clock_pid=owned_node_pid('/pedsim_monotonic_clock')
+        os.kill(clock_pid,signal.SIGTERM)
+        process.wait(timeout=10.)
+        assert process.returncode!=0, 'clock death did not fail the owned round'
+        report.update(clock_changes=clock_changes,input_loss_latched=True,clock_death_ends_round=True)
+        reportpath.write_text(json.dumps(report,indent=2)+'\n')
+        print('Clock jump, real input-loss and clock-death checks passed',flush=True)
 finally:
     if 'rospy' in locals(): rospy.signal_shutdown('stage3 test finished')
     if process.poll() is None:
@@ -223,3 +288,4 @@ finally:
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGTERM); process.wait(timeout=10)
     log.close()
+    if clock_test: clock_test.cleanup()

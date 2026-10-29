@@ -167,6 +167,8 @@ bash "$(rospack find plan_manage)/scripts/start_pedsim_navigation.sh" \
 
 两种地图均支持 `headon`、`overtake`、`crossing`；空场地另有 `crowd_2`、`crowd_5` 多人场景。脚本生成场景并启动 planner 3、pedsim 和桥接，使用独立 ROS master，默认端口 `11551`。空场地的默认配置见 [blank_scenarios.yaml](plan_manage/config/pedsim/blank_scenarios.yaml)，办公室配置见 [scenarios.yaml](plan_manage/config/pedsim/scenarios.yaml)。新场地建议在 RViz 将机器人放在 `(-5,0)`，朝向 `+X`，终点设置为 `(5,0)`（超越场景为 `(6,0)`）；启动器只打印建议，不自动设置起终点。无人测试可加 `--no-rviz`。
 
+启动器在自有 master 上先启用 `/use_sim_time`，再启动单调时钟驱动的 `/clock`；机器人、行人、桥接和 RViz 共用该仿真时间，按实际单调时间以 1 倍速推进，避免 WSL/系统校时造成观测突然过期。真实机器人输入中断仍按原 0.5 s 规则锁定；时钟进程退出会结束本轮。沿用上面的命令重启即可使用。直接手动 launch 的部署需自行提供一致的时钟，不能在运行中切换时间模式；Gazebo 使用其自身时钟。
+
 默认 `--pedestrian-mode interactive` 中，行人只对当前朝向左右各 110°、总共 220° 视野内的人杖产生避让响应；视野外关闭对人杖的社会力。运动时朝向随实际速度更新，静止后保留最后朝向，编辑复位时使用设置的起始朝向；旧 XML 场景在未指定朝向时以初始目标方向初始化。这采用论文的 220° 角度，并按本项目实验要求增加“视野外为零”的规则，论文只明确了视野内增强。视野不包含墙体遮挡判断，墙体与行人之间的交互保持原样。检验规划器自身避障能力时，使用独立模式：
 
 ```bash

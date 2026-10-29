@@ -74,3 +74,26 @@ still follows the existing integer LFPC sample count; no nominal-duration relabe
 [lfpc-timed-collision.md](lfpc-timed-collision.md), separately from planning admission.
 The lightweight recorder includes this topic. Gazebo/hardware/other planner plant
 adapters retain their existing behavior.
+
+## Owned pedsim simulation time
+
+The pedsim wrapper selects `/use_sim_time=true` only after proving ownership of
+its new private master. It starts `pedsim_monotonic_clock.py`, waits for its first
+publication/ready acknowledgement, then starts rosout and the navigation launch.
+The clock samples a wall epoch once and advances it using `time.monotonic_ns()`;
+its loop sleeps independently of ROS time. The supervisor owns and monitors the
+clock process, and ends the round if it exits. Do not add a competing clock to
+Gazebo or switch an existing master's time mode. Direct launches retain the
+caller's clock setup.
+
+Simulation time has discrete ticks. Planner-3 lightweight `publishSimOdom` emits
+at most one authoritative pose per identical simulation stamp, so FSM/execution
+callbacks cannot create conflicting TF provenance for the same tick. This does
+not advance/reset LFPC or suppress later-tick STOP/idle heartbeats.
+
+In simulation-time mode only, the bridge may wait up to 50ms of monotonic time
+when a source stamp is at most 50ms ahead of its local `/clock` callback. This
+handles cross-topic arrival order: the original stamp must become non-future
+before the original freshness checks pass. A frozen clock, persistent future
+stamp, observed rollback and actual input loss still fault; there is no stamp
+rewrite, widened 0.5s age limit or automatic fault reset.

@@ -144,6 +144,7 @@ install(DIRECTORY launch urdf worlds scripts config maps models plugins
 # 安装 Python 脚本并赋予执行权限
 catkin_install_python(PROGRAMS
   scripts/pedsim_round.py
+  scripts/pedsim_monotonic_clock.py
   scripts/pedsim_single_bridge.py
   scripts/pedsim_scene_editor.py
   scripts/export_pedsim_office.py

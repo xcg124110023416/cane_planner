@@ -29,6 +29,7 @@
   <build_export_depend>message_runtime</build_export_depend>
   <exec_depend>message_runtime</exec_depend>
   <exec_depend>rospy</exec_depend>
+  <exec_depend>rosgraph_msgs</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>python3-rospkg</exec_depend>

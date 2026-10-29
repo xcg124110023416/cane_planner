@@ -169,6 +169,37 @@ class SceneVersions(unittest.TestCase):
             self.assertFalse(b.failed)
         self.assertEqual(8,len(self.outputs))
 
+    def test_simulation_clock_delivery_order_does_not_make_valid_batch_future(self):
+        b=self.b;b.simulation_time=True
+        agents,evidence=self.batch(9.99,1)
+        agents.header=type(agents.header)(frame_id='world',stamp=rospy.Time(10))
+        for person in agents.agent_states:person.header=agents.header
+        evidence.child_frame_id='%d:1'%agents.header.stamp.to_nsec()
+        b.on_input(evidence)
+        # The agent and /clock messages travel on different connections.
+        # Catching up the clock must precede the unchanged freshness check.
+        self.now.side_effect=[rospy.Time(9.999),rospy.Time(10),rospy.Time(10)]
+        with patch.object(bridge.time,'sleep'):
+            b.on_agents(agents)
+        self.assertFalse(b.failed);self.assertEqual(1,len(self.outputs))
+        self.assertEqual(agents.header.stamp,self.outputs[-1].header.stamp)
+
+    def test_simulation_future_stamp_still_faults_if_clock_never_catches_up(self):
+        b=self.b;b.simulation_time=True
+        agents,evidence=self.batch(9.99,1)
+        agents.header=type(agents.header)(frame_id='world',stamp=rospy.Time(10))
+        for person in agents.agent_states:person.header=agents.header
+        self.now.return_value=rospy.Time(9.999)
+        b.on_agents(agents)
+        self.assertTrue(b.failed);self.assertEqual([],self.outputs)
+
+    def test_simulation_delivery_wait_does_not_hide_real_clock_rollback(self):
+        b=self.b;b.simulation_time=True
+        agents,evidence=self.batch(10,1)
+        self.now.return_value=rospy.Time(9.999)
+        b.on_agents(agents)
+        self.assertTrue(b.failed);self.assertEqual([],self.outputs)
+
 
 class EditorAcknowledgements(unittest.TestCase):
     def setUp(self):

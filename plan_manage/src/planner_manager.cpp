@@ -3506,13 +3506,19 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
 
     void PlannerManager::publishSimOdom(bool stopped)
     {
+        const ros::Time stamp=ros::Time::now();
+        // ROS simulation time is discrete. FSM and execution callbacks can
+        // share a tick; publish one authoritative plant pose for that stamp.
+        if(planner_==3 && simulation_ && !gazebo_sim_ && ros::Time::isSimTime() &&
+           stamp==last_sim_odom_stamp_)return;
+        last_sim_odom_stamp_=stamp;
         Eigen::Vector3d com = (gazebo_sim_ || planner_ == 4) ? odom_pos_ : lfpc_model_->getCOMPos();
         Eigen::Vector3d vel = (planner_ == 4 || timed_sim_execution_) ? odom_vel_ : lfpc_model_->getNextIterState();
         double theta = (gazebo_sim_ || planner_ == 4) ? start_state_(2) : lfpc_model_->getNextIterState()(2);
 
         nav_msgs::Odometry odom;
         odom.header.frame_id = "world";
-        odom.header.stamp = ros::Time::now();
+        odom.header.stamp = stamp;
         odom.pose.pose.position.x = com(0);
         odom.pose.pose.position.y = com(1);
         odom.pose.pose.position.z = 0.0;

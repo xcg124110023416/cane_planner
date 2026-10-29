@@ -1571,7 +1571,9 @@ TEST_F(SimOdomTest, LastSafeFinalStepThenActualArrivalAndIdle)
     SimOdomTestAccess::fsm(manager_);
     EXPECT_TRUE(SimOdomTestAccess::planValid(manager_));
     EXPECT_LT((SimOdomTestAccess::model(manager_).getCOMPos().head<2>()-Eigen::Vector2d(.30,0)).norm(),.2);
-    SimOdomTestAccess::fsm(manager_);done=true;clock.join();waitForOdom(2);
+    // Arrival is a distinct plant publication on the next simulation tick.
+    done=true;clock.join();ros::Time::setNow(ros::Time::now()+ros::Duration(.001));
+    SimOdomTestAccess::fsm(manager_);waitForOdom(2);
     const auto state=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
     for(int i=0;i<8;++i){ros::Time::setNow(ros::Time(720.1+.1*i));SimOdomTestAccess::fsm(manager_);}
     waitForOdom(10);EXPECT_EQ(state,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));

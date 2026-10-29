@@ -38,6 +38,7 @@ class Bridge:
     def __init__(self):
         self.lock=threading.Lock();self.odoms=OrderedDict();self.inputs=OrderedDict();self.agents=OrderedDict()
         self.started=False;self.failed=False;self.last_now=None;self.last_pair=None
+        self.simulation_time=rospy.get_param('/use_sim_time',False)
         self.last_input_received=None;self.last_agents_received=None
         self.last_input_stamp=None;self.last_agents_stamp=None
         self.last_watchdog_wall=time.monotonic();self.watchdog_gap_wall=None
@@ -117,9 +118,17 @@ class Bridge:
         if state!=self.workflow_state:
             self.workflow_state=state;self.status_pub.publish(String(state));rospy.loginfo('pedsim: %s',state)
 
-    def now_checked(self):
+    def now_checked(self,stamp=None):
         now=rospy.Time.now()
-        if self.last_now is not None and now<self.last_now:self.fault('ROS clock rollback')
+        if self.last_now is not None and now<self.last_now:
+            self.fault('ROS clock rollback');self.last_now=now;return now
+        if stamp is not None and getattr(self,'simulation_time',False) and 0<(stamp-now).to_sec()<=.05:
+            # /clock and source messages use separate connections. Briefly wait
+            # for our clock callback, then apply the original freshness rules.
+            deadline=time.monotonic()+.05
+            while now<stamp and time.monotonic()<deadline and not rospy.is_shutdown():
+                previous=now;time.sleep(.001);now=rospy.Time.now()
+                if now<previous:self.fault('ROS clock rollback');break
         self.last_now=now
         return now
 
@@ -130,7 +139,7 @@ class Bridge:
 
     def on_odom(self,msg):
         with self.lock:
-            now=self.now_checked();p=msg.pose.pose.position;q=msg.pose.pose.orientation
+            now=self.now_checked(msg.header.stamp);p=msg.pose.pose.position;q=msg.pose.pose.orientation
             if msg.header.frame_id!='world' or not fresh(msg.header.stamp,now) or not all(math.isfinite(x) for x in [p.x,p.y,p.z,q.x,q.y,q.z,q.w]):
                 self.fault('invalid/stale robot odometry');return
             if abs(q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w-1)>1e-3:self.fault('invalid robot quaternion');return
@@ -146,7 +155,7 @@ class Bridge:
     def on_input(self,msg):
         with self.lock:
             self.last_input_received=time.monotonic();self.last_input_stamp=msg.header.stamp
-            now=self.now_checked()
+            now=self.now_checked(msg.header.stamp)
             try:
                 parts=msg.child_frame_id.split(':')
                 if len(parts) not in (1,2) or any(not p.isdecimal() for p in parts):raise ValueError()
@@ -169,7 +178,7 @@ class Bridge:
     def on_agents(self,msg):
         with self.lock:
             self.last_agents_received=time.monotonic();self.last_agents_stamp=msg.header.stamp
-            now=self.now_checked()
+            now=self.now_checked(msg.header.stamp)
             key=msg.header.stamp.to_nsec()
             if key<self.scene_cutoff or key<=self.last_output:return
             if msg.header.frame_id!='world' or not fresh(msg.header.stamp,now):self.fault('invalid/stale agent batch');return
