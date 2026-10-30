@@ -169,6 +169,8 @@ bool PlannerManager::advanceExecutionLocked(const ros::Time& now) {
         nav_msgs::Path path;path.header.frame_id="world";path.header.stamp=authorized;
         visualization_msgs::MarkerArray markers;visualization_msgs::Marker marker;
         marker.header=path.header;marker.action=visualization_msgs::Marker::DELETEALL;markers.markers.push_back(marker);
+        if(mpc_timed_plan_pub_ && (!frame.enabled || obstacles.empty()))
+            mpc_timed_plan_pub_.publish(markers);
         if(frame.enabled && !obstacles.empty()) {
             size_t display_count=0;
             for(const auto& s:samples)if(s.phase>=target) {

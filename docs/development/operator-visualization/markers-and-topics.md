@@ -42,8 +42,20 @@ rejected sample; it is not an executed trajectory. Path pose headers carry actua
 future times; marker headers stay at the prediction epoch so TF is not queried in
 the future. All are in world. Dedicated DELETEALL and .6-second marker lifetimes
 prevent leftover IDs. STOP/empty/invalid/reset/arrival publishes an empty timed
-path. Model timestamps do not imply that the lightweight jump-step plant plays
-support phases continuously. Geometry/timing contract: planning-runtime/lfpc-timed-collision.md.
+path. During lightweight execution this topic is replaced by the currently
+checked remainder of the first support phase, usually at most .28s under the
+default discretization. The plant advances that phase with elapsed model time.
+Geometry/timing contract: planning-runtime/lfpc-timed-collision.md.
+
+`/mpc/timed_plan` is a separate MarkerArray, enabled as MPC_TimedPlan in both
+default RViz configurations. It retains up to ten pairs from the latest verified
+full MPPI horizon, with `Plan +seconds` labels and the original planning epoch.
+Execution updates must not erase this display. This is a planning snapshot, not
+current execution authorization; do not re-stamp it as a new live prediction.
+New plans replace it; STOP/invalid/empty/reset/arrival clear it, and its markers
+expire after .6s even if no further messages arrive. A fresh empty execution
+frame also clears it immediately. All three evaluation/debug recorders capture
+the topic. The short checked remainder remains visible in MPC_TimedCollision.
 
 ## LFPC MPPI outputs
 

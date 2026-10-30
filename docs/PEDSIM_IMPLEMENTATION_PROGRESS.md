@@ -309,3 +309,13 @@ pedsim 源码、补丁、manifest、编辑器及交互/独立模式均未改。�
 下一步由用户沿原命令实测，地图扩展和统计实验仍按前文阶段计划推进。
 本阶段修复、回归测试及说明按用户要求提交到 `mpc-lfpc-prototype`，并同步至
 `origin/mpc-lfpc-prototype`；实际提交和远端同步状态以 Git 为准。
+
+## 共享 RViz 显示：完整时间配对预测（2026-10-30）
+
+`pedsim.rviz` 与确定性行人入口的 `replan.rviz` 均默认启用
+`MPC_TimedPlan`（`/mpc/timed_plan`），独立保留最近一次验证的完整预测，避免
+被 20 ms 当前步显示覆盖。原 `MPC_TimedCollision` 保留当前步复检语义。
+本轮不改 pedsim 源、社会力、桥接、地图、编辑器或交互/独立模式。
+管理器 69 项回归通过，确定性行人原路线在完整 RViz 下实际到达并捕获渲染；
+细节见 [执行与显示验证](PLANNER3_ASYNC_EXECUTION_VALIDATION.md#2026-10-30完整行人预测被当前步显示覆盖)。
+下一步仍按用户实测和前文地图扩展、统计实验计划推进。

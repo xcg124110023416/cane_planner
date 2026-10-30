@@ -309,6 +309,7 @@ namespace cane_planner
         ros::Publisher mpc_vis_pub_, mpc_foot_pub_, mpc_path_pub_;
         ros::Publisher mpc_fov_pub_, mpc_wp_pub_, mpc_wps_pub_;
         ros::Publisher mpc_timed_collision_pub_, mpc_timed_path_pub_;
+        ros::Publisher mpc_timed_plan_pub_; // last verified full-horizon visualization
         ros::Publisher mpc_best_traj_pub_; // MPC predicted optimal CoM path (LINE_STRIP)
         ros::Publisher mpc_debug_metrics_pub_; // std_msgs/Float64MultiArray
         ros::Publisher mpc_stop_advice_pub_;   // std_msgs/Bool

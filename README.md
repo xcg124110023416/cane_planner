@@ -74,7 +74,7 @@ Pᵢ = P₀ + v × [(执行时间原点 − 观测时间戳) + τᵢ]
 
 默认空间走廊表示生成时刻静态障碍与当前行人凸包之外的自由空间。即使预测行人稍后离开，也不会把他当前占用的区域纳入走廊；预测检查进一步约束沿候选轨迹同一时刻是否与行人相交。轻量仿真现按模型时间逐段执行，保留原 LFPC 离散化决定的有效步时；延迟时单次最多推进 40 ms，不补跳整步。执行中受阻会冻结实际位置和步态阶段，后续有效观测复检通过才恢复。检查仍限于离散姿态，不代表连续扫掠安全或实机跟踪验证。
 
-轻量执行期间，`MPC_HumanCane` 显示实际姿态，`MPC_TimedCollision` 和 `/mpc/timed_best_path` 显示本次复检的首步剩余预测及对应行人凸包，时间原点随检查更新；`/mpc/best_traj` 保留最近一次 MPPI 的完整预测。新增 `/mpc/execution_diagnostics` 记录实际阶段、推进量与停车状态。
+轻量执行期间，`MPC_HumanCane` 显示实际姿态，`MPC_TimedCollision` 和 `/mpc/timed_best_path` 显示本次复检的首步剩余预测及对应行人凸包，时间原点随检查更新。默认开启的 **MPC_TimedPlan**（`/mpc/timed_plan`）独立保留最近一次通过验证的完整 MPPI 预测，人杖与行人轮廓由青到紫对应未来时刻，文字为 `Plan +τ s`；不再被每 20 ms 的当前步显示覆盖。该图层是原规划时刻的预测快照，不表示后续每一步已经获得执行授权；新计划会替换它，STOP、行人为空或无效、重置和到达会清除它，标记最多存活 0.6 s。`/mpc/best_traj` 保留最近一次 MPPI 的完整预测。`/mpc/execution_diagnostics` 记录实际阶段、推进量与停车状态。
 
 具体显示颜色、范围与尺寸调整见 [走廊使用说明](docs/PLANNER3_CORRIDOR_USAGE.md)。会影响停车和绕行的实现选择见 [Planner 3 行为说明](docs/PLANNER3_BEHAVIOR_NOTES.md)。
 
@@ -276,6 +276,7 @@ planner 3 始终固定步长、步宽，只优化转角；`sigma_al`、`sigma_aw
 | `/mpc/best_traj` | `visualization_msgs/Marker` | 当前选中的预测轨迹 |
 | `/mpc/timed_best_path` | `nav_msgs/Path` | 带未来时间戳的选中轨迹；无有效动态预测时为空 |
 | `/mpc/timed_collision` | `visualization_msgs/MarkerArray` | 同时刻机器人包络、匀速预测行人凸包及冲突样本 |
+| `/mpc/timed_plan` | `visualization_msgs/MarkerArray` | 最近一次通过验证的完整预测快照；独立于当前步执行显示 |
 | `/mpc/path` | `nav_msgs/Path` | 累积轨迹历史 |
 | `/mpc/sample_trajectories` | `visualization_msgs/MarkerArray` | 最后一轮的有界采样显示；青色可行、橙色拒绝 |
 | `/mpc/optimization_evidence` | `std_msgs/Float64MultiArray` | 采样数、加权复检、有效样本量、逐轮代价及重演结果 |

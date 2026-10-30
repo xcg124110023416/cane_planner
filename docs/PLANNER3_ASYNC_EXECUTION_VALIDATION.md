@@ -88,7 +88,8 @@ ROS 时钟在约 20 ms 墙钟内前跳 1.377 s，旧行人观测因此过期并�
 
 轻量执行期间黄色人杖轮廓来自实际 LFPC；时间配对图形和
 `/mpc/timed_best_path` 只显示当前复检的首步剩余部分，使用当前授权时刻和
-剩余时间。完整 MPPI 预测仍见 `/mpc/best_traj`。新执行诊断记录真实阶段、
+剩余时间。完整 MPPI 路径仍见 `/mpc/best_traj`；完整时间配对轮廓现由
+`/mpc/timed_plan` 单独保留，见下方 2026-10-30 的显示修复。新执行诊断记录真实阶段、
 推进量和停车。规划诊断字段 21 在排入步骤时仍为 1；它不表示当前不运动。
 字段 14/22–28 描述完成的后台任务，不应计作本次回调的阻塞搜索。
 
@@ -147,3 +148,35 @@ python3 docs/archive/trellis/tasks/10-28-planner3-local-route-repair/research/as
 `/tmp/cane-deterministic-repro-b_v2uajp/` 与
 `/tmp/cane-execution-recovery-pedsim-after.txt`。临时证据可能被清理。
 测试只操作自有私有 master，不重启用户的 11311 master。
+
+## 2026-10-30：完整行人预测被当前步显示覆盖
+
+用户在 RViz 看不到清楚的行人预测。管理器回归复现：规划时发布的 1.68 s
+预测，在下一次 20 ms 执行更新后仅剩 0.26 s。默认有效支撑步时为 0.28 s，
+因此 0.5 m/s 行人的预测位移只有约 13 cm，大部分轮廓重叠于当前姿态。
+
+新增 `/mpc/timed_plan`，两个默认 RViz 配置均启用 `MPC_TimedPlan`：保留最近
+一次通过验证的完整预测、原规划时间戳及 `Plan +τ s` 文字。执行端继续显示
+当前复检的首步剩余部分。STOP、无效或空行人输入、重置和到达会清除完整
+快照，标记寿命仍为 0.6 s。三个调试/评估录制器同时记录新话题；规划、
+碰撞检查及执行授权逻辑未改。
+
+验证：
+
+- `catkin build plan_manage --no-deps --no-status --make-args
+  test_sim_odom_stop kin_replan_node -j2` 构建通过；测试时钟辅助函数更新后
+  单独重建 `test_sim_odom_stop` 通过。
+- 新回归修复前失败，修复后完整预测仍为 1.68 s，执行显示为 0.26 s；过期
+  STOP 清除快照，新计划恢复快照，新鲜空帧在下一次规划前立即清除快照。
+  管理器全部 69 项回归通过。测试辅助函数在解锁事务前显式推进一个仿真
+  tick，消除依赖时钟线程先调度的竞争，生产时钟和里程计合并规则未改。
+- 原用户路线起点 `(-3.632,4.779)`、目标 `(8.447,4.536)`，使用保存的
+  0.5 m/s 行人，在私有 master `47097`、完整 RViz 下实际到达。收到 26 帧
+  完整预测和 330 帧含行人轮廓的当前步显示，完整预测最大 2.8 s。
+  直接捕获 Ogre 渲染确认行人未来凸包以青至紫沿运动方向展开。
+- 两个 RViz 配置的显示开关/话题、三个录制器的 Python 语法及
+  `git diff --check` 检查通过。
+
+回归日志 `/tmp/cane-timed-display-manager-tests-final.log`，导航证据和渲染
+截图 `/tmp/cane-deterministic-repro-5z7ikcog/`。临时证据可能被清理。
+测试仅运行和清理自有私有 master，用户原 11311 master 保留。

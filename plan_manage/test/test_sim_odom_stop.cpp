@@ -93,6 +93,7 @@ public:
         m.mpc_stop_advice_pub_ = nh.advertise<std_msgs::Bool>("stop", 20);
         m.mpc_stop_reason_pub_ = nh.advertise<std_msgs::String>("reason", 20);
         m.mpc_timed_collision_pub_ = nh.advertise<visualization_msgs::MarkerArray>("timed_collision",20);
+        m.mpc_timed_plan_pub_ = nh.advertise<visualization_msgs::MarkerArray>("timed_plan",20);
         m.mpc_timed_path_pub_ = nh.advertise<nav_msgs::Path>("timed_path",20);
         m.mpc_best_traj_pub_ = nh.advertise<visualization_msgs::Marker>("best", 20);
         m.mpc_fov_pub_ = nh.advertise<visualization_msgs::Marker>("fov", 20);
@@ -358,7 +359,14 @@ protected:
             EXPECT_EQ(std::future_status::ready,entry.wait_for(std::chrono::seconds(2)));
             EXPECT_EQ(std::future_status::timeout,receiving.wait_for(std::chrono::milliseconds(20)));
             if(expire)ros::Time::setNow(ros::Time::now()+ros::Duration(1.));
-            else clock=std::thread([&]{double t=ros::Time::now().toSec();while(!done){t+=.001;ros::Time::setNow(ros::Time(t));ros::WallDuration(.002).sleep();}});
+            else {
+                // Each transaction needs a distinct simulated tick: the plant
+                // deliberately coalesces odometry at an identical timestamp.
+                // Do not rely on the clock thread winning its scheduling race.
+                const double epoch=ros::Time::now().toSec()+.001;
+                ros::Time::setNow(ros::Time(epoch));
+                clock=std::thread([&,epoch]{double t=epoch;while(!done){t+=.001;ros::Time::setNow(ros::Time(t));ros::WallDuration(.002).sleep();}});
+            }
         });
         EXPECT_FALSE(SimOdomTestAccess::step(manager_));
         done=true;if(clock.joinable())clock.join();
@@ -1226,6 +1234,56 @@ TEST_F(SimOdomTest, ExecutionDisplayUsesCurrentSourceAgeAndOnlyCheckedRemainingT
     for(int i=0;i<10;++i){ros::spinOnce();ros::WallDuration(.005).sleep();}
     EXPECT_TRUE(paths.back().poses.empty());
     EXPECT_TRUE(std::any_of(visuals.back().markers.begin(),visuals.back().markers.end(),[](const visualization_msgs::Marker& m){return m.ns=="timed_rejected" && m.color.r==1.;}));
+}
+TEST_F(SimOdomTest, FullTimedPredictionRemainsVisibleAfterExecutionDisplayUpdates)
+{
+    ros::Time::setNow(ros::Time(770));
+    SimOdomTestAccess::timedSetup(manager_,nh_);SimOdomTestAccess::enabled(manager_,true);
+    auto distant=frame(ros::Time(769.9));addPedestrian(*distant,Eigen::Vector2d(4,2));
+    distant->velocity[0].x=.5;SimOdomTestAccess::receive(manager_,distant);
+    visualization_msgs::MarkerArray execution,plan;
+    auto es=nh_.subscribe<visualization_msgs::MarkerArray>("timed_collision",30,
+        [&](const visualization_msgs::MarkerArray::ConstPtr& m){execution=*m;});
+    auto ps=nh_.subscribe<visualization_msgs::MarkerArray>("timed_plan",30,
+        [&](const visualization_msgs::MarkerArray::ConstPtr& m){plan=*m;});
+    const auto ready=ros::WallTime::now()+ros::WallDuration(2.);
+    while(!es.getNumPublishers() && ros::WallTime::now()<ready) {
+        ros::spinOnce();ros::WallDuration(.005).sleep();
+    }
+    auto drain=[] {for(int i=0;i<10;++i){ros::spinOnce();ros::WallDuration(.005).sleep();}};
+    auto horizon=[](const visualization_msgs::MarkerArray& message) {
+        double maximum=0.;
+        for(const auto& marker:message.markers)
+            if(marker.action==visualization_msgs::Marker::ADD && marker.type==visualization_msgs::Marker::TEXT_VIEW_FACING) {
+                const auto plus=marker.text.find('+');
+                if(plus!=std::string::npos)maximum=std::max(maximum,std::stod(marker.text.substr(plus+1)));
+            }
+        return maximum;
+    };
+    SimOdomTestAccess::step(manager_);ASSERT_TRUE(SimOdomTestAccess::executing(manager_));drain();
+    const double planned_horizon=horizon(execution);ASSERT_GT(planned_horizon,1.);
+    ros::Time::setNow(ros::Time(770.02));ASSERT_TRUE(SimOdomTestAccess::execute(manager_));drain();
+    std::cout<<"TIMED_DISPLAY full_plan_seconds="<<planned_horizon
+             <<" execution_seconds="<<horizon(execution)<<" retained_plan_seconds="<<horizon(plan)<<std::endl;
+    EXPECT_LE(horizon(execution),.26+1e-9);
+    EXPECT_GE(std::max(horizon(execution),horizon(plan)),planned_horizon-1e-9)
+        <<"The 20ms execution display must not erase the full pedestrian prediction from RViz";
+    if(!plan.markers.empty()) {
+        EXPECT_DOUBLE_EQ(planned_horizon,horizon(plan));
+        EXPECT_EQ(ros::Time(770),plan.markers.front().header.stamp);
+    }
+    // Invalid source/STOP must also clear the retained planning snapshot.
+    ros::Time::setNow(ros::Time(770.6));EXPECT_FALSE(SimOdomTestAccess::execute(manager_));drain();
+    EXPECT_DOUBLE_EQ(0.,horizon(plan));
+    // A new successful plan can restore the snapshot; a fresh empty execution
+    // frame must clear it immediately, even before the next planning boundary.
+    ros::Time::setNow(ros::Time(771));SimOdomTestAccess::timedSetup(manager_,nh_);SimOdomTestAccess::enabled(manager_,true);
+    distant->header.stamp=ros::Time::now();SimOdomTestAccess::receive(manager_,distant);
+    SimOdomTestAccess::step(manager_);ASSERT_TRUE(SimOdomTestAccess::executing(manager_));drain();
+    ASSERT_GT(horizon(plan),1.);
+    ros::Time::setNow(ros::Time(771.02));SimOdomTestAccess::receive(manager_,frame(ros::Time::now()));
+    ASSERT_TRUE(SimOdomTestAccess::execute(manager_));drain();
+    EXPECT_DOUBLE_EQ(0.,horizon(plan));
 }
 TEST_F(SimOdomTest, TimedPlantExecutesAndChecksNewFramesWhileGlobalWorkerIsDelayed)
 {

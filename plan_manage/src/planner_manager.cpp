@@ -355,6 +355,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         risk_field_pub_ = nh.advertise<sensor_msgs::PointCloud2>("/mpc/risk_field", 1);
         risk_halo_pub_ = nh.advertise<sensor_msgs::PointCloud2>("/mpc/risk_halo", 1);
         mpc_timed_collision_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/mpc/timed_collision", 1);
+        mpc_timed_plan_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/mpc/timed_plan", 1);
         mpc_timed_path_pub_ = nh.advertise<nav_msgs::Path>("/mpc/timed_best_path", 1);
         mpc_best_traj_pub_ = nh.advertise<visualization_msgs::Marker>("/mpc/best_traj", 10);
         transaction_diag_pub_ = nh.advertise<std_msgs::Float64MultiArray>("/mpc/transaction_diagnostics",10);
@@ -2005,7 +2006,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
 
     void PlannerManager::publishTimedCollisionLocked(const ros::Time& epoch, bool show_plan)
     {
-        if (!mpc_timed_collision_pub_ && !mpc_timed_path_pub_) return;
+        if (!mpc_timed_collision_pub_ && !mpc_timed_path_pub_ && !mpc_timed_plan_pub_) return;
         visualization_msgs::MarkerArray markers;
         visualization_msgs::Marker marker;
         marker.header.frame_id="world"; marker.header.stamp=epoch;
@@ -2071,6 +2072,23 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         }
         if(mpc_timed_collision_pub_)mpc_timed_collision_pub_.publish(markers);
         if(mpc_timed_path_pub_)mpc_timed_path_pub_.publish(path);
+        // The 20ms execution display replaces timed_collision with the checked
+        // remainder of one step. Keep the last verified full plan in a separate
+        // RViz display; STOP/invalid/empty/reset clears it instead of retaining
+        // an old safe-looking prediction. This snapshot is not live execution
+        // authorization and keeps its original epoch and bounded lifetime.
+        if(mpc_timed_plan_pub_) {
+            visualization_msgs::MarkerArray plan;
+            plan.markers.push_back(markers.markers.front()); // DELETEALL
+            if(show_plan) {
+                plan=markers;
+                for(auto& item:plan.markers)
+                    if(item.action==visualization_msgs::Marker::ADD &&
+                       item.type==visualization_msgs::Marker::TEXT_VIEW_FACING)
+                        item.text="Plan "+item.text;
+            }
+            mpc_timed_plan_pub_.publish(plan);
+        }
     }
 
     bool PlannerManager::pedestrianDataValid(const ros::Time& now)

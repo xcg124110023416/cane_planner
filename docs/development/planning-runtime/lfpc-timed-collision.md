@@ -106,6 +106,18 @@ whole-horizon timestamps. STOP clears the path and can show a current rejected
 execution footprint. MPC_HumanCane shows actual pose in this mode; best_traj
 remains the last MPPI prediction, not current execution authorization.
 
+`/mpc/timed_plan` independently retains the latest verified full-horizon marker
+snapshot (RViz MPC_TimedPlan, enabled by default). Publish it alongside the
+planning visualization, with original epoch/geometry and `Plan +seconds` labels;
+do not replace it with 20ms execution markers. It has the same bounded .6s
+lifetime. STOP/invalid/empty/reset/arrival clear this snapshot; a fresh empty or
+disabled source in the execution path clears it immediately as well. This topic
+has no execution authority and does not extend/revalidate future steps. Recorders
+capture both planning and execution visualizations. Regress that a >1s planning
+horizon remains visible after a .02s execution tick while timed_best_path still
+contains only the checked remainder, and that expiry/empty input clears the
+retained snapshot.
+
 `/mpc/execution_diagnostics` Float64MultiArray v1 has eight fields:
 version, ROS epoch, executed phase, effective duration, ACTUAL advance (zero on
 STOP), stopped, current accepted generation, validation seconds. The 33-field

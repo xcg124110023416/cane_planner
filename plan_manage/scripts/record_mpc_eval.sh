@@ -15,6 +15,7 @@ TOPICS = [
     "/mpc/best_traj",
     "/mpc/timed_best_path",
     "/mpc/timed_collision",
+    "/mpc/timed_plan",
     "/mpc/current_waypoint",
     "/mpc/waypoints",
     "/mpc/walking_corridors",
