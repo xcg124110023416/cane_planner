@@ -28,6 +28,9 @@ parser.add_argument('--edit-scene', action='store_true')
 parser.add_argument('--repeat-goals', action='store_true')
 parser.add_argument('--clock-jumps', action='store_true')
 parser.add_argument('--pedestrian-mode', choices=['interactive', 'independent'], default='interactive')
+parser.add_argument('--human-response', action='store_true')
+parser.add_argument('--reaction-delay', type=float, default=.3)
+parser.add_argument('--goal-offset-y', type=float, default=0., help='Offset the preset robot goal to exercise steering')
 args = parser.parse_args()
 scenario = args.scenario
 edit_scene = args.edit_scene
@@ -35,6 +38,8 @@ repeat_goals = args.repeat_goals
 evidence_tag = 'repeat-goals' if repeat_goals else ('stage4-edited' if edit_scene else 'stage3')
 if args.pedestrian_mode == 'independent': evidence_tag += '-independent'
 if args.clock_jumps: evidence_tag += '-clock-jumps'
+if args.human_response: evidence_tag += '-response-'+str(args.reaction_delay)
+if args.goal_offset_y: evidence_tag += '-goal-y'+str(args.goal_offset_y)
 package=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(package/'scripts'))
 from export_pedsim_blank import load_blank_scene
@@ -66,9 +71,11 @@ if clock_test:
             'import time; print(time.time_ns()-time.monotonic_ns())'],env=round_env,text=True))
     baseline_offset = realtime_offset()
 clock_changes = []
-process = subprocess.Popen(['bash', str(package/'scripts/start_pedsim_navigation.sh'),
+round_command = ['bash', str(package/'scripts/start_pedsim_navigation.sh'),
                             'start', '--world', 'blank', '--scenario', scenario, '--fresh-scene', '--no-rviz',
-                            '--pedestrian-mode', args.pedestrian_mode, '--port', str(port)],
+                            '--pedestrian-mode', args.pedestrian_mode, '--port', str(port)]
+if args.human_response: round_command += ['--human-response', '--reaction-delay', str(args.reaction_delay)]
+process = subprocess.Popen(round_command,
                            stdout=log, stderr=subprocess.STDOUT, start_new_session=True, env=round_env)
 try:
     from pedsim_round import TimeoutTransport
@@ -92,8 +99,11 @@ try:
     from rosgraph_msgs.msg import Log
     rospy.init_node('cane_stage3_check', anonymous=True, disable_signals=True)
     odoms = []; agents = []; observations = []; statuses = []; paths = []; clouds = []; force_frames = []; timed_frames=[]; execution=[]; transactions=[]; guards=[]; arrivals=[]
+    response_diagnostics=[];response_visuals=[]
     subscribers = [
         rospy.Subscriber('/rosout_agg', Log, lambda m: arrivals.append(m.msg) if '[MPC] Reached final goal' in m.msg else None, queue_size=20),
+        rospy.Subscriber('/mpc/human_response_diagnostics',Float64MultiArray,lambda m:response_diagnostics.append(list(m.data)),queue_size=100),
+        rospy.Subscriber('/mpc/human_response',MarkerArray,response_visuals.append,queue_size=100),
         rospy.Subscriber('/mpc/timed_collision',MarkerArray,timed_frames.append,queue_size=100),
         rospy.Subscriber('/mpc/execution_diagnostics',Float64MultiArray,lambda m: execution.append(list(m.data)),queue_size=100),
         rospy.Subscriber('/mpc/transaction_diagnostics',Float64MultiArray,lambda m: transactions.append(list(m.data)),queue_size=100),
@@ -140,6 +150,7 @@ try:
         assert math.hypot(robot_after.x-robot_before.x, robot_after.y-robot_before.y) < 1e-9, 'scene editing reset robot'
     goal = PoseStamped(); goal.header.frame_id = 'world'; goal.header.stamp = rospy.Time.now()
     goal.pose.position.x, goal.pose.position.y = scene['robot_goal']; goal.pose.orientation.w = 1.
+    goal.pose.position.y += args.goal_offset_y
     goalpub.publish(goal)
     began = time.monotonic(); deadline = began+45.; reached = False
     next_clock_change = began+2.
@@ -229,7 +240,35 @@ try:
         values=sorted(values)
         return dict(count=len(values),p50_ms=round(values[len(values)//2]*1000,3),p95_ms=round(values[int(.95*(len(values)-1))]*1000,3),max_ms=round(max(values)*1000,3)) if values else {}
     p = odoms[-1].pose.pose.position if odoms else None
+    response_report=None
+    if args.human_response:
+        assert response_diagnostics, 'missing actual response diagnostics'
+        applied={}
+        for row in response_diagnostics:
+            assert len(row)==19 and row[0]==1 and all(math.isfinite(v) for v in row)
+            if row[10]:
+                assert row[11]-row[17]>=args.reaction_delay-1e-6, 'cue applied before the configured delay'
+                applied[(row[17],row[10])]=row[12] # issue epoch disambiguates a goal reset
+        assert len(applied)>5, 'delayed cues never reached the actual plant'
+        assert any(len(m.points)==2 and m.id==0 for frame in response_visuals for m in frame.markers), 'desired heading arrow missing'
+        assert any(len(m.points)==2 and m.id==1 for frame in response_visuals for m in frame.markers), 'actual heading arrow missing'
+        response_report=dict(configured_delay=args.reaction_delay,applied_cues=len(applied),
+            applied_delay_min=min(applied.values()),applied_delay_max=max(applied.values()),
+            guard_interventions=max(row[16] for row in response_diagnostics),
+            max_heading_disagreement=max(abs(math.atan2(math.sin(row[5]-row[13]),math.cos(row[5]-row[13]))) for row in response_diagnostics))
+        if args.reaction_delay>0:
+            assert any(row[14]>0 and row[6]==0 for row in response_diagnostics), 'initial cue was not queued'
+            if args.goal_offset_y:
+                assert response_report['max_heading_disagreement']>.05, 'steering delay never changed actual heading'
+            first_issue=next(row[1] for row in response_diagnostics if row[4]==1)
+            first_apply=next(row[11] for row in response_diagnostics if row[10]>0)
+            pending_motion=[m for m in odoms if first_issue<=m.header.stamp.to_sec()<first_apply]
+            assert pending_motion and max(math.hypot(m.pose.pose.position.x-start.pose.pose.position.x,
+                m.pose.pose.position.y-start.pose.pose.position.y) for m in pending_motion)>.01, 'plant waited in place for a cue'
+    else:
+        assert not response_diagnostics, 'disabled response modified the ideal baseline'
     report = dict(pedestrian_mode=args.pedestrian_mode,edited_scene=edit_scene,repeat_goals=repeat_goals,completed_goals=len(arrivals),expected_people=expected_people,observed_max_speeds=observed_max_speeds,all_hull_frames=all_hull_frames,all_timed_frames=all_timed_frames,execution_seconds=profile([v[7] for v in execution]),transaction_seconds=profile([v[18] for v in transactions if len(v)>18]),mppi_seconds=profile([v[16] for v in transactions if len(v)>16 and math.isfinite(v[16])]),force_frames_checked=checked, marker_namespaces=sorted(namespaces),scenario=scenario, port=port, log=str(logpath), reached=reached,
+                  human_response=response_report,
                   elapsed=round(time.monotonic()-began, 3), robot_final=[p.x, p.y] if p else None,
                   agent_frames=len(agents), observation_frames=len(observations), statuses=statuses,
                   path_max_points=max(paths, default=0), cloud_counts=sorted(set(clouds)),

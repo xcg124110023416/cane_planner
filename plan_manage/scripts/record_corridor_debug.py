@@ -20,6 +20,8 @@ TOPICS = [
     "/mpc/stop_reason",
     "/mpc/path",
     "/mpc/best_traj",
+    "/mpc/human_response_diagnostics",
+    "/mpc/human_response",
     "/mpc/timed_best_path",
     "/mpc/timed_collision",
     "/mpc/timed_plan",

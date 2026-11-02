@@ -14,6 +14,16 @@ another unused port. --no-rviz runs without the RViz window for unattended tests
 The entry script currently contains a machine-specific primary workspace path;
 adjust that path when deploying elsewhere.
 
+OPTIONAL HUMAN STEERING DELAY
+Append --human-response --reaction-delay 0.3 to enable only steering response
+delay in the lightweight LFPC plant. Omit both flags for the ideal baseline;
+--human-response --reaction-delay 0.0 is the zero-delay control. This flag is
+independent of --pedestrian-mode, which controls pedestrians' response to robot.
+Yellow/blue MPC_HumanResponse arrows show desired/actual heading; its text and
+/mpc/human_response_diagnostics record realized delay and guard STOP episodes.
+Boundary/compute/callback time increases realized delay. Existing safety freezes
+remain active: this does not model stopping reaction, braking or tracking noise.
+
 CLOCK
 The wrapper sets /use_sim_time on its owned master before starting any nodes.
 pedsim_monotonic_clock publishes /clock from elapsed monotonic time at 1x speed;

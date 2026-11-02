@@ -150,6 +150,19 @@ public:
         m.execution_diag_pub_=nh.advertise<std_msgs::Float64MultiArray>("execution",20);
     }
     static Eigen::Vector2d V2(const Eigen::Vector3d& v) {return v.head<2>();}
+    static void responseSetup(PlannerManager& m,ros::NodeHandle& nh,double delay=.3) {
+        m.human_response_enabled_=true;ASSERT_TRUE(m.human_response_.setDelay(delay));
+        m.resetHumanResponseLocked(m.lfpc_model_->getNextIterState().z());
+        m.human_response_diag_pub_=nh.advertise<std_msgs::Float64MultiArray>("response_diagnostics",20);
+        m.human_response_vis_pub_=nh.advertise<visualization_msgs::MarkerArray>("response_visuals",20);
+    }
+    static auto& response(PlannerManager& m) {return m.human_response_;}
+    static uint64_t responseGuards(PlannerManager& m) {return m.human_response_guard_interventions_;}
+    static auto executionControl(PlannerManager& m) {return m.execution_control_;}
+    static void diagonalGoal(PlannerManager& m) {
+        m.global_waypoints_={Eigen::Vector2d(0,0),Eigen::Vector2d(2,1),Eigen::Vector2d(4,2)};
+        m.end_pt_=Eigen::Vector2d(4,2);m.mpc_sim_goal_=Eigen::Vector3d(2,1,0);
+    }
     static auto executionHull(PlannerManager& m) {return m.pedestrian_geometry_.front().hull;}
     static auto allGeometry(PlannerManager& m) {return m.pedestrian_geometry_;}
     static bool reached(PlannerManager& m) {return m.mpc_reached_goal_;}
@@ -1000,6 +1013,116 @@ TEST_F(SimOdomTest, TimedPlantQueuesWithoutTeleportAndSamplesActualLfpcPhase)
     EXPECT_NE(initial,SimOdomTestAccess::model(manager_).getCOMPos());EXPECT_NEAR(.02,SimOdomTestAccess::phase(manager_),1e-9);
     ros::Time::setNow(ros::Time(700.8));ASSERT_TRUE(SimOdomTestAccess::execute(manager_));
     EXPECT_NEAR(.06,SimOdomTestAccess::phase(manager_),1e-9); // delayed callback cannot skip the step
+}
+TEST_F(SimOdomTest, ResponseDelayWalksBeforeCueAndTurnsOnlyAtLaterSupportBoundary)
+{
+    const double epoch=880.;ros::Time::setNow(ros::Time(epoch));
+    SimOdomTestAccess::timedSetup(manager_,nh_);SimOdomTestAccess::responseSetup(manager_,nh_);
+    SimOdomTestAccess::diagonalGoal(manager_);
+    const auto initial=SimOdomTestAccess::model(manager_).getCOMPos();
+    for(int step=0;step<3;++step) {
+        SimOdomTestAccess::step(manager_);ASSERT_TRUE(SimOdomTestAccess::executing(manager_));
+        const auto control=SimOdomTestAccess::executionControl(manager_);
+        if(step<2)EXPECT_NEAR(0.,control.z(),1e-12);
+        else {
+            EXPECT_EQ(1u,SimOdomTestAccess::response(manager_).selected().sequence);
+            EXPECT_GT(std::abs(control.z()),.05);
+        }
+        for(int tick=1;tick<=14;++tick) {
+            ros::Time::setNow(ros::Time(epoch+step*.28+tick*.02));
+            auto expected=SimOdomTestAccess::expectedSample(manager_,tick*.02);
+            ASSERT_TRUE(SimOdomTestAccess::execute(manager_));
+            EXPECT_TRUE(expected.getCOMPos().isApprox(SimOdomTestAccess::model(manager_).getCOMPos(),1e-10));
+            if(step<2)EXPECT_NEAR(0.,SimOdomTestAccess::model(manager_).getNextIterState().z(),1e-12);
+        }
+        EXPECT_FALSE(SimOdomTestAccess::executing(manager_));
+        EXPECT_NE(initial,SimOdomTestAccess::model(manager_).getCOMPos());
+    }
+    const auto& response=SimOdomTestAccess::response(manager_);
+    EXPECT_EQ(1u,response.applied().sequence);EXPECT_NEAR(.58,response.appliedAt()-response.applied().issued,1e-9);
+    EXPECT_EQ(0u,SimOdomTestAccess::responseGuards(manager_));
+}
+TEST_F(SimOdomTest, ZeroResponseDelayUsesNominalFirstControlWithoutMovingAtAdmission)
+{
+    ros::Time::setNow(ros::Time(881));SimOdomTestAccess::timedSetup(manager_,nh_);
+    SimOdomTestAccess::responseSetup(manager_,nh_,0.);SimOdomTestAccess::diagonalGoal(manager_);
+    const auto before=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
+    const auto position=SimOdomTestAccess::model(manager_).getCOMPos();
+    SimOdomTestAccess::step(manager_);ASSERT_TRUE(SimOdomTestAccess::executing(manager_));
+    EXPECT_EQ(before,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
+    EXPECT_EQ(position,SimOdomTestAccess::model(manager_).getCOMPos());
+    EXPECT_NEAR(SimOdomTestAccess::response(manager_).desired().yaw,
+        SimOdomTestAccess::executionControl(manager_).z(),1e-12);
+    EXPECT_EQ(0u,SimOdomTestAccess::response(manager_).applied().sequence);
+    ros::Time::setNow(ros::Time(881.02));ASSERT_TRUE(SimOdomTestAccess::execute(manager_));
+    EXPECT_EQ(1u,SimOdomTestAccess::response(manager_).applied().sequence);
+}
+TEST_F(SimOdomTest, ResponseGuardFreezesActualStateAndCountsEpisodesSeparately)
+{
+    ros::Time::setNow(ros::Time(882));SimOdomTestAccess::timedSetup(manager_,nh_);
+    SimOdomTestAccess::responseSetup(manager_,nh_,0.);SimOdomTestAccess::enabled(manager_,true);
+    SimOdomTestAccess::receive(manager_,frame(ros::Time::now()));
+    SimOdomTestAccess::step(manager_);ASSERT_TRUE(SimOdomTestAccess::executing(manager_));
+    const auto state=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
+    const auto position=SimOdomTestAccess::model(manager_).getCOMPos();
+    // Expire the source before the selected cue has ever moved the actual plant.
+    ros::Time::setNow(ros::Time(882.6));EXPECT_FALSE(SimOdomTestAccess::execute(manager_));
+    EXPECT_EQ(state,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
+    EXPECT_EQ(position,SimOdomTestAccess::model(manager_).getCOMPos());
+    EXPECT_EQ(0u,SimOdomTestAccess::response(manager_).applied().sequence);
+    EXPECT_EQ(1u,SimOdomTestAccess::responseGuards(manager_));
+    ros::Time::setNow(ros::Time(882.62));EXPECT_FALSE(SimOdomTestAccess::execute(manager_));
+    EXPECT_EQ(1u,SimOdomTestAccess::responseGuards(manager_));
+    SimOdomTestAccess::receive(manager_,frame(ros::Time::now()));
+    ros::Time::setNow(ros::Time(882.64));ASSERT_TRUE(SimOdomTestAccess::execute(manager_));
+    EXPECT_EQ(1u,SimOdomTestAccess::response(manager_).applied().sequence);
+    SimOdomTestAccess::clipExecutionCorridor(manager_,-10.);
+    ros::Time::setNow(ros::Time(882.66));EXPECT_FALSE(SimOdomTestAccess::execute(manager_));
+    EXPECT_EQ(2u,SimOdomTestAccess::responseGuards(manager_));
+}
+TEST_F(SimOdomTest, ResponseRebuildsForActualActionAndStillRejectsBlockedActualMotion)
+{
+    ros::Time::setNow(ros::Time(883));SimOdomTestAccess::timedSetup(manager_,nh_);
+    SimOdomTestAccess::responseSetup(manager_,nh_);SimOdomTestAccess::diagonalGoal(manager_);
+    SimOdomTestAccess::step(manager_);ASSERT_TRUE(SimOdomTestAccess::executing(manager_));
+    // The actual straight step has its own certificate, despite a turning nominal plan.
+    auto end=SimOdomTestAccess::expectedSample(manager_,.28);
+    EXPECT_TRUE(SimOdomTestAccess::executionContains(manager_,end.getCOMPos().head<2>()));
+    SimOdomTestAccess::block(manager_,end.getCOMPos().head<2>());
+    const auto before=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
+    ros::Time::setNow(ros::Time(883.02));EXPECT_FALSE(SimOdomTestAccess::execute(manager_));
+    EXPECT_EQ(before,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
+    EXPECT_EQ(1u,SimOdomTestAccess::responseGuards(manager_));
+}
+TEST_F(SimOdomTest, ResponseGoalAndStartResetDiscardPendingCuesAndGuardHistory)
+{
+    ros::Time::setNow(ros::Time(884));SimOdomTestAccess::timedSetup(manager_,nh_);
+    SimOdomTestAccess::responseSetup(manager_,nh_);SimOdomTestAccess::diagonalGoal(manager_);
+    SimOdomTestAccess::step(manager_);ASSERT_GT(SimOdomTestAccess::response(manager_).pending(),0u);
+    SimOdomTestAccess::goalReset(manager_);
+    EXPECT_EQ(0u,SimOdomTestAccess::response(manager_).pending());EXPECT_FALSE(SimOdomTestAccess::executing(manager_));
+    SimOdomTestAccess::startAt(manager_,-.7);
+    EXPECT_EQ(0u,SimOdomTestAccess::response(manager_).pending());
+    EXPECT_NEAR(-.7,SimOdomTestAccess::response(manager_).selected().yaw,1e-12);
+    EXPECT_EQ(0u,SimOdomTestAccess::responseGuards(manager_));
+}
+TEST_F(SimOdomTest, ResponsePreflightRejectsDelayedActionEvenWhenNominalPlanIsSafe)
+{
+    ros::Time::setNow(ros::Time(885));SimOdomTestAccess::timedSetup(manager_,nh_);
+    SimOdomTestAccess::responseSetup(manager_,nh_);SimOdomTestAccess::enabled(manager_,true);
+    auto observation=frame(ros::Time::now());addPedestrian(*observation,Eigen::Vector2d(0,1.));
+    observation->velocity[0].x=0.;SimOdomTestAccess::receive(manager_,observation);
+    // A prior heading cue becomes due now. Nominal planning goes along +X;
+    // the delayed +Y action would rotate the cane into the pedestrian instead.
+    double ignored;ASSERT_TRUE(SimOdomTestAccess::response(manager_).command(884.,0.,1.5707963267948966,ignored));
+    const auto state=StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_));
+    SimOdomTestAccess::step(manager_);
+    EXPECT_TRUE(SimOdomTestAccess::planValid(manager_));
+    EXPECT_FALSE(SimOdomTestAccess::executing(manager_));
+    EXPECT_EQ(state,StaticMpcTestAccess::state(SimOdomTestAccess::model(manager_)));
+    EXPECT_EQ(0u,SimOdomTestAccess::response(manager_).applied().sequence);
+    EXPECT_EQ(1u,SimOdomTestAccess::responseGuards(manager_));
+    waitForStops(1); // no nominal OK may be published for this rejected action
 }
 TEST_F(SimOdomTest, ExpiredExecutionFreezesTruePhaseAndFreshClearResumes)
 {

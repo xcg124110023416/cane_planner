@@ -661,6 +661,14 @@ Visualization Manager:
         {}
       Queue Size: 1
       Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /mpc/human_response
+      Name: MPC_HumanResponse
+      Namespaces:
+        {}
+      Queue Size: 1
+      Value: true
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /mpc/best_traj

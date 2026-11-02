@@ -24,6 +24,8 @@
     <arg name="simulation"/>
     <arg name="mpc_timed_collision_enable" default="true"/>
     <arg name="mpc_timed_robot_radius" default="0.25"/>
+    <arg name="human_response_enable" default="false"/>
+    <arg name="human_reaction_delay" default="0.3"/>
     <arg name="planner"/> <!-- A*:1, kinodynamic:2, LFPC-MPPI:3, kinematic MPPI:4 -->
     <arg name="use_pedestrians" default="false"/>
     <arg name="gazebo_sim" default="false"/>
@@ -269,6 +271,8 @@
              The circumscribed octagon encloses this COM-centered circular radius. -->
         <param if="$(eval arg('planner') == 3)" name="mpc/timed_collision_enable" value="$(arg mpc_timed_collision_enable)" type="bool"/>
         <param if="$(eval arg('planner') == 3)" name="mpc/timed_robot_radius" value="$(arg mpc_timed_robot_radius)" type="double"/>
+        <param name="human_response/enabled" value="$(arg human_response_enable)" type="bool"/>
+        <param name="human_response/reaction_delay" value="$(arg human_reaction_delay)" type="double"/>
         <!-- MPPI温度：越小越贪心(选最优)，越大越平滑(加权平均) -->
         <param name="mpc/temperature" value="0.4" type="double"/>
         <param name="mpc/mpc_iters" value="$(eval 2 if arg('planner') == 3 else 1)" type="int"/>

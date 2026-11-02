@@ -5,6 +5,8 @@
   <arg name="map_pcd" default="$(find map_generator)/resource/office2_modify.pcd"/>
   <arg name="use_static_global_map" default="false"/>
   <arg name="visualize" default="true"/>
+  <arg name="human_response_enable" default="false"/>
+  <arg name="human_reaction_delay" default="0.3"/>
   <arg name="enable_scene_editor" default="false"/>
   <arg name="pedestrians_avoid_robot" default="true"/>
   <arg name="scene_description" default=""/>
@@ -19,6 +21,8 @@
     <arg name="simulation_map_pcd" value="$(arg map_pcd)"/>
     <arg name="use_static_global_map" value="$(arg use_static_global_map)"/>
     <arg name="visualize" value="$(arg visualize)"/>
+    <arg name="human_response_enable" value="$(arg human_response_enable)"/>
+    <arg name="human_reaction_delay" value="$(arg human_reaction_delay)"/>
     <arg name="rviz_config" value="$(eval find('plan_manage') + ('/config/pedsim.rviz' if arg('enable_scene_editor') else '/config/replan.rviz'))"/>
   </include>
   <include file="$(find plan_manage)/launch/pedsim_single_source.launch">

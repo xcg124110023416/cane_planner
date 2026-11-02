@@ -6,6 +6,7 @@ from export_pedsim_blank import export_world, load_blank_scene
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import signal
@@ -179,11 +180,18 @@ def main():
     parser.add_argument('--pedestrian-mode', choices=['interactive', 'independent'], default='interactive',
                         help='interactive: avoid robot within 220-deg FOV; independent: ignore robot, retain walls/peers')
     parser.add_argument('--no-rviz', action='store_true', help='Headless navigation; no goals are sent automatically')
+    parser.add_argument('--human-response', action='store_true', help='Enable delayed human steering response (ideal execution by default)')
+    parser.add_argument('--reaction-delay', type=float, help='Steering cue delay in seconds, with --human-response (default: 0.3)')
     parser.add_argument('--fresh-scene', action='store_true', help='Use the YAML preset without reading or writing remembered edits')
     parser.add_argument('--editor-state-file', help='Explicit scene memory file (blank arena only)')
     parser.add_argument('--port', type=int, default=11551)
     parser.add_argument('--label', default='pedsim_round')
     args = parser.parse_args()
+    if args.reaction_delay is not None and not args.human_response:
+        parser.error('reaction-delay requires --human-response')
+    if args.reaction_delay is None: args.reaction_delay = .3
+    if not math.isfinite(args.reaction_delay) or args.reaction_delay < 0:
+        parser.error('reaction-delay must be finite and nonnegative')
     if not 1024 <= args.port <= 65535:
         parser.error('port must be 1024..65535')
     if not args.label or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' for c in args.label):
@@ -249,6 +257,8 @@ def main():
                      'editor_state_file:='+(str(Path(args.editor_state_file).expanduser().resolve()) if args.editor_state_file else ''),
                      'use_static_global_map:='+str(args.world == 'blank').lower(),
                      'visualize:='+str(not args.no_rviz).lower(),
+                     'human_response_enable:='+str(args.human_response).lower(),
+                     'human_reaction_delay:='+str(args.reaction_delay),
                      'pedestrian_speeds:='+json.dumps(speeds)],
                      clock_command=['/usr/bin/python3',str(package/'scripts/pedsim_monotonic_clock.py')])
 

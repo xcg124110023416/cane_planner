@@ -47,6 +47,32 @@ flowchart LR
 
 加权更新可行时，从初始可行提议和各轮可行加权结果中选择代价最低者，避免相对已验证的热启动解退化。局部目标到达只影响距离代价，仍检查完整预测期；只有安全进入实际最终目标范围才允许提前结束。有限采样 MPPI 提供连续优化过程，**不保证严格局部最优或找到所有可行解**。
 
+### 可选的转向反应延迟实验
+
+planner 3 的轻量仿真默认仍使用理想执行。追加 `human_response_enable:=true human_reaction_delay:=0.3` 可只启用**转向引导反应延迟**，例如：
+
+```bash
+roslaunch plan_manage sim_kin_replan.launch \
+  planner:=3 use_pedestrians:=true pedestrian_scenario:=dwcg_crossing \
+  human_response_enable:=true human_reaction_delay:=0.3
+```
+
+pedsim 启动器使用同一执行模型：
+
+```bash
+bash "$(rospack find plan_manage)/scripts/start_pedsim_navigation.sh" \
+  start --world blank --scenario crowd_5 --pedestrian-mode independent \
+  --human-response --reaction-delay 0.3
+```
+
+提示到期前，模拟人沿已响应的方向继续 LFPC 行走，到期后在下一个步态边界采用新提示。规划始终从实际 LFPC 状态开始，不把实际位置拉回预测轨迹；名义步长参数不变，转向增益、转速限制、步长扰动等其他因素本轮不启用。去掉上述参数就是原理想跟随对照，启用后设置延迟 `0.0` 则为零延迟对照。
+
+RViz **MPC_HumanResponse** 的黄色箭头表示最新引导方向，蓝色箭头表示实际朝向，文字显示配置延迟、最近一次实际生效延迟及保护介入次数。LFPC 只能在步态边界转向，实际延迟包含边界等待、规划和回调耗时，可能大于配置值。`/mpc/human_response_diagnostics` 记录提示发出、选中与实际执行的时间；录制脚本已包含它。
+
+延迟动作仍须通过实际首步的空间走廊和时间碰撞检查；失败时保留原安全冻结机制，并计为一次连续保护介入。**这不是停步反应或制动仿真**，不能把保护冻结后的到达当作无干预跟随成功。完整范围与验证记录见 [转向反应延迟仿真](docs/PLANNER3_HUMAN_RESPONSE_SIMULATION.md)。
+
+当前 MPPI 尚未补偿响应延迟。已测转弯场景中，理想与零延迟模式均到达，0.3 s 延迟模式出现反复修正且 45 s 内未到达；这属于本实验要测量的跟随退化，不能把启用延迟当作避障性能改进。
+
 ### 行人输入与适用范围
 
 - `use_pedestrians:=false` 为静态模式；启用后要求持续收到有效观测。
@@ -237,6 +263,8 @@ roslaunch plan_manage kin_replan.launch planner:=2
 | `mpc/max_api` | `π/6 rad` | 每步相对转角上限，约 30° |
 | `mpc/random_seed` | `0` | 初始化随机种子；运行中不逐周期重新播种 |
 | `mpc/timed_collision_enable` | `true` | 行人未来凸包与机器人包络的时间同步 SAT 硬检查；关闭用于消融 |
+| `human_response/enabled` | `false` | 仅轻量 planner 3：启用实际 LFPC 转向响应延迟 |
+| `human_response/reaction_delay` | `0.3` | 提示延迟秒数；生效时刻受步态边界与计算调度影响 |
 | `mpc/timed_robot_radius` | `0.25 m` | 关闭完整人杖时的质心包络半径 |
 | `mpc/nominal_al` | `0.40 m` | 固定步长参数，由 launch 参数 `user_step_length` 提供 |
 | `mpc/nominal_aw` | `0.0 m` | 固定步宽参数 |
@@ -283,6 +311,8 @@ planner 3 始终固定步长、步宽，只优化转角；`sigma_al`、`sigma_aw
 | `/mpc/debug_metrics` | `std_msgs/Float64MultiArray` | 规划耗时、拒绝计数和执行代价 |
 | `/mpc/transaction_diagnostics` | `std_msgs/Float64MultiArray` | 观测时效、事务耗时及是否执行 LFPC 积分 |
 | `/mpc/execution_diagnostics` | `std_msgs/Float64MultiArray` | 轻量仿真的实际步态阶段、推进量、停车状态及复检耗时 |
+| `/mpc/human_response_diagnostics` | `std_msgs/Float64MultiArray` | 可选转向延迟实验的提示/生效时间、实际方向与保护介入计数 |
+| `/mpc/human_response` | `visualization_msgs/MarkerArray` | 最新引导方向、实际朝向与延迟/保护文字 |
 | `/mpc/stop_advice`、`/mpc/stop_reason` | `std_msgs/Bool`、`std_msgs/String` | 停止建议及原因 |
 | `/sim_odom` | `nav_msgs/Odometry` | 轻量仿真的 LFPC 状态与静止心跳 |
 | `/cmd_vel_footprint` | `geometry_msgs/Twist` | Gazebo 模式下的速度输出 |

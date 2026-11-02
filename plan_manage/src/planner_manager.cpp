@@ -10,6 +10,7 @@
 #include <functional>
 #include <iomanip>
 #include <sstream>
+#include <stdexcept>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
@@ -330,6 +331,15 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
                                      &PlannerManager::dynamicObstaclesCallback, this);
         // Timer
         timed_sim_execution_=planner_==3 && simulation_ && !gazebo_sim_;
+        nh.param("human_response/enabled",human_response_enabled_,false);
+        double response_delay;
+        nh.param("human_response/reaction_delay",response_delay,.3);
+        if(human_response_enabled_ && (!timed_sim_execution_ || !human_response_.setDelay(response_delay))) {
+            ROS_FATAL("Human steering response requires planner 3 lightweight simulation and a finite nonnegative delay");
+            throw std::invalid_argument("invalid human_response configuration");
+        }
+        human_response_diag_pub_=nh.advertise<std_msgs::Float64MultiArray>("/mpc/human_response_diagnostics",20);
+        human_response_vis_pub_=nh.advertise<visualization_msgs::MarkerArray>("/mpc/human_response",1);
         execution_diag_pub_=nh.advertise<std_msgs::Float64MultiArray>("/mpc/execution_diagnostics",20);
         if(timed_sim_execution_)execution_timer_=nh.createTimer(ros::Duration(.02), &PlannerManager::executionCallback,this);
         exec_timer_ =
@@ -1807,6 +1817,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         if(timed_sim_execution_) {
             resetCorridorForGoalLocked();
             lfpc_model_->reset(Eigen::Vector3d(0,0,yaw),Eigen::Vector3d(px,py,0),LEFT_LEG,0);
+            resetHumanResponseLocked(yaw);
             odom_vel_=Eigen::Vector3d(0,0,yaw);
             mpc_reached_goal_=false;publishSimOdom(true);
             if(have_target_)changeFSMExecState(GEN_NEW_TRAJ);
@@ -1960,6 +1971,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         corridor_failure_capture_.resetForGoal();
         if (planner_==3) {
             ++global_route_revision_;global_route_ready_.reset();execution_active_=false;execution_phase_=0.;
+            resetHumanResponseLocked(lfpc_model_?lfpc_model_->getNextIterState().z():0.);
             ++pedestrian_generation_; // invalidate an outstanding plan on goal reset too
             ++corridor_preview_revision_;corridor_preview_started_=corridor_preview_next_=ros::Time();publishCorridorPreviewLocked(nullptr);
             if(human_cane_pub_) {visualization_msgs::MarkerArray clear;visualization_msgs::Marker marker;marker.header.frame_id="world";marker.header.stamp=ros::Time::now();marker.action=visualization_msgs::Marker::DELETEALL;clear.markers.push_back(marker);human_cane_pub_.publish(clear);}
@@ -2786,6 +2798,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         Eigen::Vector3d com_init_pos(odom_pos_(0), odom_pos_(1), 0.0);
         if (planner_ == 3)
             lfpc_model_->reset(init_v_state, com_init_pos, LEFT_LEG, 0);
+        if (planner_ == 3) resetHumanResponseLocked(init_v_state.z());
 
         // Cache the first forward A* point; reanchorWaypoint() selects the
         // actual lookahead target before the first planning step.
@@ -3013,6 +3026,10 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             mpc_controller_->clearTimedPedestrians();
             publishTimedCollisionLocked(ros::Time::now(), false);
             mpc_reached_goal_ = true;
+            if(human_response_enabled_) {
+                human_response_.reset(lfpc_model_->getNextIterState().z());
+                publishHumanResponseLocked("OK");
+            }
             if (simulation_ && !gazebo_sim_) publishSimOdom(true);
             ROS_WARN("[MPC] Reached final goal at (%.2f, %.2f), %d steps",
                      current_com(0), current_com(1), mpc_step_count_);
@@ -3152,6 +3169,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         }
         transaction_diag_[17]=std::chrono::duration<double>(std::chrono::steady_clock::now()-authorization_started).count();
         Eigen::Vector3d new_com = current_com;
+        bool response_execution_blocked=false;
         if (convex_corridor_result.feasible && mpc_controller_->lastPlanValid()) {
             // Admit lightweight execution, or integrate the other plant adapter,
             // immediately after authorization and before debug/visual output.
@@ -3165,6 +3183,22 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
                 execution_phase_=0.;execution_clock_=ros::Time::now();
                 execution_corridor_=convex_corridor_result;execution_active_=true;
                 execution_map_revision_=corridor_map_revision_;
+                execution_rebuild_corridor_=false;
+                if(human_response_enabled_) {
+                    // Cues are absolute headings, issued after nominal planning.
+                    // A pending cue holds the previous heading while walking.
+                    if(!human_response_.command(execution_clock_.toSec(),corridor_pose.z(),control.z(),execution_control_.z())) {
+                        execution_stop_reason_="HUMAN_RESPONSE_CLOCK_INVALID";
+                        human_response_.reset(corridor_pose.z());
+                        response_execution_blocked=true;
+                    } else {
+                        execution_rebuild_corridor_=std::abs(execution_control_.z()-control.z())>1e-9;
+                        // Certify the actual delayed action before publishing OK;
+                        // this shares the executor's corridor and timed checks.
+                        response_execution_blocked=!advanceExecutionLocked(execution_clock_,true);
+                    }
+                    if(response_execution_blocked)execution_active_=false;
+                }
             } else {
                 lfpc_model_->SetCtrlParams(control);
                 lfpc_model_->updateOneStep();
@@ -3227,8 +3261,8 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         }
 
         const auto dbg = mpc_controller_->getDebugMetrics();
-        const bool stop_advice = !convex_corridor_result.feasible || !mpc_controller_->lastPlanValid();
-        const std::string stop_reason = stop_advice ?
+        const bool stop_advice = response_execution_blocked || !convex_corridor_result.feasible || !mpc_controller_->lastPlanValid();
+        const std::string stop_reason = response_execution_blocked ? execution_stop_reason_ : stop_advice ?
             (convex_corridor_result.feasible ? (timed_execution_blocked ? "TIMED_EXECUTION_COLLISION" : "NO_FEASIBLE_TRAJECTORY") :
                 (convex_corridor_result.failure_reason==ConvexCorridor::FailureReason::DYNAMIC_DATA_INVALID ||
                  convex_corridor_result.failure_reason==ConvexCorridor::FailureReason::DYNAMIC_REFERENCE_BLOCKED ?
@@ -3240,6 +3274,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         std_msgs::String reason_msg;
         reason_msg.data = stop_reason;
         mpc_stop_reason_pub_.publish(reason_msg);
+        publishHumanResponseLocked(stop_reason);
         if (stop_advice)
         {
             mpc_controller_->resetWarmStart();

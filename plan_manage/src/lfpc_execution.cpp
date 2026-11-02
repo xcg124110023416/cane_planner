@@ -3,12 +3,69 @@
 #include <std_msgs/String.h>
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
+#include <sstream>
 
 namespace cane_planner {
 namespace {
 using V=Eigen::Vector2d;
 struct PoseSample {Eigen::Vector3d position;double yaw,phase;};
 }
+void PlannerManager::resetHumanResponseLocked(double yaw) {
+    human_response_.reset(yaw);human_response_guard_stopped_=false;
+    human_response_guard_interventions_=0;execution_rebuild_corridor_=false;
+    if(human_response_vis_pub_) {
+        visualization_msgs::MarkerArray markers;visualization_msgs::Marker m;
+        m.header.frame_id="world";m.header.stamp=ros::Time::now();
+        m.action=visualization_msgs::Marker::DELETEALL;markers.markers.push_back(m);
+        human_response_vis_pub_.publish(markers);
+    }
+}
+
+void PlannerManager::publishHumanResponseLocked(const std::string& reason,bool moved) {
+    if(!human_response_enabled_)return;
+    const auto now=ros::Time::now();
+    const bool stopped=reason!="OK";
+    if(stopped && !human_response_guard_stopped_)++human_response_guard_interventions_;
+    human_response_guard_stopped_=stopped;
+    if(moved)human_response_.acknowledge(now.toSec());
+    const auto& desired=human_response_.desired();const auto& selected=human_response_.selected();
+    const auto& applied=human_response_.applied();
+    const double actual_yaw=lfpc_model_->getNextIterState().z();
+    const double applied_delay=applied.sequence?human_response_.appliedAt()-applied.issued:-1.;
+    if(human_response_diag_pub_) {
+        std_msgs::Float64MultiArray m;std_msgs::MultiArrayDimension d;
+        d.label="human_steering_response_v1;0=version,1=epoch,2=enabled,3=configured_delay,4=issued_seq,5=desired_yaw,6=selected_seq,7=selected_issued,8=selected_due,9=selected_yaw,10=applied_seq,11=applied_at,12=applied_delay,13=actual_yaw,14=pending,15=guard_stopped,16=guard_interventions,17=applied_issued,18=applied_yaw";
+        d.size=d.stride=19;m.layout.dim.push_back(d);
+        m.data={1.,now.toSec(),1.,human_response_.delay(),double(desired.sequence),desired.yaw,
+            double(selected.sequence),selected.issued,selected.due,selected.yaw,double(applied.sequence),
+            human_response_.appliedAt(),applied_delay,actual_yaw,double(human_response_.pending()),
+            stopped?1.:0.,double(human_response_guard_interventions_),applied.issued,applied.yaw};
+        human_response_diag_pub_.publish(m);
+    }
+    if(human_response_vis_pub_) {
+        visualization_msgs::MarkerArray markers;visualization_msgs::Marker m;
+        m.header.frame_id="world";m.header.stamp=now;m.ns="human_response";
+        m.action=visualization_msgs::Marker::ADD;m.type=visualization_msgs::Marker::ARROW;
+        m.pose.orientation.w=1.;m.scale.x=.04;m.scale.y=.10;m.scale.z=.10;
+        m.lifetime=ros::Duration(.5);m.color.a=1.;
+        const auto com=lfpc_model_->getCOMPos();
+        for(int id=0;id<2;++id) {
+            m.id=id;m.points.clear();m.color.r=id==0?1.:.1;m.color.g=id==0?.8:.6;m.color.b=id==0?0.:1.;
+            const double yaw=id==0 && desired.sequence?desired.yaw:actual_yaw;
+            geometry_msgs::Point a,b;a.x=com.x();a.y=com.y();a.z=id==0?.95:.8;b=a;
+            b.x+=.9*std::cos(yaw);b.y+=.9*std::sin(yaw);m.points={a,b};markers.markers.push_back(m);
+        }
+        m.id=2;m.type=visualization_msgs::Marker::TEXT_VIEW_FACING;m.points.clear();
+        m.pose.position.x=com.x();m.pose.position.y=com.y();m.pose.position.z=1.25;
+        m.scale.z=.16;m.color.r=1.;m.color.g=stopped?0.:1.;m.color.b=stopped?0.:1.;
+        std::ostringstream label;label<<std::fixed<<std::setprecision(2)<<"Steering delay "<<human_response_.delay()<<" s; applied ";
+        if(applied_delay<0.)label<<"pending";else label<<applied_delay<<" s";
+        label<<"; guards "<<human_response_guard_interventions_;if(stopped)label<<" ["<<reason<<"]";
+        m.text=label.str();markers.markers.push_back(m);human_response_vis_pub_.publish(markers);
+    }
+}
+
 void PlannerManager::publishExecutionDecisionLocked(const std::string& reason) {
     const bool stopped=reason!="OK";
     if(mpc_stop_advice_pub_){std_msgs::Bool m;m.data=stopped;mpc_stop_advice_pub_.publish(m);}
@@ -35,7 +92,7 @@ void PlannerManager::publishExecutionDecisionLocked(const std::string& reason) {
     }
 }
 
-bool PlannerManager::advanceExecutionLocked(const ros::Time& now) {
+bool PlannerManager::advanceExecutionLocked(const ros::Time& now,bool admission_only) {
     if(!execution_active_)return false;
     const auto began=std::chrono::steady_clock::now();
     execution_witness_=MpcController::CollisionWitness();
@@ -43,13 +100,17 @@ bool PlannerManager::advanceExecutionLocked(const ros::Time& now) {
     const double duration=execution_root_.stepDuration();
     const double elapsed=(now-execution_clock_).toSec();
     // A delayed/paused plant cannot catch up by teleporting through a whole step.
-    const double delta=std::max(0.,std::min(.04,elapsed));
+    const double delta=admission_only?0.:std::max(0.,std::min(.04,elapsed));
     const double target=std::min(duration,execution_phase_+delta);
     auto finish=[&](const std::string& reason) {
+        execution_stop_reason_=reason;
+        if(admission_only)return reason=="OK"; // manager publishes the admission decision once
         execution_clock_=now;
         const bool stopped=reason!="OK";
         if(stopped)publishSimOdom(true);
         publishExecutionDecisionLocked(reason);
+        // A successful preflight has not yet moved or applied the selected cue.
+        publishHumanResponseLocked(reason,!stopped && execution_phase_>previous_phase);
         auto pose=lfpc_model_->getCOMPos();pose.z()=lfpc_model_->getNextIterState().z();
         publishHumanCaneLocked(pose,false);
         if(execution_diag_pub_) {
@@ -65,7 +126,7 @@ bool PlannerManager::advanceExecutionLocked(const ros::Time& now) {
     const PedestrianFrameToken frame{pedestrian_generation_,pedestrians_enabled_,pedestrian_header_.stamp,pedestrian_receipt_};
     std::vector<PoseSample> samples;
     const auto current=lfpc_model_->getCOMPos();const double current_yaw=lfpc_model_->getNextIterState().z();
-    const bool rebuild=collision_->getStaticMapRevision()!=execution_map_revision_;
+    const bool rebuild=execution_rebuild_corridor_ || collision_->getStaticMapRevision()!=execution_map_revision_;
     samples.push_back({current,current_yaw,execution_phase_});
     // Include boundary rotation, every nominal LFPC sample, and extra20ms poses.
     if(execution_phase_==0.) {
@@ -136,6 +197,7 @@ bool PlannerManager::advanceExecutionLocked(const ros::Time& now) {
             return finish("INVALID_STATIC_CORRIDOR");
         }
         execution_corridor_=rebuilt;execution_map_revision_=snapshot_revision;
+        execution_rebuild_corridor_=false;
     }
     if(!dynamic_check.bind(obstacles,shape))return finish("DYNAMIC_DATA_INVALID");
     auto in_corridor=[&](const V& p) {
@@ -157,6 +219,7 @@ bool PlannerManager::advanceExecutionLocked(const ros::Time& now) {
             execution_witness_={true,s.position.head<2>(),std::max(0.,s.phase-target),age,s.yaw};
             return finish("TIMED_EXECUTION_COLLISION");
         }
+    if(admission_only)return true;
     lfpc_model_->copyState(executed);execution_phase_=target;
     odom_pos_=executed.getCOMPos();odom_vel_=executed.getNextIterState();
     if(target>=duration-1e-12) {

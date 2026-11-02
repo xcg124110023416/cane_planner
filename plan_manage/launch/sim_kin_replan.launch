@@ -17,6 +17,9 @@
     <arg name="odometry_topic" value = "/simulation_generator/odom"/>
     <arg name="mpc_timed_collision_enable" default="true"/>
     <arg name="mpc_timed_robot_radius" default="0.25"/>
+    <!-- Optional human steering response; ideal execution remains the default. -->
+    <arg name="human_response_enable" default="false"/>
+    <arg name="human_reaction_delay" default="0.3"/>
     <arg name="planner" default="2"/>  <!-- A*:1, kinodynamic:2, LFPC-MPPI:3, kinematic MPPI:4 -->
     <arg name="visualize" default="true"/>
     <arg name="rviz_config" default="$(find plan_manage)/config/replan.rviz"/>
@@ -96,6 +99,8 @@
 
         <arg name="mpc_timed_collision_enable" value="$(arg mpc_timed_collision_enable)"/>
         <arg name="mpc_timed_robot_radius" value="$(arg mpc_timed_robot_radius)"/>
+        <arg name="human_response_enable" value="$(arg human_response_enable)"/>
+        <arg name="human_reaction_delay" value="$(arg human_reaction_delay)"/>
         <arg name="use_pedestrians" value="$(arg use_pedestrians)"/>
         <arg name="odometry_topic" value = "$(arg odometry_topic)"/>
         <arg name="odometry_world" value = "$(arg odometry_topic)"/>

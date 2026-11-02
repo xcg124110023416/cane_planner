@@ -97,6 +97,7 @@ target_link_libraries(pedestrian_panel ${catkin_LIBRARIES} ${RVIZ_DEFAULT_PLUGIN
   Qt5::Widgets -Wl,--no-undefined)
 
 if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(test_steering_response test/test_steering_response.cpp)
   catkin_add_nosetests(test/test_pedestrian_motion.py)
   catkin_add_nosetests(test/test_pedsim_blank.py)
   catkin_add_nosetests(test/test_social_scene.py)

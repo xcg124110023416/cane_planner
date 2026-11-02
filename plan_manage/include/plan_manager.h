@@ -39,6 +39,7 @@
 #include <path_searching/corridor_failure_snapshot.h>
 #include <path_searching/path_smoother.h>
 #include <path_searching/lfpc.h>
+#include <plan_manage/steering_response.h>
 #include <plan_env/collision_detection.h>
 #include <plan_container.hpp>
 
@@ -291,8 +292,16 @@ namespace cane_planner
         std::mutex fsmMutex_;
         ros::Timer execution_timer_;
         ros::Publisher execution_diag_pub_;
+        bool human_response_enabled_=false, execution_rebuild_corridor_=false;
+        SteeringResponse human_response_;
+        bool human_response_guard_stopped_=false;
+        uint64_t human_response_guard_interventions_=0;
+        std::string execution_stop_reason_="OK";
+        ros::Publisher human_response_diag_pub_, human_response_vis_pub_;
+        void resetHumanResponseLocked(double yaw);
+        void publishHumanResponseLocked(const std::string& reason, bool moved=false);
         void executionCallback(const ros::TimerEvent&);
-        bool advanceExecutionLocked(const ros::Time& now);
+        bool advanceExecutionLocked(const ros::Time& now, bool admission_only=false);
         void publishExecutionDecisionLocked(const std::string& reason);
 
         Eigen::Vector3d mpc_sim_goal_;

@@ -106,6 +106,31 @@ each actual advance. Reoptimize steering at support boundaries, not each timer t
 
 ## Diagnostics and visualization
 
+Optional lightweight steering-response experiments are applied **after** nominal
+MPPI selection, not inside its cost or rollout model. `human_response/enabled`
+defaults false; `human_response/reaction_delay` defaults .3 seconds. The response
+queue stores absolute headings with issue/release times. At a support boundary,
+the latest due cue replaces the responded heading; pending cues retain the
+previous heading while the actual LFPC continues moving. There is no timer sleep,
+pose snap, odometry-only delay or second authoritative plant. MPPI replans from
+the actual full LFPC state. Other response effects are not enabled.
+
+When the delayed first action differs from the nominal one, build its own COM
+reference corridor with the current-pose hull and current pedestrians, then
+check its support foot/COM union and time-matched pedestrian SAT with the same
+executor validator. Preflight does not advance the plant. It can reject a safe
+nominal plan's unsafe delayed action before publishing OK. Normal 20ms execution
+checks continue afterward; nominal MPPI snapshots remain reference predictions,
+not the actual delayed future. Only successful actual advancement acknowledges
+cue application. The diagnostics separate issue, due, selection and first
+actual use; boundary scheduling and callback/compute time increase realized delay.
+
+Existing protection freezes phase/pose on a failed check. Count each continuous
+STOP episode separately from successful responses; do not claim reaction/braking
+distance or unguarded human-navigation success. Goal/start/init reset pending
+cues and per-goal counters, and arrival clears queued cues. Details and evidence:
+[human response simulation](../../PLANNER3_HUMAN_RESPONSE_SIMULATION.md).
+
 `/mpc/sample_trajectories` shows a bounded uniform subset of actual last-iteration
 rollouts without drawing extra random values. Existing selected trajectory,
 time-matched hull pairs and timed path outputs remain. Historical beam_evidence

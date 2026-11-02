@@ -59,6 +59,17 @@ the topic. The short checked remainder remains visible in MPC_TimedCollision.
 
 ## LFPC MPPI outputs
 
+Opt-in delayed steering simulation publishes `/mpc/human_response` (MarkerArray),
+enabled as MPC_HumanResponse in both RViz configs. Yellow is the newest nominal
+heading cue; blue is actual LFPC yaw. Text reports configured delay, last actual
+cue application delay and guard STOP episode count. Markers use world, finite
+arrow endpoints and a .5s lifetime; start/goal reset clears them. These are
+simulator diagnostics, not new control inputs. Nominal best/timed-plan displays
+remain nominal predictions; timed execution remainder uses the delayed action.
+`/mpc/human_response_diagnostics` is a versioned Float64MultiArray whose layout
+label defines all 19 fields. Recorders capture both topics; cue selection is not
+recorded as actual application until the LFPC advances successfully.
+
 `/mpc/sample_trajectories` displays uniformly selected last-iteration sampled
 rollouts (default 20, cap 50), cyan for feasible and orange for rejected prefixes.
 It does not draw new random samples or display an unsafe weighted trajectory as
