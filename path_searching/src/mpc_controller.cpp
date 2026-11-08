@@ -42,7 +42,7 @@ void MpcController::setParam(ros::NodeHandle &nh)
     nh.param("mpc/goal_arrival_threshold", cfg_.goal_arrival_threshold, 0.3);
 
     nh.param("mpc/nominal_al", cfg_.nominal_al, 0.25);
-    nh.param("mpc/nominal_aw", cfg_.nominal_aw, 0.0);
+    nh.param("mpc/nominal_aw", cfg_.nominal_aw, 0.1);
     nh.param("mpc/timed_collision_enable", cfg_.timed_collision_enable, true);
     nh.param("mpc/timed_robot_radius", cfg_.timed_robot_radius, 0.25);
     nh.param("human_cane/enabled",cfg_.footprint.enabled,true);
@@ -62,7 +62,7 @@ void MpcController::init()
 void MpcController::reset()
 {
     resetWarmStart(); optimization_evidence_=OptimizationEvidence();
-    best_path_.clear(); best_times_.clear(); best_yaws_.clear(); best_controls_.clear();
+    best_path_.clear(); best_times_.clear(); best_yaws_.clear(); best_controls_.clear(); best_footsteps_.clear();
     clearTimedPedestrians();
     last_plan_valid_ = false;
     last_plan_time_ms_ = 0.0;
@@ -260,7 +260,7 @@ bool MpcController::revalidateTimedPath(double age)
     if (safe) timed_observation_age_ = age;
     else {
         last_plan_valid_ = last_debug_metrics_.plan_valid = false;
-        best_path_.clear(); best_times_.clear(); best_yaws_.clear(); best_controls_.clear();
+        best_path_.clear(); best_times_.clear(); best_yaws_.clear(); best_controls_.clear(); best_footsteps_.clear();
     }
     return safe;
 }
@@ -283,7 +283,8 @@ bool MpcController::spatialFree(const Eigen::Vector2d& p) {
         [&](const ConvexCorridor::Segment& region){return ConvexCorridor::contains(region,p,1e-6);});
 }
 bool MpcController::advance(LFPC& state,double action,std::vector<Eigen::Vector3d>& path,
-                            double& elapsed,std::vector<double>* times,std::vector<double>* yaws)
+                            double& elapsed,std::vector<double>* times,std::vector<double>* yaws,
+                            std::vector<Footstep>* footsteps)
 {
     const size_t previous_samples = state.getStepCOMPath().size();
     const double phase_start = state.getPhaseTime();
@@ -333,6 +334,12 @@ bool MpcController::advance(LFPC& state,double action,std::vector<Eigen::Vector3
         if(yaws)yaws->push_back(state.getNextIterState()(2));
     }
     elapsed += phases.back()-phase_start;
+    if(footsteps) {
+        // Legacy LEFT_LEG uses -aw along local y; RIGHT_LEG uses +aw.
+        // Decode the target-foot side without changing the LFPC dynamics.
+        const char side=state.getSupportFeet()==LEFT_LEG?RIGHT_LEG:LEFT_LEG;
+        footsteps->push_back({state.getFootPosition(),state.getNextIterState()(2),side});
+    }
     state.prepareNextStep();return true;
 }
 
@@ -377,7 +384,7 @@ MpcController::ControlSequence MpcController::weightedUpdate(
 
 MpcController::Rollout MpcController::rolloutSequence(const LFPC& base,
     const ControlSequence& controls,const Eigen::Vector3d& goal,
-    const Eigen::Vector2d* final_goal,double final_radius)
+    const Eigen::Vector2d* final_goal,double final_radius,std::vector<Footstep>* footsteps)
 {
     Rollout result;
     if(controls.size()!=size_t(cfg_.horizon_steps))return result;
@@ -386,7 +393,7 @@ MpcController::Rollout MpcController::rolloutSequence(const LFPC& base,
     for(size_t n=0;n<controls.size();++n) {
         const double action=controls[n];
         if(!std::isfinite(action) || std::abs(action)>cfg_.max_api ||
-           !advance(state,action,result.path,elapsed,&result.times,&result.yaws))return result;
+           !advance(state,action,result.path,elapsed,&result.times,&result.yaws,footsteps))return result;
         motion_cost+=cfg_.w_steer*std::abs(action)+(n>0?cfg_.w_dapi*std::abs(action-previous_action):0.);
         previous_action=action;++result.steps;
         arrived=arrived || distanceToGoal(state,goal)<cfg_.goal_arrival_threshold;
@@ -405,7 +412,7 @@ Eigen::Vector3d MpcController::plan(const LFPC::Ptr& base,const Eigen::Vector3d&
 {
     const auto started=std::chrono::steady_clock::now();
     footprint_local_=HumanCaneFootprint::relative(cfg_.footprint,0.);
-    best_path_.clear();best_times_.clear();best_yaws_.clear();best_controls_.clear();collision_witness_=CollisionWitness();
+    best_path_.clear();best_times_.clear();best_yaws_.clear();best_controls_.clear();best_footsteps_.clear();collision_witness_=CollisionWitness();
     last_plan_valid_=false;last_debug_metrics_=DebugMetrics();optimization_evidence_=OptimizationEvidence();
     last_debug_metrics_.timed_collision_active=!timed_collision_.empty() || !timed_input_valid_;
     const int N=cfg_.horizon_steps,K=cfg_.num_samples,I=cfg_.mpc_iters;
@@ -490,13 +497,15 @@ Eigen::Vector3d MpcController::plan(const LFPC::Ptr& base,const Eigen::Vector3d&
     if(fallback.valid) {
         const auto& selected=has_weighted?optimized:fallback;
         const auto& controls=has_weighted?optimized_controls:fallback_controls;
-        auto replay=rolloutSequence(*base,controls,goal,final_goal,final_radius);
+        std::vector<Footstep> footsteps;
+        auto replay=rolloutSequence(*base,controls,goal,final_goal,final_radius,&footsteps);
         evidence.reroll_valid=replay.valid && replay.cost==selected.cost && replay.steps==selected.steps &&
                               replay.terminal==selected.terminal;
         if(evidence.reroll_valid) {
             last_plan_valid_=true;last_debug_metrics_.executed_total_cost=replay.cost;
             best_path_=std::move(replay.path);best_times_=std::move(replay.times);best_yaws_=std::move(replay.yaws);
             best_controls_.assign(controls.begin(),controls.begin()+replay.steps);
+            best_footsteps_=std::move(footsteps);
             evidence.selected_steps=replay.steps;evidence.selected_terminal=replay.terminal;
             command=Eigen::Vector3d(cfg_.nominal_al,cfg_.nominal_aw,controls.front());
             warm_start_=controls;std::rotate(warm_start_.begin(),warm_start_.begin()+1,warm_start_.end());

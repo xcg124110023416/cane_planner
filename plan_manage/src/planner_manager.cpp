@@ -368,6 +368,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         mpc_timed_plan_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/mpc/timed_plan", 1);
         mpc_timed_path_pub_ = nh.advertise<nav_msgs::Path>("/mpc/timed_best_path", 1);
         mpc_best_traj_pub_ = nh.advertise<visualization_msgs::Marker>("/mpc/best_traj", 10);
+        mpc_selected_footsteps_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/mpc/selected_footsteps", 1);
         transaction_diag_pub_ = nh.advertise<std_msgs::Float64MultiArray>("/mpc/transaction_diagnostics",10);
         mpc_debug_metrics_pub_ = nh.advertise<std_msgs::Float64MultiArray>("/mpc/debug_metrics", 10);
         mpc_stop_advice_pub_ = nh.advertise<std_msgs::Bool>("/mpc/stop_advice", 10);
@@ -1970,6 +1971,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
     {
         corridor_failure_capture_.resetForGoal();
         if (planner_==3) {
+            publishSelectedFootstepsLocked(ros::Time::now(),false);
             ++global_route_revision_;global_route_ready_.reset();execution_active_=false;execution_phase_=0.;
             resetHumanResponseLocked(lfpc_model_?lfpc_model_->getNextIterState().z():0.);
             ++pedestrian_generation_; // invalidate an outstanding plan on goal reset too
@@ -2014,6 +2016,51 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             }
         }
         mpc_convex_corridor_pub_.publish(markers);
+    }
+
+    void PlannerManager::publishSelectedFootstepsLocked(const ros::Time& epoch, bool show_plan)
+    {
+        if (!mpc_selected_footsteps_pub_) return;
+        visualization_msgs::MarkerArray markers;
+        visualization_msgs::Marker marker;
+        marker.header.frame_id = "world";
+        marker.header.stamp = epoch;
+        marker.action = visualization_msgs::Marker::DELETEALL;
+        markers.markers.push_back(marker);
+        if (show_plan && mpc_controller_ && mpc_controller_->lastPlanValid()) {
+            const auto& footsteps = mpc_controller_->getBestFootsteps();
+            for (size_t i = 0; i < footsteps.size(); ++i) {
+                const auto& foot = footsteps[i];
+                const bool left = foot.side == LEFT_LEG;
+                marker.ns = left ? "selected_left_foot" : "selected_right_foot";
+                marker.id = i;
+                marker.action = visualization_msgs::Marker::ADD;
+                // Symbol centered on the model's point support, not collision geometry.
+                marker.type = visualization_msgs::Marker::CUBE;
+                marker.pose.position.x = foot.position.x();
+                marker.pose.position.y = foot.position.y();
+                marker.pose.position.z = .04;
+                marker.pose.orientation = tf::createQuaternionMsgFromYaw(foot.yaw);
+                marker.scale.x = .22;
+                marker.scale.y = .10;
+                marker.scale.z = .025;
+                marker.color.r = left ? .15 : 1.;
+                marker.color.g = .5;
+                marker.color.b = left ? 1. : .05;
+                marker.color.a = .95;
+                marker.lifetime = ros::Duration(.6);
+                markers.markers.push_back(marker);
+                marker.ns = "selected_foot_labels";
+                marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+                marker.pose.position.z = .19;
+                marker.pose.orientation = geometry_msgs::Quaternion();
+                marker.pose.orientation.w = 1.;
+                marker.scale.z = .13;
+                marker.text = std::string(left ? "L" : "R") + std::to_string(i + 1);
+                markers.markers.push_back(marker);
+            }
+        }
+        mpc_selected_footsteps_pub_.publish(markers);
     }
 
     void PlannerManager::publishTimedCollisionLocked(const ros::Time& epoch, bool show_plan)
@@ -2188,7 +2235,10 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             ++pedestrian_generation_; // includes malformed and same-stamp enabled frames
             receivePedestrians(msg, receipt);
             if (!pedestrian_frame_valid_ || pedestrian_observations_.empty()) clearPedestrianMarkersLocked();
-            if (!pedestrian_frame_valid_) updateCorridorPreviewLocked(Eigen::Vector3d::Zero(),false);
+            if (!pedestrian_frame_valid_) {
+                publishSelectedFootstepsLocked(receipt,false);
+                updateCorridorPreviewLocked(Eigen::Vector3d::Zero(),false);
+            }
             return;
         }
         publishDynamicObstacleBodies(msg);
@@ -2227,6 +2277,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
             std::lock_guard<std::mutex> lock(dynObsMutex_);
             if (!pedestrianDataValid(ros::Time::now())) {
                 clearPedestrianMarkersLocked();
+                publishSelectedFootstepsLocked(ros::Time::now(),false);
                 updateCorridorPreviewLocked(Eigen::Vector3d::Zero(),false);
             }
         }
@@ -3025,6 +3076,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         {
             mpc_controller_->clearTimedPedestrians();
             publishTimedCollisionLocked(ros::Time::now(), false);
+            publishSelectedFootstepsLocked(ros::Time::now(), false);
             mpc_reached_goal_ = true;
             if(human_response_enabled_) {
                 human_response_.reset(lfpc_model_->getNextIterState().z());
@@ -3055,6 +3107,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
         {
             mpc_controller_->clearTimedPedestrians();
             publishTimedCollisionLocked(ros::Time::now(), false);
+            publishSelectedFootstepsLocked(ros::Time::now(), false);
             ROS_WARN("[MPC] Stuck for %d steps, triggering replan", STUCK_THRESHOLD);
             mpc_reached_goal_ = false;
             if (gazebo_sim_) { geometry_msgs::Twist cmd; cmd_vel_pub_.publish(cmd); }
@@ -3268,6 +3321,7 @@ std::vector<Eigen::Vector2d> buildHumanCaneFootprintWorld(
                  convex_corridor_result.failure_reason==ConvexCorridor::FailureReason::DYNAMIC_REFERENCE_BLOCKED ?
                     ConvexCorridor::failureReasonName(convex_corridor_result.failure_reason) : "INVALID_STATIC_CORRIDOR")) : "OK";
         publishTimedCollisionLocked(prediction_epoch, !stop_advice);
+        publishSelectedFootstepsLocked(prediction_epoch, !stop_advice);
         std_msgs::Bool stop_msg;
         stop_msg.data = stop_advice;
         mpc_stop_advice_pub_.publish(stop_msg);

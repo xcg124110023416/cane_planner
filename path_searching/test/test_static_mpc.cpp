@@ -53,6 +53,7 @@ public:
     {
         c.cfg_.horizon_steps = 1;
         c.cfg_.nominal_al = 0.25;
+        c.cfg_.nominal_aw = 0.0; // Existing obstacle fixtures assume zero lateral gait.
         c.cfg_.max_api = 3.14159265358979323846/6.;
         c.cfg_.num_samples = 64;c.cfg_.mpc_iters = 2;
         c.rng_.seed(17);c.normal_dist_.reset();
@@ -75,6 +76,7 @@ public:
     static void timedEnable(MpcController& c,bool value) {c.cfg_.timed_collision_enable=value;}
     static void footprint(MpcController& c,bool value) {c.cfg_.footprint.enabled=value;}
     static void angleLimit(MpcController& c,double limit) {c.cfg_.max_api=limit;}
+    static void nominalWidth(MpcController& c,double width) {c.cfg_.nominal_aw=width;}
     static CollisionDetection::Ptr wideMap() {auto c=map();c->static_origin_=Eigen::Vector2d(-10,-10);c->static_map_resolution_=.025;c->static_map_inv_resolution_=40.;return c;}
     static void suffixCost(MpcController& c) {c.cfg_.horizon_steps=10;c.cfg_.w_steer=.5;c.cfg_.w_dapi=.7;c.cfg_.w_goal=10.;c.cfg_.goal_arrival_threshold=.2;}
     static void steeringCost(MpcController &c) { c.cfg_.w_steer = 0.5; }
@@ -249,10 +251,12 @@ TEST(StaticMpcRuntime, MissingInvalidAndClearedCorridorStop)
     c.setConvexCorridor({box()});
     c.plan(m, goal);
     ASSERT_TRUE(c.lastPlanValid());
+    ASSERT_FALSE(c.getBestFootsteps().empty());
     c.clearConvexCorridor();
     EXPECT_TRUE(c.plan(m, goal).isZero());
     EXPECT_FALSE(c.lastPlanValid());
     EXPECT_TRUE(c.getBestPath().empty());
+    EXPECT_TRUE(c.getBestFootsteps().empty());
 }
 
 TEST(StaticMpcRuntime, WeightedCommandMatchesExecutedAction)
@@ -305,6 +309,10 @@ TEST(StaticMpcRuntime, WeightedFootOutsideUnionFallsBackToVerifiedSampleReproduc
     EXPECT_TRUE(a.getDebugMetrics().weighted_checked);EXPECT_TRUE(a.getDebugMetrics().weighted_fallback);
     EXPECT_EQ(1,a.optimizationEvidence().weighted_rejects);
     EXPECT_GT(a.getDebugMetrics().convex_corridor_reject_count,0);expectExecutedPath(a,m,expected);
+    LFPC replay;replay.copyState(*m);replay.SetCtrlParams(expected);replay.updateOneStep();
+    ASSERT_EQ(1u,a.getBestFootsteps().size());
+    EXPECT_EQ(replay.getFootPosition(),a.getBestFootsteps().front().position);
+    EXPECT_EQ(replay.getSupportFeet()==LEFT_LEG?RIGHT_LEG:LEFT_LEG,a.getBestFootsteps().front().side);
 }
 
 TEST(StaticMpcRuntime, WeightedMeanAcrossNonconvexUnionIsRechecked)
@@ -346,18 +354,57 @@ TEST(StaticMpcRuntime, ContinuousOptimizationImprovesCostAndReplaysFullState)
     ASSERT_EQ(3u,e.best_verified_costs.size());
     for(size_t i=1;i<e.best_verified_costs.size();++i)EXPECT_LE(e.best_verified_costs[i],e.best_verified_costs[i-1]);
     const auto& controls=c.getBestControls();ASSERT_EQ(5u,controls.size());
+    const auto& footsteps=c.getBestFootsteps();ASSERT_EQ(controls.size(),footsteps.size());
     EXPECT_DOUBLE_EQ(command.z(),controls.front());
     EXPECT_GT(std::abs(command.z()/(3.14159265358979323846/12.)-std::round(command.z()/(3.14159265358979323846/12.))),1e-4);
     LFPC replay;replay.copyState(*model);std::vector<Eigen::Vector3d> path;
-    for(double action:controls) {
+    for(size_t i=0;i<controls.size();++i) {
+        const double action=controls[i];
         EXPECT_LE(std::abs(action),3.14159265358979323846/6.);
         replay.SetCtrlParams(Eigen::Vector3d(command.x(),command.y(),action));replay.updateOneStep();
+        EXPECT_EQ(replay.getFootPosition(),footsteps[i].position);
+        EXPECT_DOUBLE_EQ(replay.getNextIterState()(2),footsteps[i].yaw);
+        EXPECT_EQ(replay.getSupportFeet()==LEFT_LEG?RIGHT_LEG:LEFT_LEG,footsteps[i].side);
+        if(i>0) { EXPECT_NE(footsteps[i-1].side,footsteps[i].side); }
         const auto step=replay.getStepCOMPath();path.insert(path.end(),step.begin(),step.end());replay.prepareNextStep();
     }
     ASSERT_EQ(path.size(),c.getBestPath().size());
     for(size_t i=0;i<path.size();++i)EXPECT_NEAR(0.,(path[i]-c.getBestPath()[i]).norm(),1e-12);
     EXPECT_DOUBLE_EQ(c.getDebugMetrics().executed_total_cost,StaticMpcTestAccess::rolloutCost(c,*model,controls,goal));
     EXPECT_TRUE(e.reroll_valid);
+    c.reset();EXPECT_TRUE(c.getBestFootsteps().empty());
+}
+
+TEST(StaticMpcRuntime, NominalFootWidthUsesModelPlacementsAndPhysicalLeftRight)
+{
+    for(double yaw:{0.,.7,-1.2}) {
+        MpcController c;StaticMpcTestAccess::configure(c);StaticMpcTestAccess::horizon(c,10);
+        StaticMpcTestAccess::nominalWidth(c,MpcController::Config().nominal_aw);
+        StaticMpcTestAccess::angleLimit(c,0.);
+        c.setCollision(StaticMpcTestAccess::wideMap());c.setConvexCorridor({box(-9,9,-9,9)});
+        auto model=StaticMpcTestAccess::model();
+        model->reset(Eigen::Vector3d(0,0,yaw),Eigen::Vector3d::Zero(),LEFT_LEG,0);
+        const Eigen::Vector2d forward(std::cos(yaw),std::sin(yaw)),left(-std::sin(yaw),std::cos(yaw));
+        const auto command=c.plan(model,Eigen::Vector3d(5*forward.x(),5*forward.y(),0));
+        ASSERT_TRUE(c.lastPlanValid());EXPECT_DOUBLE_EQ(.1,command.y());
+        const auto& feet=c.getBestFootsteps();ASSERT_EQ(10u,feet.size());
+        LFPC replay;replay.copyState(*model);
+        for(size_t i=0;i<feet.size();++i) {
+            const Eigen::Vector2d root=replay.getCOMPos().head<2>();
+            replay.SetCtrlParams(command);replay.updateOneStep();
+            EXPECT_TRUE(feet[i].position.isApprox(replay.getFootPosition(),1e-12));
+            const double lateral=(feet[i].position-root).dot(left);
+            if(feet[i].side==LEFT_LEG) { EXPECT_GT(lateral,0.); }
+            else { EXPECT_EQ(RIGHT_LEG,feet[i].side);EXPECT_LT(lateral,0.); }
+            if(i>=3) {
+                const double width=std::abs((feet[i].position-feet[i-1].position).dot(left));
+                EXPECT_NEAR(.415,width,.01);
+                EXPECT_NE(feet[i].side,feet[i-1].side);
+            }
+            replay.prepareNextStep();
+        }
+        EXPECT_LT(std::abs(replay.getCOMPos().head<2>().dot(left)),.10);
+    }
 }
 
 TEST(StaticMpcRuntime, StableWeightsExcludeAllUnsafeInputs)
@@ -452,6 +499,7 @@ TEST(StaticMpcRuntime, FinalArrivalIsSafeTerminalButLocalGoalIsNot)
     c.plan(model,Eigen::Vector3d(.30,0,0));EXPECT_FALSE(c.lastPlanValid());
     const auto cmd=c.plan(model,Eigen::Vector3d(.30,0,0),&final,.2);
     ASSERT_TRUE(c.lastPlanValid());EXPECT_TRUE(c.optimizationEvidence().selected_terminal);
+    EXPECT_EQ(size_t(c.optimizationEvidence().selected_steps),c.getBestFootsteps().size());
     EXPECT_LT(c.optimizationEvidence().selected_steps,10);EXPECT_TRUE(c.optimizationEvidence().reroll_valid);
     LFPC state;state.copyState(*model);state.SetCtrlParams(cmd);state.updateOneStep();
     EXPECT_LT((state.getCOMPos().head<2>()-final).norm(),.2);
@@ -561,6 +609,7 @@ TEST(TimedMpcRuntime, ExecutionEpochRecheckCatchesLatencyWithoutChangingModel) {
     c.plan(m,Eigen::Vector3d(2,0,0));ASSERT_TRUE(c.lastPlanValid());
     const auto pos=m->getCOMPos();const auto state=m->getState();
     EXPECT_FALSE(c.revalidateTimedPath(.2));EXPECT_FALSE(c.lastPlanValid());
+    EXPECT_TRUE(c.getBestFootsteps().empty());
     EXPECT_TRUE(c.getDebugMetrics().timed_execution_checked);EXPECT_FALSE(c.getDebugMetrics().timed_execution_safe);
     EXPECT_EQ(pos,m->getCOMPos());EXPECT_EQ(state,m->getState());
     ASSERT_TRUE(c.collisionWitness().valid);EXPECT_DOUBLE_EQ(.2,c.collisionWitness().observation_age);

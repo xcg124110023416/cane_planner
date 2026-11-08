@@ -61,6 +61,7 @@ public:
     {
         nh.setParam("human_cane/enabled",false); // historical point/circle transaction fixtures
         nh.setParam("mpc/num_samples",256);nh.setParam("mpc/horizon_steps",6);
+        nh.setParam("mpc/nominal_aw",0.); // Historical straight-line transaction fixtures.
         nh.setParam("mpc/max_api",.5236);
         nh.setParam("mpc/timed_collision_enable",true);
         m.initial_route_active_ = true; // existing step fixtures model an already activated route

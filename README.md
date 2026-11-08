@@ -102,6 +102,8 @@ Pᵢ = P₀ + v × [(执行时间原点 − 观测时间戳) + τᵢ]
 
 轻量执行期间，`MPC_HumanCane` 显示实际姿态，`MPC_TimedCollision` 和 `/mpc/timed_best_path` 显示本次复检的首步剩余预测及对应行人凸包，时间原点随检查更新。默认开启的 **MPC_TimedPlan**（`/mpc/timed_plan`）独立保留最近一次通过验证的完整 MPPI 预测，人杖与行人轮廓由青到紫对应未来时刻，文字为 `Plan +τ s`；不再被每 20 ms 的当前步显示覆盖。该图层是原规划时刻的预测快照，不表示后续每一步已经获得执行授权；新计划会替换它，STOP、行人为空或无效、重置和到达会清除它，标记最多存活 0.6 s。`/mpc/best_traj` 保留最近一次 MPPI 的完整预测。`/mpc/execution_diagnostics` 记录实际阶段、推进量与停车状态。
 
+默认开启的 **MPC_SelectedFootsteps**（`/mpc/selected_footsteps`）显示最终选中轨迹的预测落脚点：蓝色 `L` 为左脚、橙色 `R` 为右脚，数字是本次预测的步序。落点来自最终控制序列的 LFPC 重演，每个支撑相一个；MPPI 加权的是转向控制，不会丢失落点。足印中心对应模型的点支撑位置，矩形尺寸与朝向仅用于示意，不是足部碰撞模型。默认 LFPC 横向参数 `nominal_aw=0.1 m`，在当前步时配置下，稳定直行的两脚横向间距约 41.5 cm；没有额外的显示横移。图层随新计划替换，STOP、重置和到达清除，寿命为 0.6 s；它表示滚动预测，不是实际落脚历史，启用响应延迟时仍显示名义计划。普通 planner 3 和 pedsim 的默认 RViz 配置均已启用。
+
 具体显示颜色、范围与尺寸调整见 [走廊使用说明](docs/PLANNER3_CORRIDOR_USAGE.md)。会影响停车和绕行的实现选择见 [Planner 3 行为说明](docs/PLANNER3_BEHAVIOR_NOTES.md)。
 
 ## 编译
@@ -267,7 +269,7 @@ roslaunch plan_manage kin_replan.launch planner:=2
 | `human_response/reaction_delay` | `0.3` | 提示延迟秒数；生效时刻受步态边界与计算调度影响 |
 | `mpc/timed_robot_radius` | `0.25 m` | 关闭完整人杖时的质心包络半径 |
 | `mpc/nominal_al` | `0.40 m` | 固定步长参数，由 launch 参数 `user_step_length` 提供 |
-| `mpc/nominal_aw` | `0.0 m` | 固定步宽参数 |
+| `mpc/nominal_aw` | `0.1 m` | LFPC 横向控制偏置；当前步时下稳定直行两脚横向间距约 41.5 cm，不等同于该参数值 |
 | `lfpc/t_sup` | `0.35 s` | 单支撑相持续时间 |
 | `lfpc/delta_t` | `0.07 s` | 单步内质心采样间隔 |
 | `mpc/w_goal` | `25.0` | 局部目标距离代价权重 |
@@ -302,6 +304,7 @@ planner 3 始终固定步长、步宽，只优化转角；`sigma_al`、`sigma_aw
 | `/mpc/human_cane` | `visualization_msgs/MarkerArray` | 当前及选中轨迹上的完整人杖外形 |
 | `/mpc/convex_corridor_debug` | `std_msgs/String` | 走廊可行性、失败原因和路径恢复诊断 |
 | `/mpc/best_traj` | `visualization_msgs/Marker` | 当前选中的预测轨迹 |
+| `/mpc/selected_footsteps` | `visualization_msgs/MarkerArray` | 最终选中 LFPC 轨迹的左右脚预测落点及步序 |
 | `/mpc/timed_best_path` | `nav_msgs/Path` | 带未来时间戳的选中轨迹；无有效动态预测时为空 |
 | `/mpc/timed_collision` | `visualization_msgs/MarkerArray` | 同时刻机器人包络、匀速预测行人凸包及冲突样本 |
 | `/mpc/timed_plan` | `visualization_msgs/MarkerArray` | 最近一次通过验证的完整预测快照；独立于当前步执行显示 |

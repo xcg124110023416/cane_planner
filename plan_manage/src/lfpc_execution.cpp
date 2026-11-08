@@ -74,6 +74,7 @@ void PlannerManager::publishExecutionDecisionLocked(const std::string& reason) {
         ROS_WARN_THROTTLE(1.,"[MPC execution] STOP reason=%s phase=%.3f/%.3f",
             reason.c_str(),execution_phase_,execution_root_.stepDuration());
         publishTimedCollisionLocked(ros::Time::now(),false);
+        publishSelectedFootstepsLocked(ros::Time::now(),false);
         if(reason=="TIMED_EXECUTION_COLLISION" && execution_witness_.valid && mpc_timed_collision_pub_) {
             visualization_msgs::MarkerArray markers;visualization_msgs::Marker m;
             m.header.frame_id="world";m.header.stamp=ros::Time::now();m.action=visualization_msgs::Marker::ADD;

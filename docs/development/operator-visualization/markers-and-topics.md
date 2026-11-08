@@ -74,6 +74,24 @@ recorded as actual application until the LFPC advances successfully.
 rollouts (default 20, cap 50), cyan for feasible and orange for rejected prefixes.
 It does not draw new random samples or display an unsafe weighted trajectory as
 the executed path. `/mpc/best_traj` remains the selected verified rollout.
+`/mpc/selected_footsteps` (MarkerArray, MPC_SelectedFootsteps in both RViz configs)
+draws only that rollout's support placements: blue L and orange R with 1-based
+step order. These come from the final independent LFPC replay before each support
+side switch, not an average of sample positions. Target-foot sides decode the
+legacy LFPC branch convention so L corresponds to positive local lateral offset
+and R to negative offset in nominal straight walking. Centers are the exact model
+point supports; .22 x .10 m boxes at model yaw are symbols, not foot collision
+geometry or an independently modeled foot orientation. No lateral display offset
+is added. Default nominal_aw=.1 produces about .415 m straight-walking lateral
+separation under launch timing; this is a model setting, not a display offset.
+Each frame begins with DELETEALL, uses world and
+a .6s lifetime, and shares full-plan STOP/reset/arrival clearing. Publication is
+independent of pedestrian presence. This is a rolling nominal prediction, not
+executed history; delayed-response mode can execute a different first action.
+Fresh valid empty pedestrian observations preserve this display; dynamic
+prediction displays can clear independently. Invalid observations clear it.
+Footstep capture is limited to the final replay; it does not add per-sample
+storage or change RNG or optimization.
 `/mpc/optimization_evidence` Float64MultiArray replaces historical beam_evidence;
 its versioned layout label defines counts, ESS, weighted rechecks, replay and
 per-iteration costs. The retained-best curve is nonincreasing by construction,

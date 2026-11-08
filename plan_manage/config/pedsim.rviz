@@ -683,6 +683,14 @@ Visualization Manager:
         {}
       Queue Size: 10
       Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /mpc/selected_footsteps
+      Name: MPC_SelectedFootsteps
+      Namespaces:
+        {}
+      Queue Size: 1
+      Value: true
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /mpc/current_waypoint

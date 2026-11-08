@@ -320,6 +320,7 @@ namespace cane_planner
         ros::Publisher mpc_timed_collision_pub_, mpc_timed_path_pub_;
         ros::Publisher mpc_timed_plan_pub_; // last verified full-horizon visualization
         ros::Publisher mpc_best_traj_pub_; // MPC predicted optimal CoM path (LINE_STRIP)
+        ros::Publisher mpc_selected_footsteps_pub_; // final LFPC replay, left/right support placements
         ros::Publisher mpc_debug_metrics_pub_; // std_msgs/Float64MultiArray
         ros::Publisher mpc_stop_advice_pub_;   // std_msgs/Bool
         ros::Publisher mpc_stop_reason_pub_;   // std_msgs/String
@@ -394,6 +395,7 @@ namespace cane_planner
                                              const ros::Time& schedule_epoch = ros::Time());
         void publishConvexCorridorLocked(const ConvexCorridor::Result& result);
         void publishTimedCollisionLocked(const ros::Time& epoch, bool show_plan);
+        void publishSelectedFootstepsLocked(const ros::Time& epoch, bool show_plan);
         const char* interactionSceneName(InteractionScene scene) const;
         const char* interactionModeName(InteractionMode mode) const;
 

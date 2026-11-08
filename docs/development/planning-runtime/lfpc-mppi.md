@@ -27,6 +27,27 @@ K=1..4096, iterations=1..16; finite positive temperature, finite nonnegative
 sigma, nonnegative seed and validated fixed gait/weights are mandatory.
 Configuration failure returns invalid zero command and clears warm start.
 
+Planner-3 nominal_aw defaults to .1 m in both launch and C++. This is an LFPC
+lateral control bias, not the distance between foot centers. With h=1 m,
+t_sup=.35 s, delta_t=.07 s and the preserved effective .28 s support duration,
+straight walking settles to about .415 m lateral separation with this setting.
+Planner 4 retains its zero-width launch setting. Existing zero-width geometry
+fixtures explicitly select aw=0; a nonzero-width regression checks actual LFPC
+placements, bounded lateral COM motion and left/right interpretation at rotated
+headings.
+
+At the previous aw=.15 setting, the nominal straight-placement regression passed,
+but the existing 1.8 m-wide cold-start right-angle fixture and its
+reference-seeded variant did not find a feasible full rollout at the original
+budget. Recheck cornering when changing gait parameters; straight-placement
+checks alone do not establish it. The prior cornering evidence below used
+smaller lateral settings.
+
+At current aw=.1, 27/28 controller tests pass: the 256x2 cold-start right-angle
+case succeeds again, while the reference-seeded case with only one candidate
+per iteration still does not find a feasible rollout. The nominal placement
+check passes at all three tested headings.
+
 The .35 rad launch/default spread was selected after the mixed_turn_upper
 lightweight route repeatedly stopped with .15 rad cold-start exploration.
 Both that cornering route and mixed_stress reached their final goals with the
@@ -94,6 +115,18 @@ weighted optimization as the primary result rather than merely selecting a
 random minimum. No feasible candidate means STOP. A final independent full
 rollout from the original LFPC state must reproduce finite cost, step count and
 terminal status exactly before returning its first command.
+
+Only that final replay captures one support placement per accepted step in
+`getBestFootsteps()`, including its physical target-foot side and model heading
+before `prepareNextStep()` flips the leg. The legacy LEFT_LEG formula uses a
+negative local-y lateral bias, so the visual target-foot side decodes the opposite
+of that legacy branch identifier; the dynamics and stored LFPC state stay intact.
+Weighted optimization averages controls,
+not foot positions. Failed plans, reset and failed execution-epoch revalidation
+clear placements with the selected COM path. No sampled-rollout foot storage is
+allocated. The manager publishes `/mpc/selected_footsteps` after authorization;
+the RViz display is a nominal plan snapshot and does not promise execution of
+the whole horizon. See the operator marker contract for colors and clearing.
 
 Existing manager accepted-observation transaction, source freshness, final
 execution-epoch timed revalidation, frozen-LFPC STOP and stopped odometry remain

@@ -46,7 +46,7 @@ public:
 
         // Warm-start nominal
         double nominal_al = 0.25;
-        double nominal_aw = 0.0;
+        double nominal_aw = 0.1; // LFPC bias; ~0.415 m steady lateral foot spacing at launch timing
 
         bool timed_collision_enable = true;
         double timed_robot_radius = 0.25;
@@ -95,6 +95,13 @@ public:
     };
     const OptimizationEvidence& optimizationEvidence() const { return optimization_evidence_; }
     const ControlSequence& getBestControls() const { return best_controls_; }
+    struct Footstep {
+        Eigen::Vector2d position;
+        double yaw;
+        char side;
+    };
+    // Support placements from the final verified replay, with physical target-foot sides.
+    const std::vector<Footstep>& getBestFootsteps() const { return best_footsteps_; }
 
     MpcController();
     ~MpcController();
@@ -173,9 +180,10 @@ private:
                                    const std::vector<double>& weights) const;
     Rollout rolloutSequence(const LFPC& base, const ControlSequence& controls,
                             const Eigen::Vector3d& goal, const Eigen::Vector2d* final_goal,
-                            double final_radius);
+                            double final_radius, std::vector<Footstep>* footsteps = nullptr);
     bool advance(LFPC& state, double action, std::vector<Eigen::Vector3d>& path,
-                 double& elapsed, std::vector<double>* times = nullptr, std::vector<double>* yaws = nullptr);
+                 double& elapsed, std::vector<double>* times = nullptr, std::vector<double>* yaws = nullptr,
+                 std::vector<Footstep>* footsteps = nullptr);
     bool spatialFree(const Eigen::Vector2d& com);
     HumanCaneFootprint::Polygon relativeFootprint(double yaw) const;
     HumanCaneFootprint::Polygon footprint_local_;
@@ -191,6 +199,7 @@ private:
     std::vector<Eigen::Vector3d> best_path_;
     std::vector<double> best_times_;
     std::vector<double> best_yaws_;
+    std::vector<Footstep> best_footsteps_;
 
     // Timing
     double last_plan_time_ms_;

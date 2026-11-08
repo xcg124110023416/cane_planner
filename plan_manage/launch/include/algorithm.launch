@@ -334,7 +334,9 @@
         <param if="$(eval arg('planner') == 4)" name="mpc/interaction_cpa_dist" value="$(arg mpc_interaction_cpa_dist)" type="double"/>
         <param if="$(eval arg('planner') == 4)" name="mpc/interaction_use_cpa_check" value="$(arg mpc_interaction_use_cpa_check)" type="bool"/>
         <param name="mpc/nominal_al" value="$(arg user_step_length)" type="double"/>
-        <param name="mpc/nominal_aw" value="0.0" type="double"/>
+        <!-- LFPC bias, not full step width: ~41.5 cm steady lateral foot spacing
+             with h=1 m, t_sup=.35 s and the existing .07 s discretization. -->
+        <param name="mpc/nominal_aw" value="$(eval 0.1 if arg('planner') == 3 else 0.0)" type="double"/>
         <param if="$(eval arg('planner') == 4)" name="mpc/nominal_api" value="0.0" type="double"/>
 
         <!-- Planner 4 only: legacy dynamic walking corridor diagnostics.
